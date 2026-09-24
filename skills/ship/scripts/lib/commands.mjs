@@ -3,6 +3,8 @@ import { parseArgs } from 'node:util';
 import { parseSource } from './source.mjs';
 import { branchName, keyFromBranch, worktreePath } from './naming.mjs';
 import { loadConfig } from './config.mjs';
+import { formatMarker, parseMarker, defaultRun } from './marker.mjs';
+import { lockStatus } from './lock.mjs';
 
 export class UsageError extends Error {}
 
@@ -51,5 +53,18 @@ export const COMMANDS = {
   config: (argv) => {
     const v = parse(argv, { 'repo-root': { type: 'string' }, ref: { type: 'string' } });
     return loadConfig(v['repo-root'] ?? process.cwd(), { ref: v.ref });
+  },
+  marker: (argv) => {
+    const v = parse(argv, { run: { type: 'string' }, now: { type: 'string' } }, 1);
+    return formatMarker(v._[0], { run: v.run ?? defaultRun(), now: v.now ? new Date(v.now) : new Date() });
+  },
+  'parse-marker': (argv) => {
+    parse(argv);
+    return parseMarker(readFileSync(0, 'utf8'));
+  },
+  'lock-status': (argv) => {
+    const v = parse(argv, { 'issue-file': { type: 'string' }, 'ttl-hours': { type: 'string' }, now: { type: 'string' } });
+    required(v, 'issue-file', 'ttl-hours');
+    return lockStatus(readJson(v['issue-file']), { ttlHours: Number(v['ttl-hours']), now: v.now ? new Date(v.now) : new Date() });
   },
 };
