@@ -8,6 +8,8 @@ import { lockStatus } from './lock.mjs';
 import { checkEligibility, LANES } from './eligibility.mjs';
 import { fetchIssue, currentRepo, countOpenClaudePrs, ghJson } from './github.mjs';
 import { gradeVerdict } from './grade.mjs';
+import { findFreePort, diffSize } from './runtime.mjs';
+import { takeScreenshot } from './chrome.mjs';
 
 export class UsageError extends Error {}
 
@@ -104,5 +106,19 @@ export const COMMANDS = {
     required(v, 'checklist-file', 'config-file', 'mode');
     if (!['auto', 'interactive'].includes(v.mode)) throw new UsageError('--mode must be auto or interactive');
     return gradeVerdict(readJson(v['checklist-file']), { maxPrSize: readJson(v['config-file']).maxPrSize, mode: v.mode });
+  },
+  'free-port': async (argv) => {
+    const v = parse(argv, { start: { type: 'string' } });
+    return { port: await findFreePort(v.start ? Number(v.start) : 5173) };
+  },
+  'diff-size': (argv) => {
+    const v = parse(argv, { base: { type: 'string' }, cwd: { type: 'string' } });
+    required(v, 'base');
+    return diffSize(v.cwd ?? process.cwd(), v.base);
+  },
+  screenshot: (argv) => {
+    const v = parse(argv, { url: { type: 'string' }, out: { type: 'string' }, width: { type: 'string' }, height: { type: 'string' } });
+    required(v, 'url', 'out');
+    return takeScreenshot(v.url, v.out, { width: Number(v.width ?? 1280), height: Number(v.height ?? 800) });
   },
 };
