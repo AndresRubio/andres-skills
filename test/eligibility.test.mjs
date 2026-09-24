@@ -17,6 +17,7 @@ const makeIssue = (over = {}) => ({
 const check = (issue, lane = 'github', extra = {}) => checkEligibility({ issue, config, lane, openClaudePrs: 0, now: NOW, ...extra });
 const marked = (kind, createdAt) => ({ author: 'AndresRubio', authorAssociation: 'OWNER', body: '', createdAt, marker: { kind, at: createdAt, run: 'local' } });
 const reply = (createdAt, authorAssociation = 'OWNER') => ({ author: 'x', authorAssociation, body: 'answer', createdAt, marker: null });
+const botMarked = (kind, createdAt) => ({ author: 'claude[bot]', authorAssociation: 'NONE', body: '', createdAt, marker: { kind, at: createdAt, run: 'local' } });
 
 test('a labelled, open, owner-authored issue is eligible on a cloud lane', () => {
   assert.deepEqual(check(makeIssue()).reasons, []);
@@ -75,6 +76,21 @@ test('hasNewTrustedReply ignores an untrusted marker when finding the last pipel
   assert.equal(check(waiting).eligible, true);
 });
 
+test('a fresh lock posted by the pipeline bot blocks, even though its authorAssociation is not trusted', () => {
+  const fresh = makeIssue({ labels: ['claude', 'claude-working'], comments: [botMarked('lock', '2026-09-25T11:00:00Z')] });
+  assert.match(check(fresh).reasons.join(), /locked since/);
+});
+
+test('needs-decision: a bot question marker anchors lastMarked; only a reply newer than it counts', () => {
+  const waitingOnBot = makeIssue({
+    labels: ['claude', 'needs-decision'],
+    comments: [reply('2026-09-25T09:00:00Z'), botMarked('questions', '2026-09-25T10:00:00Z')],
+  });
+  assert.equal(check(waitingOnBot).eligible, false);
+  const resumed = { ...waitingOnBot, comments: [...waitingOnBot.comments, reply('2026-09-25T11:00:00Z')] };
+  assert.equal(check(resumed).eligible, true);
+});
+
 test('a disabled pipeline blocks every lane', () => {
   const off = validateConfig({ tracker: { type: 'github' }, enabled: false });
   assert.match(checkEligibility({ issue: makeIssue(), config: off, lane: 'manual', now: NOW }).reasons.join(), /disabled/);
@@ -96,4 +112,17 @@ test('CLI eligibility validates the lane and reads files', () => {
   const ok = runCli(['eligibility', '--issue-file', issueFile, '--config-file', configFile, '--lane', 'github', '--open-claude-prs', '0']);
   assert.equal(ok.json().eligible, true, ok.stderr);
   assert.equal(runCli(['eligibility', '--issue-file', issueFile, '--config-file', configFile, '--lane', 'moon']).code, 2);
+});
+
+test('CLI eligibility rejects a non-integer --open-claude-prs', () => {
+  const dir = tempDir();
+  const issueFile = path.join(dir, 'issue.json');
+  const configFile = path.join(dir, 'config.json');
+  writeFileSync(issueFile, JSON.stringify(makeIssue()));
+  writeFileSync(configFile, JSON.stringify(config));
+  const bad = runCli(['eligibility', '--issue-file', issueFile, '--config-file', configFile, '--lane', 'github', '--open-claude-prs', 'abc']);
+  assert.equal(bad.code, 2);
+  assert.match(bad.stderr, /--open-claude-prs must be an integer/);
+  const emptyString = runCli(['eligibility', '--issue-file', issueFile, '--config-file', configFile, '--lane', 'github', '--open-claude-prs', '']);
+  assert.equal(emptyString.code, 2);
 });

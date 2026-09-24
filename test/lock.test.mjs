@@ -49,6 +49,18 @@ test('since uses createdAt (GitHub server time), not marker.at', () => {
   assert.deepEqual(s, { locked: true, stale: false, since: '2026-09-25T11:00:00Z' });
 });
 
+test('a pipeline bot lock comment counts even though its authorAssociation is not trusted', () => {
+  const botLock = {
+    author: 'claude[bot]',
+    authorAssociation: 'NONE',
+    body: '',
+    createdAt: '2026-09-25T11:00:00Z',
+    marker: { kind: 'lock', at: '2026-09-25T11:00:00Z', run: 'local' },
+  };
+  assert.deepEqual(lockStatus({ labels: ['claude-working'], comments: [botLock] }, { ttlHours: 3, now: NOW }),
+    { locked: true, stale: false, since: '2026-09-25T11:00:00Z' });
+});
+
 test('CLI lock-status reads an issue file', () => {
   const file = path.join(tempDir(), 'issue.json');
   writeFileSync(file, JSON.stringify({ labels: ['claude-working'], comments: [lockComment('2026-09-25T11:00:00Z')] }));

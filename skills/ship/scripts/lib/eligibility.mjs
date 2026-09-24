@@ -1,11 +1,11 @@
-import { lockStatus, TRUSTED } from './lock.mjs';
+import { lockStatus, TRUSTED, isPipelineComment } from './lock.mjs';
 
 export { TRUSTED };
 
 export const LANES = Object.freeze(['manual', 'github', 'linear', 'local']);
 
 export function hasNewTrustedReply(issue) {
-  const lastMarked = issue.comments.filter((c) => c.marker && TRUSTED.has(c.authorAssociation)).map((c) => c.createdAt).sort().at(-1) ?? '';
+  const lastMarked = issue.comments.filter(isPipelineComment).map((c) => c.createdAt).sort().at(-1) ?? '';
   return issue.comments.some((c) => !c.marker && TRUSTED.has(c.authorAssociation) && c.createdAt > lastMarked);
 }
 

@@ -87,11 +87,14 @@ export const COMMANDS = {
     });
     required(v, 'issue-file', 'config-file', 'lane');
     if (!LANES.includes(v.lane)) throw new UsageError(`--lane must be one of ${LANES.join(', ')}`);
+    if (v['open-claude-prs'] !== undefined && !/^\d+$/.test(v['open-claude-prs'])) {
+      throw new UsageError('--open-claude-prs must be an integer >= 0');
+    }
     return checkEligibility({
       issue: readJson(v['issue-file']),
       config: readJson(v['config-file']),
       lane: v.lane,
-      openClaudePrs: Number(v['open-claude-prs'] ?? 0),
+      openClaudePrs: v['open-claude-prs'] !== undefined ? Number(v['open-claude-prs']) : 0,
       now: v.now ? new Date(v.now) : new Date(),
     });
   },
