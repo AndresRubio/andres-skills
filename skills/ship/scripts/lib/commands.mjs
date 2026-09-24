@@ -7,6 +7,7 @@ import { formatMarker, parseMarker, defaultRun } from './marker.mjs';
 import { lockStatus } from './lock.mjs';
 import { checkEligibility, LANES } from './eligibility.mjs';
 import { fetchIssue, currentRepo, countOpenClaudePrs, ghJson } from './github.mjs';
+import { gradeVerdict } from './grade.mjs';
 
 export class UsageError extends Error {}
 
@@ -97,5 +98,11 @@ export const COMMANDS = {
       openClaudePrs: v['open-claude-prs'] !== undefined ? Number(v['open-claude-prs']) : 0,
       now: v.now ? new Date(v.now) : new Date(),
     });
+  },
+  grade: (argv) => {
+    const v = parse(argv, { 'checklist-file': { type: 'string' }, 'config-file': { type: 'string' }, mode: { type: 'string' } });
+    required(v, 'checklist-file', 'config-file', 'mode');
+    if (!['auto', 'interactive'].includes(v.mode)) throw new UsageError('--mode must be auto or interactive');
+    return gradeVerdict(readJson(v['checklist-file']), { maxPrSize: readJson(v['config-file']).maxPrSize, mode: v.mode });
   },
 };
