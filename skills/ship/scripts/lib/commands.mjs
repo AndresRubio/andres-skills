@@ -5,6 +5,7 @@ import { branchName, keyFromBranch, worktreePath } from './naming.mjs';
 import { loadConfig } from './config.mjs';
 import { formatMarker, parseMarker, defaultRun } from './marker.mjs';
 import { lockStatus } from './lock.mjs';
+import { checkEligibility, LANES } from './eligibility.mjs';
 import { fetchIssue, currentRepo, countOpenClaudePrs, ghJson } from './github.mjs';
 
 export class UsageError extends Error {}
@@ -78,5 +79,20 @@ export const COMMANDS = {
     const v = parse(argv, { repo: { type: 'string' } });
     const repo = v.repo ?? currentRepo();
     return { count: countOpenClaudePrs(ghJson(['pr', 'list', '--repo', repo, '--state', 'open', '--limit', '500', '--json', 'headRefName'])) };
+  },
+  eligibility: (argv) => {
+    const v = parse(argv, {
+      'issue-file': { type: 'string' }, 'config-file': { type: 'string' }, lane: { type: 'string' },
+      'open-claude-prs': { type: 'string' }, now: { type: 'string' },
+    });
+    required(v, 'issue-file', 'config-file', 'lane');
+    if (!LANES.includes(v.lane)) throw new UsageError(`--lane must be one of ${LANES.join(', ')}`);
+    return checkEligibility({
+      issue: readJson(v['issue-file']),
+      config: readJson(v['config-file']),
+      lane: v.lane,
+      openClaudePrs: Number(v['open-claude-prs'] ?? 0),
+      now: v.now ? new Date(v.now) : new Date(),
+    });
   },
 };
