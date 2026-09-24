@@ -5,6 +5,7 @@ import { branchName, keyFromBranch, worktreePath } from './naming.mjs';
 import { loadConfig } from './config.mjs';
 import { formatMarker, parseMarker, defaultRun } from './marker.mjs';
 import { lockStatus } from './lock.mjs';
+import { fetchIssue, currentRepo, countOpenClaudePrs, ghJson } from './github.mjs';
 
 export class UsageError extends Error {}
 
@@ -66,5 +67,16 @@ export const COMMANDS = {
     const v = parse(argv, { 'issue-file': { type: 'string' }, 'ttl-hours': { type: 'string' }, now: { type: 'string' } });
     required(v, 'issue-file', 'ttl-hours');
     return lockStatus(readJson(v['issue-file']), { ttlHours: Number(v['ttl-hours']), now: v.now ? new Date(v.now) : new Date() });
+  },
+  issue: (argv) => {
+    const v = parse(argv, { repo: { type: 'string' } }, 1);
+    const number = Number(v._[0]);
+    if (!Number.isInteger(number) || number < 1) throw new UsageError('issue number must be a positive integer');
+    return fetchIssue(v.repo ?? currentRepo(), number);
+  },
+  'pr-count': (argv) => {
+    const v = parse(argv, { repo: { type: 'string' } });
+    const repo = v.repo ?? currentRepo();
+    return { count: countOpenClaudePrs(ghJson(['pr', 'list', '--repo', repo, '--state', 'open', '--limit', '500', '--json', 'headRefName'])) };
   },
 };
