@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { parseSource } from './source.mjs';
 import { branchName, keyFromBranch, worktreePath } from './naming.mjs';
+import { loadConfig } from './config.mjs';
 
 export class UsageError extends Error {}
 
@@ -46,5 +47,9 @@ export const COMMANDS = {
     const v = parse(argv, { 'repo-root': { type: 'string' }, key: { type: 'string' } });
     required(v, 'repo-root', 'key');
     return { path: worktreePath(v['repo-root'], v.key) };
+  },
+  config: (argv) => {
+    const v = parse(argv, { 'repo-root': { type: 'string' }, ref: { type: 'string' } });
+    return loadConfig(v['repo-root'] ?? process.cwd(), { ref: v.ref });
   },
 };

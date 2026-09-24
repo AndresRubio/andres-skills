@@ -1,0 +1,11 @@
+{
+  "tracker": { "type": "github" },
+  "ciChecks": ["test"],
+  "mergeDeploys": true,
+  "protectedPaths": [],
+  "localOnlyPaths": [],
+  "maxParallel": 2,
+  "maxPrSize": { "files": 25, "lines": 800 },
+  "lockTtlHours": 3,
+  "preview": { "command": "npm run dev -- --port {port} --strictPort" }
+}
