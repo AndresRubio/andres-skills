@@ -52,11 +52,19 @@ export function validateConfig(raw) {
   return { ...config, protectedPathsEffective: [...ALWAYS_PROTECTED, ...config.protectedPaths] };
 }
 
+function gitErrorText(err) {
+  return (err.stderr ?? err.message ?? '').trim();
+}
+
 export function defaultBranchRef(repoRoot) {
   try {
     return git(repoRoot, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']).trim();
-  } catch {
-    throw new ConfigError('cannot resolve origin/HEAD (run: git remote set-head origin --auto)');
+  } catch (err) {
+    const stderr = gitErrorText(err);
+    if (stderr.includes('not a symbolic ref') || stderr.includes('No such ref')) {
+      throw new ConfigError('cannot resolve origin/HEAD (run: git remote set-head origin --auto)');
+    }
+    throw new ConfigError(`cannot resolve origin/HEAD: ${stderr}`);
   }
 }
 
@@ -65,8 +73,12 @@ export function loadConfig(repoRoot, { ref } = {}) {
   let text;
   try {
     text = git(repoRoot, ['show', `${resolvedRef}:.claude/pipeline.json`]);
-  } catch {
-    throw new ConfigError(`no .claude/pipeline.json on ${resolvedRef}`);
+  } catch (err) {
+    const stderr = gitErrorText(err);
+    if (stderr.includes('does not exist in')) {
+      throw new ConfigError(`no .claude/pipeline.json on ${resolvedRef}`);
+    }
+    throw new ConfigError(`cannot read .claude/pipeline.json on ${resolvedRef}: ${stderr}`);
   }
   let raw;
   try {

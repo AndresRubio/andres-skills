@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { validateConfig, loadConfig, ConfigError } from '../skills/ship/scripts/lib/config.mjs';
-import { git, makeRepoWithOrigin, writeFiles } from './helpers/git.mjs';
+import { git, makeRepoWithOrigin, writeFiles, tempDir } from './helpers/git.mjs';
 import { runCli } from './helpers/cli.mjs';
 
 test('a minimal GitHub config gets every default', () => {
@@ -44,6 +44,21 @@ test('loadConfig reads the default branch, not the working tree', () => {
 test('loadConfig says clearly when the file is missing', () => {
   const { root } = makeRepoWithOrigin();
   assert.throws(() => loadConfig(root), /no \.claude\/pipeline\.json on origin\/main/);
+});
+
+test('loadConfig surfaces git\'s real error for a bad explicit ref, not the missing-file message', () => {
+  const { root } = makeRepoWithOrigin({ '.claude/pipeline.json': JSON.stringify({ tracker: { type: 'github' } }) });
+  assert.throws(() => loadConfig(root, { ref: 'origin/nope' }), (err) => {
+    assert.ok(err instanceof ConfigError);
+    assert.match(err.message, /cannot read/);
+    assert.match(err.message, /origin\/nope/);
+    assert.doesNotMatch(err.message, /no \.claude\/pipeline\.json/);
+    return true;
+  });
+});
+
+test('loadConfig says clearly when run outside a git repository', () => {
+  assert.throws(() => loadConfig(tempDir()), /not a git repository/);
 });
 
 test('CLI config prints the loaded config', () => {
