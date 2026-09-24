@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
+import { parseSource } from './source.mjs';
+import { branchName, keyFromBranch, worktreePath } from './naming.mjs';
 
 export class UsageError extends Error {}
 
@@ -32,5 +34,17 @@ export const COMMANDS = {
   version: (argv) => {
     parse(argv);
     return { version: readJson(PLUGIN_JSON).version };
+  },
+  source: (argv) => parseSource(parse(argv, {}, 1)._[0]),
+  'branch-name': (argv) => {
+    const v = parse(argv, { key: { type: 'string' }, title: { type: 'string' } });
+    required(v, 'key', 'title');
+    return { branch: branchName(v.key, v.title) };
+  },
+  'key-from-branch': (argv) => ({ key: keyFromBranch(parse(argv, {}, 1)._[0]) }),
+  'worktree-path': (argv) => {
+    const v = parse(argv, { 'repo-root': { type: 'string' }, key: { type: 'string' } });
+    required(v, 'repo-root', 'key');
+    return { path: worktreePath(v['repo-root'], v.key) };
   },
 };
