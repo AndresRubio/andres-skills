@@ -6,7 +6,13 @@ import { tempDir } from './helpers/git.mjs';
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-const lockComment = (at) => ({ marker: { kind: 'lock', at, run: 'local' } });
+const lockComment = (at) => ({
+  author: 'AndresRubio',
+  authorAssociation: 'OWNER',
+  body: '',
+  createdAt: at,
+  marker: { kind: 'lock', at, run: 'local' },
+});
 const NOW = new Date('2026-09-25T12:00:00Z');
 
 test('no claude-working label means unlocked', () => {
@@ -29,6 +35,18 @@ test('the newest lock comment counts', () => {
 
 test('a label with no lock comment is stale', () => {
   assert.deepEqual(lockStatus({ labels: ['claude-working'], comments: [] }, { ttlHours: 3, now: NOW }), { locked: true, stale: true, since: null });
+});
+
+test('an untrusted lock comment is ignored even if dated in the future', () => {
+  const untrusted = { ...lockComment('2099-01-01T00:00:00Z'), authorAssociation: 'NONE' };
+  assert.deepEqual(lockStatus({ labels: ['claude-working'], comments: [untrusted] }, { ttlHours: 3, now: NOW }),
+    { locked: true, stale: true, since: null });
+});
+
+test('since uses createdAt (GitHub server time), not marker.at', () => {
+  const c = { ...lockComment('2026-09-25T11:00:00Z'), marker: { kind: 'lock', at: '2099-01-01T00:00:00Z', run: 'local' } };
+  const s = lockStatus({ labels: ['claude-working'], comments: [c] }, { ttlHours: 3, now: NOW });
+  assert.deepEqual(s, { locked: true, stale: false, since: '2026-09-25T11:00:00Z' });
 });
 
 test('CLI lock-status reads an issue file', () => {
