@@ -4083,16 +4083,16 @@ No commit: this task changes only GitHub and the two new folders.
 - Consumes: everything above.
 - Produces: the Phase 1 exit-criteria evidence (spec §11), and the tag `claude-pipeline--v0.1.0`.
 
-- [ ] **Step 1: Run the automatic path on test issues 1–4 (public sandbox)**
+- [ ] **Step 1: Run the automatic path on test issues 1–4 and 7 (public sandbox)**
 
-For each FIXTURE in `01-wrong-month.md 02-sort.md 03-login.md 04-bilingual.md`, one at a time:
+First, `claude auth status` must show `loggedIn: true` (the user logs in; never enter credentials for them). 03 runs first: it stops at grading, so it cheaply proves that headless permissions cover the lock, worktree, research, grade, comment and label steps; if it fails on a permission, fix that before spending more. For each FIXTURE in `03-login.md 04-bilingual.md 01-wrong-month.md 02-sort.md 07-title-typo.md`, one at a time:
 ```bash
 PLUGIN_REPO="$(pwd)"
 mkdir -p acceptance/runs
 cd ~/Desktop/projects/pipeline-sandbox
 git fetch origin && git switch main && git pull --ff-only
 N=$(node -e 'console.log(require("./.pipeline-fixtures.json")[process.argv[1]])' "$FIXTURE")
-claude -p "/claude-pipeline:ship #$N --mode auto" --plugin-dir "$PLUGIN_REPO" --permission-mode auto --max-budget-usd 20 --output-format json > "$PLUGIN_REPO/acceptance/runs/${FIXTURE%.md}.json"
+claude -p "/claude-pipeline:ship #$N --mode auto" --plugin-dir "$PLUGIN_REPO" --add-dir "$HOME/.claude-pipeline" --permission-mode auto --max-budget-usd 20 --output-format json > "$PLUGIN_REPO/acceptance/runs/${FIXTURE%.md}.json"
 node "$PLUGIN_REPO/acceptance/verify-fixture.mjs" --sandbox . --fixture "$FIXTURE"
 cd "$PLUGIN_REPO"
 ```
