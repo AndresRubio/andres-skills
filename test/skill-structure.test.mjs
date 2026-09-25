@@ -120,3 +120,23 @@ test('the grade stage defines every checklist field', () => {
 test('stages 4-6 have every required section', () => {
   for (const f of ['04-spec.md', '05-plan.md', '06-build.md']) assertStage(f);
 });
+
+test('stages 7-10 and fix mode have every required section', () => {
+  for (const f of ['07-verify.md', '08-review.md', '09-finish.md', '10-report.md', 'fix.md']) assertStage(f);
+});
+
+test("SKILL.md's stage table lists exactly the files in stages/", () => {
+  const listed = [...new Set([...read('SKILL.md').matchAll(/`stages\/([a-z0-9-]+\.md)`/g)].map((m) => m[1]))].sort();
+  const onDisk = readdirSync(path.join(SKILL_DIR, 'stages')).filter((f) => f.endsWith('.md')).sort();
+  assert.deepEqual(listed, onDisk);
+});
+
+test('no stage merges a PR', () => {
+  for (const file of markdownFiles()) {
+    const text = readFileSync(file, 'utf8');
+    for (const m of text.matchAll(/gh pr merge/g)) {
+      const line = text.slice(text.lastIndexOf('\n', m.index) + 1, text.indexOf('\n', m.index));
+      assert.match(line, /forbidden|never|Never/i, `${path.relative(SKILL_DIR, file)} mentions gh pr merge outside a prohibition: ${line}`);
+    }
+  }
+});

@@ -55,8 +55,8 @@ Takes an issue number and the number of the issue that blocks it.
 
 ## create-pr
 
-Takes a title, a body file and optional labels. The base branch name is `BASE_REF` without its `origin/` prefix.
+Takes a title file, a body file and optional labels. The base branch name is `BASE_REF` without its `origin/` prefix.
 
-`gh pr create --repo "$REPO" --base "<base branch>" --head "$BRANCH" --title "<title>" --body-file "<file>" [--label "<labels>"]`
+`gh pr create --repo "$REPO" --base "<base branch>" --head "$BRANCH" --title "$(cat "<title file>")" --body-file "<file>" [--label "<labels>"]`
 
 The body must contain `Fixes #<NUMBER>` so GitHub closes the issue on merge. The command prints the PR URL.
