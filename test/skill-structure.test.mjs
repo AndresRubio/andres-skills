@@ -64,3 +64,11 @@ test('templates have their required sections', () => {
   assert.match(read('templates/grade.md'), /\*\*Verdict:\*\* `<verdict>`/);
   assert.match(read('templates/spec.md'), /Adapted from mattpocock\/skills \(MIT License, Copyright \(c\) 2026 Matt Pocock\)/);
 });
+
+test('the adapter links sub-issues and blockers in single commands', () => {
+  const text = read('trackers/github.md');
+  assert.match(text, /-F sub_issue_id="\$\(gh api/);
+  assert.match(text, /-F issue_id="\$\(gh api/);
+  assert.doesNotMatch(text, /CHILD_ID=/);
+  assert.doesNotMatch(text, /BLOCKER_ID=/);
+});

@@ -2,6 +2,8 @@
 
 Every operation uses `gh`, authenticated as the account running this session. `REPO` is `owner/name` and `NUMBER` is the issue number. If any command here fails, stop (hard rule 7).
 
+In the commands below, `<name>` is a placeholder: write the literal value in its place. `$NAME` variables come from the run's `vars.sh` (see SKILL.md).
+
 ## read-issue
 
 `node "$PIPELINE" issue "$NUMBER" --repo "$REPO" > "$RUN_DIR/issue.json"`
@@ -32,22 +34,20 @@ GitHub issues have no status field; the `claude-working` label shows the issue i
 
 Takes a title, a body file and optional labels.
 
-`gh issue create --repo "$REPO" --title "<title>" --body-file <file> [--label "<labels>"]` prints the new issue's URL. The last path segment is its number.
+`gh issue create --repo "$REPO" --title "<title>" --body-file "<file>" [--label "<labels>"]` prints the new issue's URL. The last path segment is its number.
 
 ## create-sub-issue
 
 Takes the parent number, a title, a body file and labels.
 
-1. Create the child with create-issue. CHILD is its number.
-2. `CHILD_ID=$(gh api "repos/$REPO/issues/$CHILD" --jq .id)`
-3. `gh api -X POST "repos/$REPO/issues/<parent>/sub_issues" -F sub_issue_id="$CHILD_ID"`
+1. Create the child with create-issue, and note its number as <child>.
+2. Link it in one command: `gh api -X POST "repos/$REPO/issues/<parent>/sub_issues" -F sub_issue_id="$(gh api "repos/$REPO/issues/<child>" --jq .id)"`
 
 ## add-blocked-by
 
 Takes an issue number and the number of the issue that blocks it.
 
-1. `BLOCKER_ID=$(gh api "repos/$REPO/issues/<blocker>" --jq .id)`
-2. `gh api -X POST "repos/$REPO/issues/<issue>/dependencies/blocked_by" -F issue_id="$BLOCKER_ID"`
+`gh api -X POST "repos/$REPO/issues/<issue>/dependencies/blocked_by" -F issue_id="$(gh api "repos/$REPO/issues/<blocker>" --jq .id)"`
 
 ## open-claude-pr-count
 
@@ -57,6 +57,6 @@ Takes an issue number and the number of the issue that blocks it.
 
 Takes a title, a body file and optional labels. The base branch name is `BASE_REF` without its `origin/` prefix.
 
-`gh pr create --repo "$REPO" --base "<base branch>" --head "$BRANCH" --title "<title>" --body-file <file> [--label "<labels>"]`
+`gh pr create --repo "$REPO" --base "<base branch>" --head "$BRANCH" --title "<title>" --body-file "<file>" [--label "<labels>"]`
 
 The body must contain `Fixes #<NUMBER>` so GitHub closes the issue on merge. The command prints the PR URL.
