@@ -48,6 +48,8 @@ export function parseNumstat(text) {
   return { files, lines };
 }
 
+// docs/pipeline/ holds the pipeline's own research/grade/spec/plan/progress notes, not the
+// change under review, so it's excluded from the size that's checked against maxPrSize.
 export function diffSize(cwd, base) {
-  return parseNumstat(git(cwd, ['diff', '--numstat', `${base}...HEAD`]));
+  return parseNumstat(git(cwd, ['diff', '--numstat', `${base}...HEAD`, '--', '.', ':(exclude)docs/pipeline']));
 }

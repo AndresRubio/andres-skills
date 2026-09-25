@@ -46,6 +46,15 @@ test('diffSize measures the branch against its base', () => {
   assert.deepEqual(runCli(['diff-size', '--base', 'origin/main', '--cwd', root]).json(), { files: 2, lines: 3 });
 });
 
+test('diffSize leaves out docs/pipeline (the pipeline\'s own docs, not the change being measured)', () => {
+  const { root } = makeRepoWithOrigin();
+  git(root, ['checkout', '-b', 'claude/1-x']);
+  writeFiles(root, { 'a.txt': 'one\ntwo\n', 'docs/pipeline/1/plan.md': 'x\ny\nz\nw\n' });
+  git(root, ['add', '-A']);
+  git(root, ['commit', '-m', 'work']);
+  assert.deepEqual(diffSize(root, 'origin/main'), { files: 1, lines: 2 });
+});
+
 test('CLI free-port prints a port', () => {
   const r = runCli(['free-port', '--start', '45100']);
   assert.equal(r.code, 0, r.stderr);

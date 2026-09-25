@@ -13,9 +13,11 @@ Turn the spec into small, test-first tasks.
    - Skip its "Execution Handoff" question and return here.
    - Its Global Constraints section must include ship's hard rules and the commands in `$RUN_DIR/checks.txt`.
    - Every task that changes behaviour is test-first and names the acceptance criteria (AC…) it satisfies. Every AC is covered by at least one task.
-2. `TASKS=$(grep -c '^### Task ' docs/pipeline/<KEY>/plan.md)` and record TASKS in progress.md.
+2. Count the tasks: `grep -c '^### Task ' docs/pipeline/<KEY>/plan.md` (prints the number). Append `TASKS='<n>'` to vars.sh and write it in progress.md's Run table. If the count is 0, the plan doesn't use `### Task N` headings: fix the plan's headings (writing-plans uses them) before continuing.
 3. If TASKS > 8, the issue is too big after all (see the mode sections).
-4. Tick stage 5. Commit and push: `docs(pipeline): plan for #<NUMBER>`.
+4. Tick stage 5. Commit and push:
+   `git add docs/pipeline/<KEY> && git commit -m "docs(pipeline): plan for #<NUMBER>" -m "<trailer>"`
+   `git push`
 
 ## Outputs
 

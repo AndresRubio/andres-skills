@@ -8,26 +8,28 @@ Implement the plan test-first, committing and pushing as you go.
 
 ## Steps
 
-1. **A bug** (the issue has the `bug` label, or the spec's problem is a defect): before task 1, use mattpocock-skills:diagnosing-bugs to build a feedback loop and reproduce the bug as a failing test. Record the reproduction in progress.md.
-2. **TASKS ≤ 3:** build here, one task at a time:
-   1. Follow superpowers:test-driven-development: write the failing test, watch it fail, write the minimal code, watch it pass.
-   2. Run the task's tests and the typecheck from `checks.txt`.
-   3. Append "Task N — summary — <sha>" to progress.md's Tasks section.
-   4. Commit with the message `<type>(<scope>): <task summary> (#<NUMBER>)` plus the trailer, and push.
+1. **A bug** (the issue has the `bug` label, or the spec's problem is a defect): before task 1, use mattpocock-skills:diagnosing-bugs for its first two phases only — build the feedback loop and reproduce the bug as a failing test — then stop the skill: no hypotheses, no fix, no commit. Record the reproduction in progress.md: the test path, the command, and its failing output. That test is the failing test of the plan task that fixes the bug: tell that task's implementer to start from it rather than write a new one. Hypotheses and the fix happen inside that task (diagnosing-bugs' hypothesis, instrument and fix phases; automatic mode: don't stop to show the ranked hypotheses — record them in progress.md instead); never its final cleanup-and-hand-off phase.
+2. **TASKS ≤ 3:** build here, one task at a time, skipping any task already listed in progress.md's Tasks section — start after the last one recorded:
+   1. For a task that changes behaviour, follow superpowers:test-driven-development, matching stage 5's rule: write the failing test, watch it fail, write the minimal code, watch it pass. Other tasks just do the step.
+   2. Run the task's tests, plus the typecheck if `checks.txt` has one.
+   3. Commit with the message `<type>(<scope>): <task summary> (#<NUMBER>)` plus the trailer, and push.
+   4. Append "Task N — summary — <sha>" to progress.md's Tasks section. Don't commit this now: it goes in with the next task's commit (the last task's line goes in with the stage-6 tick, step 5). No amend.
 3. **TASKS > 3:** use superpowers:subagent-driven-development on plan.md, with these overrides:
    - The worktree already exists: skip its worktree setup.
-   - Implementers run on sonnet and reviewers on opus. Name the model every time.
+   - Implementers run on sonnet (opus for fix rounds 4–5) and reviewers on opus. Name the model every time.
    - After each task its ledger marks complete: copy the ledger (`progress.md` in its SDD workspace) into this issue's progress.md under "## SDD ledger", commit, and push.
    - Its questions for a human are handled as the mode sections below say.
    - When it reaches its final step, don't invoke finishing-a-development-branch. Return here and go on to stage 7.
 4. After every task: `node "$PIPELINE" diff-size --base "$BASE_SHA"`. If `files` exceeds `maxPrSize.files` or `lines` exceeds `maxPrSize.lines`, hard rule 9 applies: stop and propose a split of the remaining work.
-5. Tick stage 6 and commit it with the last task.
+5. Tick stage 6 only after the last task's size check (step 4) passes and, on the TASKS > 3 path, after SDD's final whole-branch review. Commit and push it then, together with the last task's progress.md line (step 2.4).
 
 ## Outputs
 
 Commits on BRANCH, pushed; progress.md's Tasks (or SDD ledger) section up to date.
 
 ## Automatic mode
+
+Diagnosing a bug: don't stop to show the ranked hypotheses from diagnosing-bugs' hypothesis phase — record them in progress.md and continue.
 
 Each of these replaces a question the build skills would ask a human. Each is a stop procedure, asking for the decision shown.
 
