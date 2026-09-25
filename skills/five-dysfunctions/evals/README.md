@@ -34,3 +34,11 @@ Assertions alone barely discriminate, because the base model already behaves wel
 | 4 (current) | v2 plus: a 250-word first screen for audits; one runnable gate of about 60 lines for designs; one line per extra risk | First in 4 of 4 three-way comparisons (mean rank v4 1.00, v2 2.25, baseline 2.75) |
 
 **Cost of the current version against baseline:** about 20–25% more tokens on audits and live work, and about 45% more on team design, because the design run tests its own gate script.
+
+## Triggering
+
+`trigger_eval.json` holds 20 queries: 10 should trigger and 10 are near misses (a confession request, explaining the book, a sprint retro template, code review, debugging). Run it with skill-creator's `run_loop` (12 train, 8 held out, 3 runs per query).
+
+With claude-opus-5-5 the current description scored 36/36 on train and 24/24 on the held-out set, so the loop stopped at iteration 1 and the description was kept.
+
+Run `run_eval` with one command file per batch rather than one per query. Otherwise parallel queries see several copies of the skill, the model calls whichever sorts first, and real triggers score as misses.

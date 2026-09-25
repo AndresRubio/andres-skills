@@ -1,0 +1,22 @@
+[
+  {"query": "voy a lanzar 3 subagentes en paralelo para migrar los tests de jest a vitest en el monorepo (packages/api, packages/web, packages/shared). antes de lanzarlos, ¿cómo les escribo el encargo para que no me vuelvan con un 'todo verde' falso como la última vez?", "should_trigger": true},
+  {"query": "ayer la sesión con claude en el repo de facturación fue un desastre: me dijo que los tests pasaban y en CI petaron 14. el transcript está en ~/.claude/projects/-Users-me-work-facturacion/3f2a91c0.jsonl. hazme un post-mortem de qué falló y qué cambio en mi setup", "should_trigger": true},
+  {"query": "Can you review how the agents worked together in yesterday's session? The orchestrator spawned 4 subagents for the payments refactor and I suspect it just pasted their summaries into the final answer. transcript is ~/.claude/projects/-home-ana-payments/0b1c77e2.jsonl", "should_trigger": true},
+  {"query": "Ya sé que dijiste que Redis para la cola de emails era mala idea, pero lo hemos decidido con el equipo esta mañana: hazlo con Redis igualmente y sigue con la integración en workers/mailer.ts", "should_trigger": true},
+  {"query": "quiero aplicar las 5 disfunciones de Lencioni a cómo trabajo con claude code y sus subagentes, ¿qué normas concretas le pongo en el CLAUDE.md del repo?", "should_trigger": true},
+  {"query": "the three subagents finished (auth-migration, billing-cleanup, docs) and each one says done ✅. integrate their branches into release/2.4 and tell me if we can ship tonight", "should_trigger": true},
+  {"query": "diseña un equipo de agentes para auditar los 60 endpoints de nuestra API contra el spec openapi.yaml; necesito que no se pisen los ficheros y que alguien verifique de verdad lo que reportan", "should_trigger": true},
+  {"query": "retro de la sesión de hoy antes de cerrar: ¿en qué momentos me diste la razón sin comprobar nada y qué deberíamos hacer distinto mañana?", "should_trigger": true},
+  {"query": "before you tell me the postgres 16 upgrade is finished, run the five-dysfunctions checkpoint on what you did today", "should_trigger": true},
+  {"query": "resulta que el bug no estaba en el parser como te dije, estaba en la caché de redis. ya has cambiado medio parser basándote en mi diagnóstico… ¿qué hacemos con lo que ya está hecho?", "should_trigger": true},
+  {"query": "explícame el libro de Lencioni, las 5 disfunciones de un equipo, que tengo que presentarlo el lunes a mi equipo de 8 personas de backend", "should_trigger": false},
+  {"query": "refactoriza src/utils/dates.ts para usar date-fns en vez de moment y asegúrate de que pasan los tests de tests/utils", "should_trigger": false},
+  {"query": "haz code review de este PR https://github.com/acme/api/pull/482, sobre todo la parte de permisos de admin", "should_trigger": false},
+  {"query": "el endpoint POST /orders devuelve 500 cuando el carrito está vacío, ¿me ayudas a debuggearlo? el log dice KeyError: 'items'", "should_trigger": false},
+  {"query": "our sprint retro is tomorrow, can you make a start/stop/continue retro template for a 6-person scrum team with some icebreaker questions?", "should_trigger": false},
+  {"query": "¿cuántos tokens gasté en la sesión de ayer y en qué se fueron? quiero entender por qué fue tan cara", "should_trigger": false},
+  {"query": "resume en 5 bullets lo que hicimos hoy en esta sesión para mandarlo al canal #backend de slack", "should_trigger": false},
+  {"query": "write a github actions workflow that runs pytest and mypy on every PR to main and caches pip", "should_trigger": false},
+  {"query": "confiesa: ¿te saltaste algún test o metiste algún type: ignore para que pasara lo del parser hoy?", "should_trigger": false},
+  {"query": "configura un hook PreToolUse en .claude/settings.json que bloquee cualquier escritura en la carpeta migrations/", "should_trigger": false}
+]
