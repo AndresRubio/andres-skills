@@ -17,11 +17,12 @@ Implement the plan test-first, committing and pushing as you go.
 3. **TASKS > 3:** use superpowers:subagent-driven-development on plan.md, with these overrides:
    - The worktree already exists: skip its worktree setup.
    - Implementers run on sonnet (opus for fix rounds 4–5) and reviewers on opus. Name the model every time.
+   - The plan task that fixes the bug: tell its implementer to start from the reproduction test recorded in progress.md (path, command, failing output), not to write a new one.
    - After each task its ledger marks complete: copy the ledger (`progress.md` in its SDD workspace) into this issue's progress.md under "## SDD ledger", commit, and push.
    - Its questions for a human are handled as the mode sections below say.
    - When it reaches its final step, don't invoke finishing-a-development-branch. Return here and go on to stage 7.
 4. After every task: `node "$PIPELINE" diff-size --base "$BASE_SHA"`. If `files` exceeds `maxPrSize.files` or `lines` exceeds `maxPrSize.lines`, hard rule 9 applies: stop and propose a split of the remaining work.
-5. Tick stage 6 only after the last task's size check (step 4) passes and, on the TASKS > 3 path, after SDD's final whole-branch review. Commit and push it then, together with the last task's progress.md line (step 2.4).
+5. Tick stage 6 only after the last task's size check (step 4) passes and, on the TASKS > 3 path, after SDD's final whole-branch review. Commit and push it then (on the TASKS ≤ 3 path, together with the last task's progress.md line from step 2.4).
 
 ## Outputs
 
