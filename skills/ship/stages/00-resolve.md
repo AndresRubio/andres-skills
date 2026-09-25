@@ -24,7 +24,7 @@ Work out what the source is, load the repo's pipeline config, check the issue ma
 7. LANE is `${CLAUDE_PIPELINE_LANE:-github}` in automatic mode, and `manual` in interactive mode. Run `tracker:open-claude-pr-count`, giving N, then:
    `node "$PIPELINE" eligibility --issue-file "$RUN_DIR/issue.json" --config-file "$RUN_DIR/config.json" --lane "$LANE" --open-claude-prs N > "$RUN_DIR/eligibility.json"`
    Act on `eligibility.json` now, following the mode section below for this MODE; continue to step 8 only if the mode section lets the run continue.
-8. `gh pr list --repo "$REPO" --state open --json number,headRefName,isCrossRepository --jq '[.[] | select((.isCrossRepository | not) and (.headRefName | startswith("claude/<KEY>-")))]' > "$RUN_DIR/existing-prs.json"`. If it isn't empty, stop without changing anything, and say "PR #<n> is already open for this issue; use `/claude-pipeline:ship <n> --fix`."
+8. `gh pr list --repo "$REPO" --state open --limit 100 --json number,headRefName,isCrossRepository --jq '[.[] | select((.isCrossRepository | not) and (.headRefName == "claude/<KEY>" or (.headRefName | startswith("claude/<KEY>-"))))]' > "$RUN_DIR/existing-prs.json"`. If it isn't empty, stop without changing anything, and say "PR #<n> is already open for this issue; use `/claude-pipeline:ship <n> --fix`."
 9. `node "$PIPELINE" branch-name --key "$KEY" --issue-file "$RUN_DIR/issue.json"`: BRANCH is its `branch`.
 10. Take the lock:
    - `tracker:add-labels` `claude-working`

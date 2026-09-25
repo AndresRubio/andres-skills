@@ -34,7 +34,7 @@ These apply in every mode and every stage.
 4. **In automatic mode never edit `.github/workflows/**`.**
 5. **No completion claim without fresh evidence** (superpowers:verification-before-completion).
 6. **On any stop, follow the stop procedure.** Never discard work.
-7. **If the tracker, `gh`, `git fetch` or a `node "$PIPELINE"` command fails unexpectedly, stop loudly:** report the failing command and its error, then run the stop procedure. Skip its tracker steps only if the tracker itself is what failed.
+7. **If the tracker, `gh`, `git fetch` or a `node "$PIPELINE"` command fails unexpectedly, stop loudly:** report the failing command and its error. If this run has already taken the lock, then run the stop procedure (skipping its tracker steps only if the tracker itself is what failed); before the lock, just stop, changing nothing on the tracker.
 8. **A parent issue with open sub-issues:** automatic mode works only the children; interactive mode asks which one.
 9. **If the diff grows past `maxPrSize` mid-build, stop and propose a split.**
 10. **Every commit message ends with a `Co-Authored-By: Claude <model> <noreply@anthropic.com>` trailer** naming the model running this session. Commits are authored by the repo's configured git user.
@@ -67,7 +67,7 @@ KEY, NUMBER, REPO, REPO_ROOT (the main checkout), BRANCH, WT (the worktree), BAS
 Use this whenever a stage says "stop procedure".
 
 1. **Never discard work.**
-   - If the worktree has uncommitted changes outside `docs/pipeline/`, commit them as `wip(pipeline): <KEY> stopped at stage <N>` (with the trailer) and push the branch.
+   - If the worktree has uncommitted changes outside `docs/pipeline/`, commit them as `wip(pipeline): <KEY> stopped at stage <N>` (with the trailer) and push: `git push origin "$BRANCH"`.
    - If the stage says the worktree may be removed, run `. '<RUN_DIR>/vars.sh' && node "$PIPELINE" worktree-remove-if-empty --repo-root "$REPO_ROOT" --path "$WT" --branch "$BRANCH" --base "$BASE_REF"`.
 2. **Interactive mode:** explain what happened and what you need, then wait for the user. Label nothing unless the user asks you to park the issue. If the user ends the run here, `tracker:remove-labels` `claude-working`.
 3. **Automatic mode:**

@@ -21,6 +21,8 @@ test('the sandbox settings.json parses and denies destructive commands', () => {
   assert.ok(Array.isArray(deny));
   assert.ok(deny.some((d) => d.includes('gh pr merge')), 'should deny gh pr merge');
   assert.ok(deny.some((d) => d.includes('git reset --hard')), 'should deny git reset --hard');
+  assert.ok(deny.some((d) => d.includes('git push -u origin main')), 'should deny git push -u origin main (R11)');
+  assert.ok(deny.some((d) => d.includes('git push origin +main')), 'should deny a force-push refspec to main (R11)');
 });
 
 test('every seeded issue has a title, labels and a body', () => {

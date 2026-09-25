@@ -41,6 +41,30 @@ test('exits 2 with a JSON error when the fixture has no recorded issue', () => {
   assert.deepEqual(JSON.parse(r.stderr), { error: 'no issue recorded for 01-wrong-month.md' });
 });
 
+test('a fixture name of "constructor" is a usage error, not a crash from a prototype lookup (R9)', () => {
+  const sandbox = makeSandbox({ '01-wrong-month.md': 5 });
+  const r = runVerify(['--sandbox', sandbox, '--fixture', 'constructor']);
+  assert.equal(r.code, 2, r.stderr);
+  assert.match(r.stderr, /no expectations for constructor/);
+});
+
+test('a missing .pipeline-fixtures.json prints a JSON error and exits 2 (R9)', () => {
+  const sandbox = tempDir('vf-'); // no .pipeline-fixtures.json written at all
+  const r = runVerify(['--sandbox', sandbox, '--fixture', '01-wrong-month.md']);
+  assert.equal(r.code, 2, r.stderr);
+  const err = JSON.parse(r.stderr);
+  assert.match(err.error, /\.pipeline-fixtures\.json/);
+});
+
+test('an unreadable (invalid JSON) .pipeline-fixtures.json prints a JSON error and exits 2 (R9)', () => {
+  const sandbox = tempDir('vf-');
+  writeFileSync(path.join(sandbox, '.pipeline-fixtures.json'), '{ not valid json');
+  const r = runVerify(['--sandbox', sandbox, '--fixture', '01-wrong-month.md']);
+  assert.equal(r.code, 2, r.stderr);
+  const err = JSON.parse(r.stderr);
+  assert.match(err.error, /\.pipeline-fixtures\.json/);
+});
+
 test('a gh failure prints a JSON error on stderr and exits 3', () => {
   const sandbox = makeSandbox({ '01-wrong-month.md': 5 });
   const dir = fakeGh({}); // no routes configured: the very first gh call fails

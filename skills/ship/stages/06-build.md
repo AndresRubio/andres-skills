@@ -12,17 +12,17 @@ Implement the plan test-first, committing and pushing as you go.
 2. **TASKS ≤ 3:** build here, one task at a time, skipping any task already listed in progress.md's Tasks section — start after the last one recorded:
    1. For a task that changes behaviour, follow superpowers:test-driven-development, matching stage 5's rule: write the failing test, watch it fail, write the minimal code, watch it pass. Other tasks just do the step.
    2. Run the task's tests, plus the typecheck if `checks.txt` has one.
-   3. Write the message `<type>(<scope>): <task summary> (#<NUMBER>)` plus the trailer to `$RUN_DIR/commit-msg.txt` with the file-writing tool (the task summary is free text), commit with `git commit -F "$RUN_DIR/commit-msg.txt"`, and push.
+   3. Write the message `<type>(<scope>): <task summary> (#<NUMBER>)` plus the trailer to `$RUN_DIR/commit-msg.txt` with the file-writing tool (the task summary is free text), commit with `git commit -F "$RUN_DIR/commit-msg.txt"`, and push: `git push origin "$BRANCH"`.
    4. Append "Task N — summary — <sha>" to progress.md's Tasks section. Don't commit this now: it goes in with the next task's commit (the last task's line goes in with the stage-6 tick, step 5). No amend.
 3. **TASKS > 3:** use superpowers:subagent-driven-development on plan.md, with these overrides:
    - The worktree already exists: skip its worktree setup.
    - Implementers run on sonnet (opus for fix rounds 4–5) and reviewers on opus. Name the model every time.
    - The plan task that fixes the bug: tell its implementer to start from the reproduction test recorded in progress.md (path, command, failing output), not to write a new one.
-   - After each task its ledger marks complete: copy the ledger (`progress.md` in its SDD workspace) into this issue's progress.md under "## SDD ledger", commit, and push.
+   - After each task its ledger marks complete: copy the ledger (`progress.md` in its SDD workspace) into this issue's progress.md under "## SDD ledger", commit, and push: `git push origin "$BRANCH"`.
    - Its questions for a human are handled as the mode sections below say.
    - When it reaches its final step, don't invoke finishing-a-development-branch. Return here and go on to stage 7.
 4. After every task: `node "$PIPELINE" diff-size --base "$BASE_SHA"`. If `files` exceeds `maxPrSize.files` or `lines` exceeds `maxPrSize.lines`, hard rule 9 applies: stop and propose a split of the remaining work.
-5. Tick stage 6 only after the last task's size check (step 4) passes and, on the TASKS > 3 path, after SDD's final whole-branch review. Commit and push it then (on the TASKS ≤ 3 path, together with the last task's progress.md line from step 2.4).
+5. Tick stage 6 only after the last task's size check (step 4) passes and, on the TASKS > 3 path, after SDD's final whole-branch review. Commit and push it then: `git push origin "$BRANCH"` (on the TASKS ≤ 3 path, together with the last task's progress.md line from step 2.4).
 
 ## Outputs
 

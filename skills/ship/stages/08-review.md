@@ -26,9 +26,9 @@ WT, BASE_SHA (in fix mode, set by `fix.md` step 8), `docs/pipeline/<KEY>/spec.md
    | Confession: a skipped or weakened test, a suppressed error or type check, a value hardcoded to pass a test, a swallowed exception, `--no-verify` | Critical |
    | Confession: anything else | Important |
 
-4. **Critical or Important findings:** fix them (test-first where behaviour changes), commit, push, and repeat steps 1–3 on the new commits. At most 2 fix rounds. After a fix, re-run the commands in `checks.txt` and update the Commands table.
+4. **Critical or Important findings:** fix them (test-first where behaviour changes), commit, push (`git push origin "$BRANCH"`), and repeat steps 1–3 on the new commits. At most 2 fix rounds. After a fix, re-run the commands in `checks.txt` and update the Commands table.
 5. Write the Standards, Spec and Confession reports (lightly cleaned), the classification and the rounds into evidence.md under "Self-review". Important findings left after round 2 go under "Known issues".
-6. Tick stage 8. Commit and push: `docs(pipeline): self-review for #<NUMBER>`.
+6. Tick stage 8. Commit (`docs(pipeline): self-review for #<NUMBER>`) and push: `git push origin "$BRANCH"`.
 
 ## Outputs
 

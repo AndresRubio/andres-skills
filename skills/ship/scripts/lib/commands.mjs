@@ -10,6 +10,7 @@ import { fetchIssue, currentRepo, countOpenClaudePrs, ghJson } from './github.mj
 import { gradeVerdict } from './grade.mjs';
 import { findFreePort, diffSize } from './runtime.mjs';
 import { takeScreenshot } from './chrome.mjs';
+import { startPreview, stopPreview } from './preview.mjs';
 import { createWorktree, isolateInPlace, removeWorktreeIfEmpty } from './worktree.mjs';
 
 export class UsageError extends Error {}
@@ -130,6 +131,26 @@ export const COMMANDS = {
     const v = parse(argv, { url: { type: 'string' }, out: { type: 'string' }, width: { type: 'string' }, height: { type: 'string' } });
     required(v, 'url', 'out');
     return await takeScreenshot(v.url, v.out, { width: Number(v.width ?? 1280), height: Number(v.height ?? 800) });
+  },
+  'preview-start': async (argv) => {
+    const v = parse(argv, {
+      'config-file': { type: 'string' }, port: { type: 'string' }, cwd: { type: 'string' },
+      log: { type: 'string' }, 'pid-file': { type: 'string' }, 'timeout-ms': { type: 'string' },
+    });
+    required(v, 'config-file', 'port', 'cwd', 'log', 'pid-file');
+    return await startPreview({
+      config: readJson(v['config-file']),
+      port: Number(v.port),
+      cwd: v.cwd,
+      logFile: v.log,
+      pidFile: v['pid-file'],
+      timeoutMs: v['timeout-ms'] !== undefined ? Number(v['timeout-ms']) : undefined,
+    });
+  },
+  'preview-stop': (argv) => {
+    const v = parse(argv, { 'pid-file': { type: 'string' } });
+    required(v, 'pid-file');
+    return stopPreview({ pidFile: v['pid-file'] });
   },
   worktree: (argv) => {
     const v = parse(argv, {

@@ -35,6 +35,14 @@ test('countOpenClaudePrs counts only claude/* heads that are not from forks', ()
   ]), 2);
 });
 
+test('countOpenClaudePrs fails closed: a claude/* PR still counts when isCrossRepository is missing (R8)', () => {
+  assert.equal(countOpenClaudePrs([
+    { headRefName: 'claude/9-x' }, // field missing entirely, e.g. an older gh or a trimmed response
+    { headRefName: 'claude/10-y', isCrossRepository: undefined },
+    { headRefName: 'claude/11-fork', isCrossRepository: true }, // still excluded when it's explicitly a fork
+  ]), 2);
+});
+
 test('normalizeIssue sets pipeline and trusted on each comment', () => {
   const comment = (over) => ({ id: 1, user: { login: 'x' }, author_association: 'NONE', body: 'hi', created_at: 't', ...over });
   const marker = (kind = 'lock') => `**[claude-pipeline]** ${kind} · 2026-09-25T10:00:00Z · local`;

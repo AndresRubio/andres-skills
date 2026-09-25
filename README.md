@@ -22,7 +22,7 @@ Then, in the target repo:
 - Add `--mode auto` to run automatically.
 - `/claude-pipeline:ship <PR> --fix` — apply review feedback to an existing PR.
 
-Worktrees live at `~/.claude-pipeline/worktrees/<repo>/<KEY>`. Environment variables: `CLAUDE_PIPELINE_HOME`, `CLAUDE_PIPELINE_LANE`, `CLAUDE_PIPELINE_CHROME` (check the exact name in `chrome.mjs`).
+Worktrees live at `~/.claude-pipeline/worktrees/<repo>/<KEY>`. Environment variables: `CLAUDE_PIPELINE_HOME`, `CLAUDE_PIPELINE_LANE`, `CLAUDE_PIPELINE_CHROME`.
 
 Phase 1 ends at an open PR — you merge it yourself.
 

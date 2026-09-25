@@ -48,6 +48,9 @@ export function fetchIssue(repo, number, gh = ghJson) {
   return normalizeIssue(issue, comments, { blockedBy, subIssues });
 }
 
+// Fails closed: a claude/* PR counts unless it's known to be from a fork
+// (isCrossRepository === true). If gh ever omits the field, treat it as ours
+// rather than silently undercounting open runs against maxParallel.
 export function countOpenClaudePrs(prs) {
-  return prs.filter((p) => typeof p.headRefName === 'string' && p.headRefName.startsWith('claude/') && p.isCrossRepository === false).length;
+  return prs.filter((p) => typeof p.headRefName === 'string' && p.headRefName.startsWith('claude/') && p.isCrossRepository !== true).length;
 }

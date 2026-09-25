@@ -5,7 +5,9 @@
       "Bash(git push --force:*)",
       "Bash(git push -f:*)",
       "Bash(gh pr merge:*)",
-      "Bash(git reset --hard:*)"
+      "Bash(git reset --hard:*)",
+      "Bash(git push -u origin main:*)",
+      "Bash(git push origin +main:*)"
     ]
   }
 }

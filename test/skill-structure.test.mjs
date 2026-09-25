@@ -232,8 +232,101 @@ test('smaller prose fixes are in place (B11)', () => {
   assert.match(read('stages/06-build.md'), /git commit -F "\$RUN_DIR\/commit-msg\.txt"/);
   assert.match(read('stages/00-resolve.md'), /source\.txt/);
   const verify = read('stages/07-verify.md');
-  assert.match(verify, /set -m;/);
-  assert.match(verify, /kill -- -"\$\(cat "\$RUN_DIR\/preview\.pid"\)"/);
+  assert.match(verify, /node "\$PIPELINE" preview-start --config-file "\$RUN_DIR\/config\.json"/);
+  assert.match(verify, /node "\$PIPELINE" preview-stop --pid-file "\$RUN_DIR\/preview\.pid"/);
   assert.match(read('stages/08-review.md'), /confession-box skill if it's installed/);
   assert.match(read('stages/10-report.md'), /git worktree remove --force <path>/);
+});
+
+// --- final-fix-R ---
+
+// Groups a markdown file's lines into "instruction blocks": a top-level list item
+// (or bare paragraph line) plus every indented continuation line that follows it,
+// up to a blank line, a heading, or the next top-level item. A markdown table row
+// is never part of a block (skipped entirely) — it's data (like the Stages table's
+// "Produces" column), not an instruction.
+function pushInstructionBlocks(text) {
+  const blocks = [];
+  let current = null;
+  const closeCurrent = () => {
+    if (current) blocks.push(current.join('\n'));
+    current = null;
+  };
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '' || /^#{1,6}\s/.test(trimmed) || trimmed.startsWith('|')) {
+      closeCurrent();
+      continue;
+    }
+    const isTopLevelItem = line === trimmed; // no leading whitespace: starts a new block
+    if (isTopLevelItem) closeCurrent();
+    if (current) current.push(line);
+    else current = [line];
+  }
+  closeCurrent();
+  return blocks;
+}
+
+// A line "instructs" a push when it contains the standalone word push outside any
+// double-quoted text (a quoted string is someone else's literal wording — e.g. the
+// "Push and create a Pull Request" menu option name from another skill — not our
+// own prose) and isn't itself forbidding pushing (containing Never/never/forbidden)
+// or talking about the push.default git setting.
+function isPushInstructionLine(line) {
+  const unquoted = line.replace(/"[^"]*"/g, '');
+  if (!/\bpush\b/i.test(unquoted)) return false;
+  if (/\b(never|forbidden)\b/i.test(line)) return false;
+  if (/push\.default/i.test(line)) return false;
+  return true;
+}
+
+test('every push instruction under skills/ship names the branch explicitly (R2)', () => {
+  const EXPLICIT = /git push (-u )?origin "\$BRANCH"/;
+  for (const file of markdownFiles()) {
+    const text = readFileSync(file, 'utf8');
+    for (const block of pushInstructionBlocks(text)) {
+      const blockLines = block.split('\n');
+      if (!blockLines.some(isPushInstructionLine)) continue;
+      assert.match(
+        block,
+        EXPLICIT,
+        `${path.relative(SKILL_DIR, file)} has a push instruction without the explicit command:\n${block}`,
+      );
+    }
+  }
+});
+
+test('hard rule 7 only runs the stop procedure once the lock is taken (R3)', () => {
+  const rules = read('SKILL.md').split('## Hard rules')[1]?.split('\n## ')[0] ?? '';
+  const rule7 = rules.match(/^7\. \*\*.*$/m)?.[0] ?? '';
+  assert.match(rule7, /If this run has already taken the lock/);
+  assert.match(rule7, /before the lock, just stop, changing nothing on the tracker/);
+});
+
+test('the existing-PR gate is paginated and matches the slug-less branch too (R4)', () => {
+  const resolve = read('stages/00-resolve.md');
+  assert.match(resolve, /--limit 100/);
+  assert.match(resolve, /headRefName == "claude\/<KEY>"/);
+  assert.match(resolve, /startswith\("claude\/<KEY>-"\)/);
+});
+
+test('an existing PR is reused, not treated as a shortcut to stage 10 (R5)', () => {
+  const finish = read('stages/09-finish.md');
+  assert.doesNotMatch(finish, /go straight to stage 10/);
+  assert.match(finish, /reuse it, skipping only the create step/);
+  const automatic = finish.split('## Automatic mode')[1]?.split('\n## ')[0] ?? '';
+  assert.match(automatic, /continue with the remaining steps/);
+});
+
+test('stage 10 clears claude-go and cleans up RUN_DIR (R6)', () => {
+  const report = read('stages/10-report.md');
+  assert.match(report, /remove-labels.*claude-working.*claude-go|claude-go.*if the issue has it/);
+  assert.match(report, /rm -rf "\$RUN_DIR"/);
+});
+
+test('fix mode writes source.txt like stage 0, and inline comments use the REST field names (R7)', () => {
+  const fix = read('stages/fix.md');
+  assert.match(fix, /source\.txt/);
+  assert.match(fix, /author_association/);
+  assert.match(fix, /user\.login/);
 });

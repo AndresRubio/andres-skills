@@ -9,7 +9,7 @@ BRANCH, BASE_REF, NUMBER, KEY, REPO, spec.md, evidence.md, `$RUN_DIR/issue.json`
 ## Steps
 
 1. `git status --porcelain` must be empty. Commit anything left (with the trailer), then `git push -u origin "$BRANCH"`. `SHA=$(git rev-parse HEAD)`.
-2. `gh pr list --repo "$REPO" --head "$BRANCH" --state open --json number,url`. If a PR already exists for BRANCH, PR_URL is its `url`: skip the rest of this section and go straight to stage 10 without creating another pull request.
+2. `gh pr list --repo "$REPO" --head "$BRANCH" --state open --json number,url`. If a PR already exists for BRANCH, PR_URL is its `url`: reuse it, skipping only the create step (see the mode sections below).
 3. Write the PR body to `$RUN_DIR/pr-body.md`:
    1. The first line is the output of `node "$PIPELINE" marker report`.
    2. `Fixes #<NUMBER>`
@@ -29,7 +29,7 @@ The pull request URL, as PR_URL.
 
 ## Automatic mode
 
-If step 2 found an existing PR, reuse it as PR_URL and don't create another. Otherwise `tracker:create-pr` with the title, body and labels. Never merge (hard rule 3). Continue to stage 10.
+If step 2 found an existing PR, reuse it as PR_URL, skip the create call, and continue with the remaining steps (the tick, step 6) and stage 10. Otherwise `tracker:create-pr` with the title, body and labels. Never merge (hard rule 3). Continue to stage 10.
 
 ## Interactive mode
 

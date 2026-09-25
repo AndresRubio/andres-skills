@@ -11,14 +11,29 @@ if (!values.sandbox || !values.fixture) {
   console.error('usage: verify-fixture.mjs --sandbox <dir> --fixture <file.md>');
   process.exit(2);
 }
-const expected = JSON.parse(readFileSync(new URL('./fixtures.json', import.meta.url), 'utf8'))[values.fixture];
-if (!expected) {
+// Object.hasOwn, not `in` or a bracket-lookup truthiness check: both fixtures.json
+// and the sandbox's recorded-issue map are looked up by a name that comes straight
+// off argv, and `in`/`[key]` walk the prototype chain — `--fixture constructor`
+// would otherwise resolve to Object.prototype.constructor instead of failing clean.
+const allFixtures = JSON.parse(readFileSync(new URL('./fixtures.json', import.meta.url), 'utf8'));
+if (!Object.hasOwn(allFixtures, values.fixture)) {
   console.error(`no expectations for ${values.fixture}`);
   process.exit(2);
 }
+const expected = allFixtures[values.fixture];
 const sandbox = path.resolve(values.sandbox);
-const recorded = JSON.parse(readFileSync(path.join(sandbox, '.pipeline-fixtures.json'), 'utf8'));
-if (!(values.fixture in recorded)) {
+let recorded;
+try {
+  recorded = JSON.parse(readFileSync(path.join(sandbox, '.pipeline-fixtures.json'), 'utf8'));
+} catch (err) {
+  process.stderr.write(`${JSON.stringify({ error: `cannot read ${path.join(sandbox, '.pipeline-fixtures.json')}: ${err.message}` })}\n`);
+  process.exit(2);
+}
+if (recorded === null || typeof recorded !== 'object' || Array.isArray(recorded)) {
+  process.stderr.write(`${JSON.stringify({ error: `${path.join(sandbox, '.pipeline-fixtures.json')} is not a JSON object` })}\n`);
+  process.exit(2);
+}
+if (!Object.hasOwn(recorded, values.fixture)) {
   process.stderr.write(`${JSON.stringify({ error: `no issue recorded for ${values.fixture}` })}\n`);
   process.exit(2);
 }
