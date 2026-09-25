@@ -1,0 +1,6 @@
+# skill-creator workspaces (eval runs, benchmarks, local transcript stats) stay local
+*-workspace/
+# fixtures rebuilt by evals/files/build_fixtures.sh
+skills/*/evals/files/generated/
+__pycache__/
+.DS_Store
