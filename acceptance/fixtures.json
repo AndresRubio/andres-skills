@@ -1,0 +1,43 @@
+{
+  "01-wrong-month.md": {
+    "verdict": ["ready", "small-gaps"],
+    "pr": true,
+    "prFixesIssue": true,
+    "labelsAbsent": ["claude-working", "needs-decision"],
+    "commentKinds": ["lock", "grade", "report"],
+    "artifacts": ["research.md", "grade.md", "spec.md", "plan.md", "progress.md", "evidence.md"]
+  },
+  "02-sort.md": {
+    "verdict": ["small-gaps"],
+    "pr": true,
+    "prFixesIssue": true,
+    "labelsAbsent": ["claude-working", "needs-decision"],
+    "commentKinds": ["lock", "grade", "assumptions", "report"],
+    "artifacts": ["research.md", "grade.md", "spec.md", "plan.md", "progress.md", "evidence.md"]
+  },
+  "03-login.md": {
+    "verdict": ["fork"],
+    "pr": false,
+    "labelsPresent": ["needs-decision"],
+    "labelsAbsent": ["claude-working"],
+    "commentKinds": ["lock", "questions"],
+    "branchPushed": false
+  },
+  "04-bilingual.md": {
+    "verdict": ["too-big"],
+    "pr": false,
+    "labelsAbsent": ["claude-working"],
+    "commentKinds": ["lock", "split"],
+    "minSubIssues": 2,
+    "branchPushed": false
+  },
+  "05-empty-state.md": {
+    "verdict": ["ready", "small-gaps"],
+    "pr": true,
+    "prFixesIssue": true,
+    "labelsAbsent": ["claude-working", "needs-decision"],
+    "commentKinds": ["lock", "grade", "report"],
+    "artifacts": ["research.md", "grade.md", "spec.md", "plan.md", "progress.md", "evidence.md"],
+    "screenshots": true
+  }
+}
