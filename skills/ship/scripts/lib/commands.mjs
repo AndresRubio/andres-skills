@@ -91,7 +91,7 @@ export const COMMANDS = {
   'pr-count': (argv) => {
     const v = parse(argv, { repo: { type: 'string' } });
     const repo = v.repo ?? currentRepo();
-    return { count: countOpenClaudePrs(ghJson(['pr', 'list', '--repo', repo, '--state', 'open', '--limit', '500', '--json', 'headRefName'])) };
+    return { count: countOpenClaudePrs(ghJson(['pr', 'list', '--repo', repo, '--state', 'open', '--limit', '500', '--json', 'headRefName,isCrossRepository'])) };
   },
   eligibility: (argv) => {
     const v = parse(argv, {

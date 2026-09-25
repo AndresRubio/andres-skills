@@ -5,9 +5,10 @@ Design: `docs/superpowers/specs/2026-09-24-claude-pipeline-design.md`.
 
 ## Prerequisites
 
-- Claude Code 2.1.220 or later, with the `superpowers` and `mattpocock-skills` plugins installed.
-- `gh` logged in; `git`; Node 22 or later; Google Chrome or Chromium for screenshots.
-- The target repo has `.claude/pipeline.json` on its default branch.
+- Claude Code with the `superpowers` and `mattpocock-skills` plugins.
+- The `confession-box` skill in `~/.claude/skills` (optional; stage 8 has a fallback).
+- `gh` logged in, git, Node 22+, Chrome/Chromium for screenshots.
+- The target repo has `.claude/pipeline.json` on its default branch and the 7 labels (`claude`, `claude-go`, `needs-local`, `needs-decision`, `claude-working`, `ship-it`, `claude-fix`). `sandbox/setup-sandbox.sh` shows how they are created.
 
 ## Use
 
@@ -15,16 +16,29 @@ Design: `docs/superpowers/specs/2026-09-24-claude-pipeline-design.md`.
 claude --plugin-dir /path/to/claude-pipeline
 ```
 
-Then, in the target repo: `/claude-pipeline:ship #12` (interactive) or `/claude-pipeline:ship #12 --mode auto`.
+Then, in the target repo:
 
-Q10: alias probe inconclusive. `claude -p "/ship" --plugin-dir "$(pwd)" --max-budget-usd 1 --output-format json` returned an auth error (`"result":"Not logged in · Please run /login"`), not a ship-skill response or an unknown-command message, so the `/ship` alias itself is unverified. Use `/claude-pipeline:ship` until this is re-probed with an authenticated `claude` CLI.
+- `/claude-pipeline:ship <#N | issue URL | "idea">` — interactive mode.
+- Add `--mode auto` to run automatically.
+- `/claude-pipeline:ship <PR> --fix` — apply review feedback to an existing PR.
+
+Worktrees live at `~/.claude-pipeline/worktrees/<repo>/<KEY>`. Environment variables: `CLAUDE_PIPELINE_HOME`, `CLAUDE_PIPELINE_LANE`, `CLAUDE_PIPELINE_CHROME` (check the exact name in `chrome.mjs`).
+
+Phase 1 ends at an open PR — you merge it yourself.
+
+Q10: the short `/ship` alias is unverified; use `/claude-pipeline:ship`.
 
 ## Develop
 
 ```bash
 npm test
-claude plugin validate . --strict
+claude plugin validate . --strict                          # validates the marketplace
+claude plugin validate .claude-plugin/plugin.json --strict  # validates the plugin
 ```
+
+## Testing
+
+`sandbox/` holds the test app and seeded issues, plus `setup-sandbox.sh` / `recreate-issue.sh`, which create GitHub repos — run them only deliberately. `acceptance/verify-fixture.mjs` checks a sandbox run's issue, PR, comments and artifacts against `acceptance/fixtures.json`.
 
 ## Credits
 

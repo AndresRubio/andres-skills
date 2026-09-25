@@ -1,4 +1,4 @@
-const GITHUB_URL = /^https?:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/(issues|pull)\/(\d+)\/?(?:[#?]\S*)?$/;
+const GITHUB_URL = /^https?:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/(issues|pull)\/(\d+)(?:\/[^?#\s]*)?(?:[#?]\S*)?$/;
 const LINEAR_URL = /^https?:\/\/linear\.app\/[^/\s]+\/issue\/([A-Z][A-Z0-9]*-\d+)(?:\/\S*)?$/;
 const LINEAR_ID = /^[A-Z][A-Z0-9]*-\d+$/;
 

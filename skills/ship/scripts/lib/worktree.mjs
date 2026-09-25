@@ -12,6 +12,7 @@ function hasRef(cwd, ref) {
 }
 
 export function createWorktree({ repoRoot, path: wt, branch, base }) {
+  git(repoRoot, ['worktree', 'prune']);
   if (existsSync(wt)) {
     const current = git(wt, ['branch', '--show-current']).trim();
     if (current !== branch) throw new Error(`${wt} exists on branch "${current}", expected "${branch}"`);

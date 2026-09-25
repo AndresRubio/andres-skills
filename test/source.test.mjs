@@ -14,6 +14,12 @@ test('GitHub issue and PR URLs', () => {
   assert.deepEqual(parseSource('https://github.com/o/r/pull/9'), { kind: 'github-pr', owner: 'o', repo: 'r', number: 9 });
 });
 
+test('GitHub URLs with extra path segments after the number still resolve to that number', () => {
+  assert.deepEqual(parseSource('https://github.com/o/r/pull/9/files'), { kind: 'github-pr', owner: 'o', repo: 'r', number: 9 });
+  assert.deepEqual(parseSource('https://github.com/o/r/pull/9/commits'), { kind: 'github-pr', owner: 'o', repo: 'r', number: 9 });
+  assert.deepEqual(parseSource('https://github.com/o/r/issues/12/'), { kind: 'github', owner: 'o', repo: 'r', number: 12, key: '12' });
+});
+
 test('Linear IDs and URLs get a lowercased key', () => {
   assert.deepEqual(parseSource('OLD-43'), { kind: 'linear', id: 'OLD-43', key: 'old-43' });
   assert.deepEqual(parseSource('https://linear.app/old-world/issue/OLD-43/some-title'), { kind: 'linear', id: 'OLD-43', key: 'old-43' });

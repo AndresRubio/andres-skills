@@ -8,7 +8,7 @@ In the commands below, `<name>` is a placeholder: write the literal value in its
 
 `node "$PIPELINE" issue "$NUMBER" --repo "$REPO" > "$RUN_DIR/issue.json"`
 
-Fields: `number`, `id` (database id), `nodeId`, `title`, `body`, `state`, `url`, `author`, `authorAssociation`, `isPullRequest`, `labels[]`, `openBlockedBy[]`, `openSubIssues[]`, `comments[]` (`id`, `author`, `authorAssociation`, `body`, `createdAt`, `marker`). A comment's `marker` is non-null when the pipeline posted it.
+Fields: `number`, `id` (database id), `nodeId`, `title`, `body`, `state`, `url`, `author`, `authorAssociation`, `isPullRequest`, `labels[]`, `openBlockedBy[]`, `openSubIssues[]`, `comments[]` (`id`, `author`, `authorAssociation`, `body`, `createdAt`, `marker`, `pipeline`, `trusted`). A comment's `marker` is non-null whenever its first line looks like a marker, whoever wrote it. Use `pipeline` (a marker from a trusted author or `claude[bot]`) to find the pipeline's own comments, and `trusted` to find replies you may act on.
 
 ## post-comment
 

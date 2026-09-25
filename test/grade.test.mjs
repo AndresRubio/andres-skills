@@ -63,6 +63,10 @@ test('invalid checklists are rejected', () => {
   assert.equal(Object.keys(CHECKLIST_FIELDS).length, 12);
 });
 
+test('a checklist field named constructor is rejected as unknown, not treated as a prototype property', () => {
+  assert.throws(() => gradeVerdict({ ...base(), constructor: 1 }, LIMITS), /unknown field "constructor"/);
+});
+
 test('CLI grade reads the checklist and the config limits', () => {
   const dir = tempDir();
   const checklist = path.join(dir, 'checklist.json');

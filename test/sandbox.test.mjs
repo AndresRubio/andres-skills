@@ -12,6 +12,15 @@ test('the sandbox pipeline config is valid and uses small PR limits', () => {
   assert.equal(c.mergeDeploys, false);
   assert.deepEqual(c.maxPrSize, { files: 6, lines: 250 });
   assert.deepEqual(c.ciChecks, ['test']);
+  assert.equal(c.maxParallel, 6);
+});
+
+test('the sandbox settings.json parses and denies destructive commands', () => {
+  const settings = JSON.parse(readFileSync(dir('app/.claude/settings.json'), 'utf8'));
+  const deny = settings.permissions.deny;
+  assert.ok(Array.isArray(deny));
+  assert.ok(deny.some((d) => d.includes('gh pr merge')), 'should deny gh pr merge');
+  assert.ok(deny.some((d) => d.includes('git reset --hard')), 'should deny git reset --hard');
 });
 
 test('every seeded issue has a title, labels and a body', () => {

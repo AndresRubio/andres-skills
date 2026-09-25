@@ -28,7 +28,7 @@ export function validateChecklist(c) {
   for (const [name, type] of Object.entries(CHECKLIST_FIELDS)) {
     if (!hasType(c[name], type)) problems.push(`"${name}" must be ${type === 'integer' ? 'an integer >= 0' : type}`);
   }
-  for (const name of Object.keys(c)) if (!(name in CHECKLIST_FIELDS)) problems.push(`unknown field "${name}"`);
+  for (const name of Object.keys(c)) if (!Object.hasOwn(CHECKLIST_FIELDS, name)) problems.push(`unknown field "${name}"`);
   if (problems.length) throw new Error(`invalid checklist: ${problems.join('; ')}`);
   return c;
 }

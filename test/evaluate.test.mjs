@@ -33,6 +33,26 @@ test('fork and too-big expectations', () => {
   assert.match(evaluateFixture(big, observed({ verdict: 'too-big', pr: null, commentKinds: ['lock', 'split'], subIssues: 1, branchPushed: false })).failures.join(), /1 sub-issues < 2/);
 });
 
+test('small-gaps without an assumptions comment fails', () => {
+  const e = expectations['02-sort.md'];
+  const obs = observed({ verdict: 'small-gaps', commentKinds: ['lock', 'grade', 'report'] });
+  assert.match(evaluateFixture(e, obs).failures.join(), /small-gaps but no assumptions comment/);
+});
+
+test('small-gaps with an assumptions comment passes that check', () => {
+  const e = expectations['02-sort.md'];
+  const obs = observed({ verdict: 'small-gaps', commentKinds: ['lock', 'grade', 'assumptions', 'report'] });
+  assert.equal(evaluateFixture(e, obs).pass, true);
+});
+
+test('04-bilingual.md passes with too-big, no PR, 2 sub-issues, split comment, no branch', () => {
+  const big = expectations['04-bilingual.md'];
+  const obs = observed({
+    verdict: 'too-big', pr: null, commentKinds: ['lock', 'split'], subIssues: 2, branchPushed: false, artifacts: [], screenshots: 0,
+  });
+  assert.equal(evaluateFixture(big, obs).pass, true);
+});
+
 test('verdictFromComments reads the last grading comment', () => {
   const c = (kind, verdict) => ({ marker: { kind }, body: `x\n\n**Verdict:** \`${verdict}\`` });
   assert.equal(verdictFromComments([c('grade', 'ready'), c('questions', 'fork')]), 'fork');

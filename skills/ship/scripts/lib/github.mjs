@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { parseMarker } from './marker.mjs';
+import { isPipelineComment, TRUSTED } from './lock.mjs';
 
 export function ghJson(args) {
   const out = execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
@@ -25,14 +26,17 @@ export function normalizeIssue(apiIssue, apiComments, { blockedBy = [], subIssue
     labels: (apiIssue.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name)),
     openBlockedBy: blockedBy.filter((i) => i.state === 'open').map((i) => i.number),
     openSubIssues: subIssues.filter((i) => i.state === 'open').map((i) => i.number),
-    comments: apiComments.map((c) => ({
-      id: c.id,
-      author: c.user?.login ?? null,
-      authorAssociation: c.author_association,
-      body: c.body ?? '',
-      createdAt: c.created_at,
-      marker: parseMarker(c.body),
-    })),
+    comments: apiComments.map((c) => {
+      const comment = {
+        id: c.id,
+        author: c.user?.login ?? null,
+        authorAssociation: c.author_association,
+        body: c.body ?? '',
+        createdAt: c.created_at,
+        marker: parseMarker(c.body),
+      };
+      return { ...comment, pipeline: isPipelineComment(comment), trusted: TRUSTED.has(comment.authorAssociation) };
+    }),
   };
 }
 
@@ -45,5 +49,5 @@ export function fetchIssue(repo, number, gh = ghJson) {
 }
 
 export function countOpenClaudePrs(prs) {
-  return prs.filter((p) => typeof p.headRefName === 'string' && p.headRefName.startsWith('claude/')).length;
+  return prs.filter((p) => typeof p.headRefName === 'string' && p.headRefName.startsWith('claude/') && p.isCrossRepository === false).length;
 }

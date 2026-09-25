@@ -39,5 +39,13 @@
     "commentKinds": ["lock", "grade", "report"],
     "artifacts": ["research.md", "grade.md", "spec.md", "plan.md", "progress.md", "evidence.md"],
     "screenshots": true
+  },
+  "07-title-typo.md": {
+    "verdict": ["ready", "small-gaps"],
+    "pr": true,
+    "prFixesIssue": true,
+    "labelsAbsent": ["claude-working", "needs-decision"],
+    "commentKinds": ["lock", "grade", "report"],
+    "artifacts": ["research.md", "grade.md", "spec.md", "plan.md", "progress.md", "evidence.md"]
   }
 }

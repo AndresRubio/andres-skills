@@ -8,10 +8,19 @@ test('version prints the plugin version as JSON', () => {
   assert.deepEqual(r.json(), { version: '0.1.0' });
 });
 
-test('an unknown command exits 2 with usage on stderr', () => {
+test('an unknown command exits 2 with a JSON error on stderr', () => {
   const r = runCli(['nope']);
   assert.equal(r.code, 2);
-  assert.match(r.stderr, /usage: pipeline </);
+  const err = JSON.parse(r.stderr);
+  assert.match(err.error, /unknown command "nope"/);
+  assert.match(err.error, /expected one of:/);
+});
+
+test('constructor is an unknown command, not a prototype property', () => {
+  const r = runCli(['constructor']);
+  assert.equal(r.code, 2);
+  const err = JSON.parse(r.stderr);
+  assert.match(err.error, /unknown command "constructor"/);
 });
 
 test('an unexpected positional argument is a usage error', () => {

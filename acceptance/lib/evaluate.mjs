@@ -22,5 +22,8 @@ export function evaluateFixture(expected, observed) {
     failures.push(`${observed.subIssues} sub-issues < ${expected.minSubIssues}`);
   }
   if (expected.branchPushed === false && observed.branchPushed) failures.push('a claude branch was pushed');
+  if (observed.verdict === 'small-gaps' && !observed.commentKinds.includes('assumptions')) {
+    failures.push('small-gaps but no assumptions comment');
+  }
   return { pass: failures.length === 0, failures };
 }

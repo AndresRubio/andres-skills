@@ -26,8 +26,30 @@ test('normalizeIssue flattens labels, parses markers and keeps only open relatio
   assert.equal(issue.comments[1].authorAssociation, 'NONE');
 });
 
-test('countOpenClaudePrs counts only claude/* heads', () => {
-  assert.equal(countOpenClaudePrs([{ headRefName: 'claude/1-a' }, { headRefName: 'feature/x' }, { headRefName: 'claude/2' }]), 2);
+test('countOpenClaudePrs counts only claude/* heads that are not from forks', () => {
+  assert.equal(countOpenClaudePrs([
+    { headRefName: 'claude/1-a', isCrossRepository: false },
+    { headRefName: 'feature/x', isCrossRepository: false },
+    { headRefName: 'claude/2', isCrossRepository: false },
+    { headRefName: 'claude/3-fork', isCrossRepository: true },
+  ]), 2);
+});
+
+test('normalizeIssue sets pipeline and trusted on each comment', () => {
+  const comment = (over) => ({ id: 1, user: { login: 'x' }, author_association: 'NONE', body: 'hi', created_at: 't', ...over });
+  const marker = (kind = 'lock') => `**[claude-pipeline]** ${kind} · 2026-09-25T10:00:00Z · local`;
+
+  const ownerMarker = normalizeIssue(fixture('gh-issue.json'), [comment({ user: { login: 'AndresRubio' }, author_association: 'OWNER', body: marker() })]);
+  assert.deepEqual([ownerMarker.comments[0].pipeline, ownerMarker.comments[0].trusted], [true, true]);
+
+  const noneMarker = normalizeIssue(fixture('gh-issue.json'), [comment({ author_association: 'NONE', body: marker() })]);
+  assert.deepEqual([noneMarker.comments[0].pipeline, noneMarker.comments[0].trusted], [false, false]);
+
+  const botMarker = normalizeIssue(fixture('gh-issue.json'), [comment({ user: { login: 'claude[bot]' }, author_association: 'NONE', body: marker() })]);
+  assert.equal(botMarker.comments[0].pipeline, true);
+
+  const ownerNoMarker = normalizeIssue(fixture('gh-issue.json'), [comment({ user: { login: 'AndresRubio' }, author_association: 'OWNER', body: 'just a note' })]);
+  assert.deepEqual([ownerNoMarker.comments[0].pipeline, ownerNoMarker.comments[0].trusted], [false, true]);
 });
 
 test('CLI issue calls gh and prints the normalized issue', () => {
@@ -53,7 +75,19 @@ test('CLI issue fails loudly when gh fails', () => {
 
 test('CLI pr-count counts open claude PRs', () => {
   const dir = fakeGh({
-    'pr list --repo o/r --state open --limit 500 --json headRefName': [{ headRefName: 'claude/1-a' }, { headRefName: 'main-fix' }],
+    'pr list --repo o/r --state open --limit 500 --json headRefName,isCrossRepository': [
+      { headRefName: 'claude/1-a', isCrossRepository: false }, { headRefName: 'main-fix', isCrossRepository: false },
+    ],
+  });
+  const r = runCli(['pr-count', '--repo', 'o/r'], { env: { PATH: `${dir}:${process.env.PATH}` } });
+  assert.deepEqual(r.json(), { count: 1 });
+});
+
+test('CLI pr-count ignores PRs from forks', () => {
+  const dir = fakeGh({
+    'pr list --repo o/r --state open --limit 500 --json headRefName,isCrossRepository': [
+      { headRefName: 'claude/1-a', isCrossRepository: false }, { headRefName: 'claude/2-b', isCrossRepository: true },
+    ],
   });
   const r = runCli(['pr-count', '--repo', 'o/r'], { env: { PATH: `${dir}:${process.env.PATH}` } });
   assert.deepEqual(r.json(), { count: 1 });

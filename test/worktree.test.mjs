@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { createWorktree, isolateInPlace, removeWorktreeIfEmpty } from '../skills/ship/scripts/lib/worktree.mjs';
 import { git, makeRepoWithOrigin, tempDir, writeFiles } from './helpers/git.mjs';
@@ -38,6 +38,15 @@ test('resumes a local branch whose worktree was removed', () => {
   git(root, ['worktree', 'remove', args.path]);
   const r = createWorktree(args);
   assert.equal(r.resumed, true);
+});
+
+test('recovers when the worktree folder was deleted by hand, leaving a stale registration', () => {
+  const { args } = setup();
+  createWorktree(args);
+  rmSync(args.path, { recursive: true, force: true });
+  const r = createWorktree(args);
+  assert.equal(r.resumed, true);
+  assert.equal(existsSync(args.path), true);
 });
 
 test('resumes a branch that exists only on the remote', () => {
