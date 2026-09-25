@@ -1,0 +1,8 @@
+{
+  "tracker": { "type": "github" },
+  "ciChecks": ["test"],
+  "mergeDeploys": false,
+  "protectedPaths": ["src/storage.ts"],
+  "maxPrSize": { "files": 6, "lines": 250 },
+  "preview": { "command": "npm run dev -- --port {port} --strictPort" }
+}

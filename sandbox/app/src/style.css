@@ -1,0 +1,6 @@
+body { font-family: system-ui, sans-serif; margin: 2rem; color: #222; }
+main { max-width: 40rem; }
+form { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+.items { list-style: none; padding: 0; }
+.items li { padding: 0.5rem 0; border-bottom: 1px solid #ddd; }
+.added { color: #777; font-size: 0.9em; }
