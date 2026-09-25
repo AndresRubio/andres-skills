@@ -10,6 +10,7 @@ import { fetchIssue, currentRepo, countOpenClaudePrs, ghJson } from './github.mj
 import { gradeVerdict } from './grade.mjs';
 import { findFreePort, diffSize } from './runtime.mjs';
 import { takeScreenshot } from './chrome.mjs';
+import { createWorktree, isolateInPlace, removeWorktreeIfEmpty } from './worktree.mjs';
 
 export class UsageError extends Error {}
 
@@ -120,5 +121,19 @@ export const COMMANDS = {
     const v = parse(argv, { url: { type: 'string' }, out: { type: 'string' }, width: { type: 'string' }, height: { type: 'string' } });
     required(v, 'url', 'out');
     return await takeScreenshot(v.url, v.out, { width: Number(v.width ?? 1280), height: Number(v.height ?? 800) });
+  },
+  worktree: (argv) => {
+    const v = parse(argv, {
+      'repo-root': { type: 'string' }, key: { type: 'string' }, branch: { type: 'string' },
+      base: { type: 'string' }, 'in-place': { type: 'boolean' },
+    });
+    required(v, 'repo-root', 'key', 'branch', 'base');
+    if (v['in-place']) return isolateInPlace({ repoRoot: v['repo-root'], branch: v.branch, base: v.base });
+    return createWorktree({ repoRoot: v['repo-root'], path: worktreePath(v['repo-root'], v.key), branch: v.branch, base: v.base });
+  },
+  'worktree-remove-if-empty': (argv) => {
+    const v = parse(argv, { 'repo-root': { type: 'string' }, path: { type: 'string' }, branch: { type: 'string' }, base: { type: 'string' } });
+    required(v, 'repo-root', 'path', 'branch', 'base');
+    return removeWorktreeIfEmpty({ repoRoot: v['repo-root'], path: v.path, branch: v.branch, base: v.base });
   },
 };
