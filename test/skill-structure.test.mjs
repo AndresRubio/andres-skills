@@ -1,0 +1,66 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { COMMANDS } from '../skills/ship/scripts/lib/commands.mjs';
+import { MARKER_KINDS } from '../skills/ship/scripts/lib/marker.mjs';
+
+export const SKILL_DIR = fileURLToPath(new URL('../skills/ship/', import.meta.url));
+export const read = (rel) => readFileSync(path.join(SKILL_DIR, rel), 'utf8');
+export const headings = (text) => [...text.matchAll(/^#{2,4} (.+)$/gm)].map((m) => m[1].trim());
+
+export function markdownFiles(dir = SKILL_DIR) {
+  return readdirSync(dir).flatMap((name) => {
+    const full = path.join(dir, name);
+    if (statSync(full).isDirectory()) return name === 'scripts' ? [] : markdownFiles(full);
+    return name.endsWith('.md') ? [full] : [];
+  });
+}
+
+export const TRACKER_OPS = ['read-issue', 'post-comment', 'add-labels', 'remove-labels', 'set-in-progress', 'create-issue', 'create-sub-issue', 'add-blocked-by', 'open-claude-pr-count', 'create-pr'];
+
+test('every node "$PIPELINE" <command> reference names a real command', () => {
+  for (const file of markdownFiles()) {
+    for (const m of readFileSync(file, 'utf8').matchAll(/node "\$PIPELINE" ([a-z-]+)/g)) {
+      assert.ok(m[1] in COMMANDS, `${path.relative(SKILL_DIR, file)} references unknown command "${m[1]}"`);
+    }
+  }
+});
+
+test('every tracker:<op> reference is defined by the GitHub adapter', () => {
+  const defined = new Set(headings(read('trackers/github.md')));
+  for (const file of markdownFiles()) {
+    for (const m of readFileSync(file, 'utf8').matchAll(/tracker:([a-z-]+)/g)) {
+      assert.ok(defined.has(m[1]), `${path.relative(SKILL_DIR, file)} references undefined tracker:${m[1]}`);
+    }
+  }
+});
+
+test('the GitHub adapter defines every tracker operation', () => {
+  const defined = headings(read('trackers/github.md'));
+  for (const op of TRACKER_OPS) assert.ok(defined.includes(op), `trackers/github.md lacks ## ${op}`);
+});
+
+test('every marker kind named in the skill is a real kind', () => {
+  for (const file of markdownFiles()) {
+    for (const m of readFileSync(file, 'utf8').matchAll(/kind `([a-z-]+)`/g)) {
+      assert.ok(MARKER_KINDS.includes(m[1]), `${path.relative(SKILL_DIR, file)} uses unknown marker kind "${m[1]}"`);
+    }
+  }
+});
+
+test('templates have their required sections', () => {
+  const need = {
+    'templates/spec.md': ['Problem Statement', 'Solution', 'User Stories', 'Acceptance Criteria', 'Assumptions', 'Implementation Decisions', 'Testing Decisions', 'Out of Scope', 'Further Notes'],
+    'templates/grade.md': ['Why', 'Checklist', 'Assumptions', 'Research summary'],
+    'templates/evidence.md': ['Commands', 'Visible change', 'Screenshots', 'Departures from spec', 'Self-review', 'Known issues'],
+    'templates/progress.md': ['Run', 'Stages', 'Tasks'],
+  };
+  for (const [file, sections] of Object.entries(need)) {
+    const h = headings(read(file));
+    for (const s of sections) assert.ok(h.includes(s), `${file} lacks ## ${s}`);
+  }
+  assert.match(read('templates/grade.md'), /\*\*Verdict:\*\* `<verdict>`/);
+  assert.match(read('templates/spec.md'), /Adapted from mattpocock\/skills \(MIT License, Copyright \(c\) 2026 Matt Pocock\)/);
+});
