@@ -4,7 +4,7 @@ Review the change against the repo's standards and against the spec, and confess
 
 ## Inputs
 
-WT, BASE_SHA (in fix mode, the commit before the fix run), `docs/pipeline/<KEY>/spec.md`, `docs/pipeline/<KEY>/evidence.md`.
+WT, BASE_SHA (in fix mode, set by `fix.md` step 8), `docs/pipeline/<KEY>/spec.md`, `docs/pipeline/<KEY>/evidence.md`.
 
 ## Steps
 

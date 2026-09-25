@@ -43,6 +43,23 @@ test('takeScreenshot writes a PNG when Chrome is available', { timeout: 90_000 }
   }
 });
 
+test('takeScreenshot creates the output directory when it does not exist', { timeout: 90_000 }, async (t) => {
+  if (!findChrome()) {
+    t.skip('no Chrome or Chromium on this machine');
+    return;
+  }
+  const server = http.createServer((req, res) => res.end('<h1>hello</h1>'));
+  await new Promise((resolve) => server.listen(0, resolve));
+  try {
+    const out = path.join(tempDir(), 'nested', 'screenshots', 'shot.png');
+    const r = await takeScreenshot(`http://127.0.0.1:${server.address().port}/`, out);
+    const bytes = readFileSync(r.path);
+    assert.deepEqual([...bytes.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47]);
+  } finally {
+    server.close();
+  }
+});
+
 function fakeChrome(dir, name, body) {
   const file = path.join(dir, name);
   writeFileSync(file, `#!/usr/bin/env node\n${body}\n`);

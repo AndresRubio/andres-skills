@@ -8,14 +8,14 @@ BRANCH, BASE_REF, NUMBER, KEY, REPO, spec.md, evidence.md, `$RUN_DIR/issue.json`
 
 ## Steps
 
-1. `git status --porcelain` must be empty. Commit anything left (with the trailer), then `git push -u origin "$BRANCH"`.
+1. `git status --porcelain` must be empty. Commit anything left (with the trailer), then `git push -u origin "$BRANCH"`. `SHA=$(git rev-parse HEAD)`.
 2. Write the PR body to `$RUN_DIR/pr-body.md`:
    1. The first line is the output of `node "$PIPELINE" marker report`.
    2. `Fixes #<NUMBER>`
    3. **Summary:** the spec's Problem Statement and Solution, in 3 lines or fewer.
    4. **Acceptance criteria:** the ACs as a checklist, ticked where the evidence shows them met.
    5. **Assumptions** (from spec.md) and **Departures from spec** (from evidence.md).
-   6. **Evidence:** the Commands table. Each screenshot as `![<what>](https://github.com/<REPO>/blob/<BRANCH>/docs/pipeline/<KEY>/screenshots/<file>?raw=true)`, or the "Visual check needed" line.
+   6. **Evidence:** the Commands table. Each screenshot as `![<what>](https://github.com/<REPO>/blob/<SHA>/docs/pipeline/<KEY>/screenshots/<file>?raw=true)` (SHA, not the branch, so the link survives a merge), or the "Visual check needed" line.
    7. **Self-review:** finding counts per axis and severity, Known issues, and a one-line confession summary.
    8. "Pipeline files: `docs/pipeline/<KEY>/`"
 3. The title is the issue title followed by ` (#<NUMBER>)`, written to `$RUN_DIR/pr-title.txt` with the file-writing tool; that file is what `tracker:create-pr` gets.
@@ -34,5 +34,5 @@ The pull request URL, as PR_URL.
 
 Use superpowers:finishing-a-development-branch.
 - If the user chooses "Push and create a Pull Request": create it with `tracker:create-pr` and the body above.
-- If the user chooses to merge locally: follow that skill's steps. Stage 10 still reports, with "merged locally" in place of a PR link.
+- If the user chooses to merge locally: follow that skill's steps, but skip its worktree-cleanup step — stage 10 still uses WT and tells the user how to remove it. Stage 10 still reports, with "merged locally" in place of a PR link.
 - If the user keeps the branch as-is: go to stage 10 with no PR.

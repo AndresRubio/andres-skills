@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -126,6 +126,7 @@ export async function takeScreenshot(url, out, { width = 1280, height = 800, tim
   const chrome = findChrome(find);
   if (!chrome) throw new Error('no Chrome or Chromium found (set CLAUDE_PIPELINE_CHROME)');
   const target = path.resolve(out);
+  mkdirSync(path.dirname(target), { recursive: true }); // Chrome won't create a missing output directory
   rmSync(target, { force: true }); // a stale file from a previous run must not satisfy the wait
   const userDataDir = mkdtempSync(path.join(tmpdir(), 'cp-chrome-'));
   const child = spawn(chrome, screenshotArgs(url, target, { width, height, userDataDir }), {
