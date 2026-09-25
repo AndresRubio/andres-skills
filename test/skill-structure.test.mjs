@@ -116,3 +116,7 @@ test('the grade stage defines every checklist field', () => {
   const text = read('stages/03-grade.md');
   for (const field of Object.keys(CHECKLIST_FIELDS)) assert.match(text, new RegExp(`\`${field}\``), `03-grade.md does not define ${field}`);
 });
+
+test('stages 4-6 have every required section', () => {
+  for (const f of ['04-spec.md', '05-plan.md', '06-build.md']) assertStage(f);
+});
