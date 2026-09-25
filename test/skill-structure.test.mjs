@@ -99,3 +99,20 @@ test('SKILL.md keeps variables in vars.sh', () => {
   assert.ok(wt, 'worktree-remove-if-empty command not found');
   assert.match(wt[0], /^`\. '<RUN_DIR>\/vars\.sh' && node "\$PIPELINE" worktree-remove-if-empty/);
 });
+
+import { CHECKLIST_FIELDS } from '../skills/ship/scripts/lib/grade.mjs';
+
+export const STAGE_SECTIONS = ['Inputs', 'Steps', 'Outputs', 'Automatic mode', 'Interactive mode'];
+export function assertStage(file) {
+  const h = headings(read(`stages/${file}`));
+  for (const s of STAGE_SECTIONS) assert.ok(h.includes(s), `stages/${file} lacks ## ${s}`);
+}
+
+test('stages 0-3 have every required section', () => {
+  for (const f of ['00-resolve.md', '01-isolate.md', '02-research.md', '03-grade.md']) assertStage(f);
+});
+
+test('the grade stage defines every checklist field', () => {
+  const text = read('stages/03-grade.md');
+  for (const field of Object.keys(CHECKLIST_FIELDS)) assert.match(text, new RegExp(`\`${field}\``), `03-grade.md does not define ${field}`);
+});
