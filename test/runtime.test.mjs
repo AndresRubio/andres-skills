@@ -18,6 +18,19 @@ test('findFreePort skips a port that is in use', async () => {
   }
 });
 
+test('findFreePort skips a port bound only on 127.0.0.1 (e.g. a dev server\'s default)', async () => {
+  const server = net.createServer();
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const busy = server.address().port;
+  try {
+    const port = await findFreePort(busy);
+    assert.notEqual(port, busy);
+    assert.ok(port > busy);
+  } finally {
+    server.close();
+  }
+});
+
 test('parseNumstat counts files and lines, binary files count as files only', () => {
   assert.deepEqual(parseNumstat('3\t1\tsrc/a.ts\n10\t0\tsrc/b.ts\n-\t-\timg.png\n'), { files: 3, lines: 14 });
   assert.deepEqual(parseNumstat(''), { files: 0, lines: 0 });

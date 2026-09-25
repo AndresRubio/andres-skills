@@ -88,8 +88,23 @@ function waitForStableFile(target, { child, timeoutMs, intervalMs = 200, stderrS
       lastSize = size;
     }
 
-    function onExit(code) {
-      finish(reject, new Error(`Chrome exited (code ${code}) without writing ${target}: ${stderrState.tail}`));
+    function onExit(code, signal) {
+      // Writing the file and then exiting is normal `--screenshot` behaviour on most
+      // Chrome/chrome-headless-shell builds (only this Mac's Chrome 153 stays alive).
+      // Once the process is gone, whatever it last wrote is final, so check the file
+      // itself rather than treating every exit as a failure.
+      let size = -1;
+      try {
+        size = statSync(target).size;
+      } catch {
+        // file was never created
+      }
+      if (size > 0) {
+        finish(resolve);
+        return;
+      }
+      const signalPart = signal ? `, signal ${signal}` : '';
+      finish(reject, new Error(`Chrome exited (code ${code}${signalPart}) without writing ${target}: ${stderrState.tail}`));
     }
 
     function onError(err) {

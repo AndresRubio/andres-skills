@@ -68,6 +68,21 @@ test('takeScreenshot resolves once the written file is stable, and stops the Chr
   assert.throws(() => process.kill(pid, 0), /ESRCH/);
 });
 
+test('takeScreenshot resolves when Chrome writes the file and then exits normally', async () => {
+  const dir = tempDir();
+  const fake = fakeChrome(dir, 'fake-write-and-exit.cjs', `
+    const fs = require('node:fs');
+    const shot = process.argv.find((a) => a.startsWith('--screenshot='));
+    const target = shot.slice('--screenshot='.length);
+    fs.writeFileSync(target, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    process.exit(0);
+  `);
+  const out = path.join(dir, 'shot.png');
+  const r = await takeScreenshot('http://x/', out, { env: { CLAUDE_PIPELINE_CHROME: fake }, timeoutMs: 10_000 });
+  const bytes = readFileSync(r.path);
+  assert.deepEqual([...bytes.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47]);
+});
+
 test('takeScreenshot rejects with a timeout when Chrome never writes or exits', async () => {
   const dir = tempDir();
   const fake = fakeChrome(dir, 'fake-hang-only.cjs', 'setInterval(() => {}, 1000);');
