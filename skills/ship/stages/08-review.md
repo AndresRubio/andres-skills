@@ -12,7 +12,7 @@ WT, BASE_SHA (in fix mode, set by `fix.md` step 8), `docs/pipeline/<KEY>/spec.md
    - Fixed point: BASE_SHA.
    - Spec: `docs/pipeline/<KEY>/spec.md`, and the note "The spec is this file; do not look it up in an issue tracker."
    - Both sub-agents on model opus.
-2. Use the confession-box skill on the work done in this run.
+2. Use the confession-box skill if it's installed. Otherwise, list yourself every skipped or weakened test, suppressed error or type check, value hardcoded to pass a test, swallowed exception, and `--no-verify` in this run's commits.
 3. Classify every finding in evidence.md's Classification table:
 
    | Finding | Severity |

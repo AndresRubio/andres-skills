@@ -8,7 +8,7 @@ Decide whether the issue can be built as it is, needs recorded assumptions, need
 
 ## Steps
 
-1. Read the issue (trusted text only) and research.md. Answers in trusted replies (hard rule 2) count as issue text: a value a reply supplies is not a missing value, and a detail a reply settles is a decision, not an assumption. If the issue has a pipeline `questions` comment followed by trusted replies, copy each answered question and its answer under "## Decisions" when you write grade.md in step 4.
+1. Read the issue (trusted text only) and research.md. Answers in trusted replies (hard rule 2) count as issue text: a value a reply supplies is not a missing value, and a detail a reply settles is a decision, not an assumption. If the issue has a comment with `pipeline: true` and kind `questions` (the latest one) followed by trusted replies — comments with `trusted: true` and `pipeline: false` — copy each answered question and its answer under "## Decisions" when you write grade.md in step 4.
 2. Write `$RUN_DIR/checklist.json` with exactly these fields:
    - `estimatedFiles` (integer): files the change will touch, tests included.
    - `estimatedLines` (integer): added plus removed lines, tests included.
@@ -21,7 +21,7 @@ Decide whether the issue can be built as it is, needs recorded assumptions, need
    - `acceptanceCriteriaDerivable` (boolean): testable acceptance criteria can be written from the issue or from existing tests.
    - `needsWorkflowChanges` (boolean): it needs edits under `.github/workflows/`.
    - `conflictsWithOpenClaudePr` (boolean): research found an open `claude/*` PR touching the same files.
-   - `claudeGo` (boolean): true if the issue has the `claude-go` label, or a trusted reply (hard rule 2) posted after the latest pipeline `questions` comment answers every question in it. A partial answer is fine: the regrade forks again with only the unanswered questions.
+   - `claudeGo` (boolean): true if the issue has the `claude-go` label, or a trusted reply (a comment with `trusted: true` and `pipeline: false`) posted after the latest comment with `pipeline: true` and kind `questions` answers every question in it. A partial answer is fine: the regrade forks again with only the unanswered questions.
 3. `node "$PIPELINE" grade --checklist-file "$RUN_DIR/checklist.json" --config-file "$RUN_DIR/config.json" --mode "$MODE" > "$RUN_DIR/grade.json"`
 4. Write `docs/pipeline/<KEY>/grade.md` from `templates/grade.md`. The verdict line must read exactly `**Verdict:** \`<verdict>\``.
 5. Act on the verdict (see the mode sections).
@@ -39,7 +39,7 @@ Decide whether the issue can be built as it is, needs recorded assumptions, need
 - **ready or small-gaps:** `tracker:post-comment` kind `grade` with the contents of grade.md. Continue to stage 4.
 - **fork:**
   1. Append a "## Questions" section to grade.md.
-  2. `tracker:post-comment` kind `questions`, with grade.md plus "Reply to resume, or add `claude-go` to accept the recommendations."
+  2. `tracker:post-comment` kind `questions`, with grade.md plus a closing line: if every question is about a missing value, "Reply with the values to resume." (a `claude-go` can't supply a value) — otherwise "Reply to resume, or add `claude-go` to accept the recommendations."
   3. Delete `docs/pipeline/<KEY>` in WT.
   4. Stop procedure (the worktree may be removed; don't post `blocked`).
 - **too-big:**
@@ -52,6 +52,6 @@ Decide whether the issue can be built as it is, needs recorded assumptions, need
 
 ## Interactive mode
 
-- **ready or small-gaps:** show grade.md and ask "Proceed with these assumptions?" Write any corrections into grade.md as decisions.
-- **fork:** ask the questions one at a time, each with its recommendation. Record the answers under "## Decisions" in grade.md, then continue to stage 4.
-- **too-big:** show the proposed split and ask whether to create the sub-issues (then do what automatic mode does, and stop) or to proceed anyway (continue to stage 4).
+- **ready or small-gaps:** show grade.md and ask "Proceed with these assumptions?" Write any corrections into grade.md as decisions, then `tracker:post-comment` kind `grade` with grade.md.
+- **fork:** ask the questions one at a time, each with its recommendation. Record the answers under "## Decisions" in grade.md, then `tracker:post-comment` kind `grade` with grade.md, and continue to stage 4.
+- **too-big:** show the proposed split and ask whether to create the sub-issues (then do what automatic mode does, which includes the `split` comment, and stop) or to proceed anyway (`tracker:post-comment` kind `grade` with grade.md, then continue to stage 4).

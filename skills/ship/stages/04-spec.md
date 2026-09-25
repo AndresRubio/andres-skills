@@ -13,8 +13,9 @@ Write what will be built and how it will be judged. The acceptance criteria writ
    - **Assumptions:** grade.md's A1… copied exactly, or "None."
    - **Implementation Decisions:** no file paths or code, except a type shape that is itself a decision.
 2. Check hard rule 1: every value in the spec (numbers, names, user-facing text, data) must trace to the issue, the repo or a recorded decision.
-3. Tick stages 2–4 in progress.md.
-4. Commit and push. This is the first commit on the branch.
+3. If grade.md lists assumptions: `tracker:post-comment` kind `assumptions` with the numbered list and "These are the assumptions the PR is built on. Reply before merge to correct any." (Interactive mode: this runs once the spec is approved; automatic mode: once it is written.)
+4. Tick stages 2–4 in progress.md.
+5. Commit and push. This is the first commit on the branch.
    `git add docs/pipeline/<KEY> && git commit -m "docs(pipeline): spec for #<NUMBER>" -m "<trailer>"`
    `git push -u origin "$BRANCH"`
 
@@ -24,8 +25,7 @@ spec.md, research.md, grade.md and progress.md, committed and pushed.
 
 ## Automatic mode
 
-- If grade.md lists assumptions: `tracker:post-comment` kind `assumptions` with the numbered list and "These are the assumptions the PR is built on. Reply before merge to correct any."
-- A value that fails step 2: stop procedure, naming the value.
+A value that fails step 2: stop procedure, naming the value.
 
 ## Interactive mode
 

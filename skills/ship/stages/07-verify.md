@@ -13,11 +13,11 @@ WT, BASE_SHA, `$RUN_DIR/checks.txt`, `$RUN_DIR/config.json` (`preview`), `docs/p
 3. **Visible change?** From `git diff --name-only "$BASE_SHA"...HEAD` and the spec, decide whether this changes what a user sees: markup, styles, text, rendered data. Record yes or no and why under "Visible change".
 4. **If yes and the config has `preview`:**
    1. `node "$PIPELINE" free-port` gives PORT.
-   2. Start the preview command from WT in the background, with `{port}` replaced by PORT, and its PID recorded: `(<command> > "$RUN_DIR/preview.log" 2>&1 & echo $! > "$RUN_DIR/preview.pid")`. Wait up to 60 s for `http://localhost:<PORT>/` to answer. If it never answers, write "Visual check needed: preview did not start", kill it (step 4.6) and skip to step 5.
+   2. Start the preview command from WT in the background, with `{port}` replaced by PORT, as its own process group so its children die with it, and its PID recorded: `set -m; (<command> > "$RUN_DIR/preview.log" 2>&1) & echo $! > "$RUN_DIR/preview.pid"`. Wait up to 60 s for `http://localhost:<PORT>/` to answer. If it never answers, write "Visual check needed: preview did not start", kill it (step 4.6) and skip to step 5.
    3. For each changed screen reachable by URL: `node "$PIPELINE" screenshot --url "http://localhost:<PORT>/<path>" --out "docs/pipeline/<KEY>/screenshots/<n>-<what>.png"`.
    4. For a state that needs interaction (clicking, typing), use the session's browser tool if one exists, and describe what you saw.
    5. List every screenshot under "Screenshots": the file, what it shows, and which AC it demonstrates.
-   6. Kill the preview process with the PID recorded in `$RUN_DIR/preview.pid`, on every path out of this step.
+   6. Kill the preview process group with the PID recorded in `$RUN_DIR/preview.pid`: `kill -- -"$(cat "$RUN_DIR/preview.pid")"`, so vite dies along with npm, on every path out of this step.
    7. If `screenshot` fails for any reason, write "Visual check needed: screenshot failed — <the error>" and carry on.
 5. **If yes and there's no `preview`:** write "Visual check needed: no preview command configured." **If no:** write "Not applicable."
 6. Under "Departures from spec", list every place the implementation differs from spec.md and why, or write "None."

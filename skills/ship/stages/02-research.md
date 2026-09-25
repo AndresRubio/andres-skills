@@ -9,7 +9,7 @@ WT, REPO, NUMBER, KEY, `$RUN_DIR/issue.json`.
 ## Steps
 
 1. Open pipeline PRs and the files they touch, keeping only branches under `claude/`: `gh pr list --repo "$REPO" --state open --limit 100 --json number,headRefName,files --jq '[.[] | select(.headRefName | startswith("claude/"))]' > "$RUN_DIR/open-prs.json"`
-2. Use mattpocock-skills:research on model sonnet, and wait for it to finish before stage 3. Give it:
+2. Dispatch a foreground subagent on model sonnet that follows mattpocock-skills:research's method, and wait for it before stage 3. Give it:
    - The question: "What in this repository does issue #<NUMBER> touch, and what would a change satisfying it involve?" Ask for these sections:
      - **Relevant code:** modules, files and functions, with `path:line` citations.
      - **Existing tests and seams:** which tests cover it, and where a new test would go.

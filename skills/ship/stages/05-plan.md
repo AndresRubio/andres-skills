@@ -17,7 +17,7 @@ Turn the spec into small, test-first tasks.
 3. If TASKS > 8, the issue is too big after all (see the mode sections).
 4. Tick stage 5. Commit and push:
    `git add docs/pipeline/<KEY> && git commit -m "docs(pipeline): plan for #<NUMBER>" -m "<trailer>"`
-   `git push`
+   `git push origin "$BRANCH"`
 
 ## Outputs
 
