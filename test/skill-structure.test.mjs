@@ -92,6 +92,10 @@ test('SKILL.md carries the ten hard rules and the stop procedure', () => {
 
 test('SKILL.md keeps variables in vars.sh', () => {
   const text = read('SKILL.md');
-  assert.match(text, /vars\.sh/);
   assert.match(text, /\. '<RUN_DIR>\/vars\.sh' &&/);
+  assert.match(text, /printf "set -u\\n/);
+  assert.match(text, /'\\''/);
+  const wt = text.match(/`[^`]*worktree-remove-if-empty[^`]*`/);
+  assert.ok(wt, 'worktree-remove-if-empty command not found');
+  assert.match(wt[0], /^`\. '<RUN_DIR>\/vars\.sh' && node "\$PIPELINE" worktree-remove-if-empty/);
 });
