@@ -2,7 +2,7 @@
 
 Every operation uses `gh`, authenticated as the account running this session. `REPO` is `owner/name` and `NUMBER` is the issue number. If any command here fails, stop (hard rule 7).
 
-In the commands below, `<name>` is a placeholder: write the literal value in its place. `$NAME` variables come from the run's `vars.sh` (see SKILL.md).
+In the commands below, `<name>` is a placeholder: write the literal value in its place. `$NAME` variables come from the run's `vars.sh` (see SKILL.md). Free text — titles and bodies — is never typed into a command: write it to a file under `$RUN_DIR` with the file-writing tool (not `echo`/heredoc), then pass `--body-file "<file>"` or `--title "$(cat "<file>")"`.
 
 ## read-issue
 
@@ -32,13 +32,13 @@ GitHub issues have no status field; the `claude-working` label shows the issue i
 
 ## create-issue
 
-Takes a title, a body file and optional labels.
+Takes a title file, a body file and optional labels.
 
-`gh issue create --repo "$REPO" --title "<title>" --body-file "<file>" [--label "<labels>"]` prints the new issue's URL. The last path segment is its number.
+`gh issue create --repo "$REPO" --title "$(cat "<title file>")" --body-file "<file>" [--label "<labels>"]` prints the new issue's URL. The last path segment is its number.
 
 ## create-sub-issue
 
-Takes the parent number, a title, a body file and labels.
+Takes the parent number, a title file, a body file and labels.
 
 1. Create the child with create-issue, and note its number as <child>.
 2. Link it in one command: `gh api -X POST "repos/$REPO/issues/<parent>/sub_issues" -F sub_issue_id="$(gh api "repos/$REPO/issues/<child>" --jq .id)"`

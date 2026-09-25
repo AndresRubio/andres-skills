@@ -12,8 +12,8 @@ KEY, BRANCH, BASE_REF, REPO_ROOT, `$RUN_DIR/config.json`.
    - Normally: `node "$PIPELINE" worktree --repo-root "$REPO_ROOT" --key "$KEY" --branch "$BRANCH" --base "$BASE_REF" > "$RUN_DIR/worktree.json"`
    - If the environment variable `CI` is `true` (a disposable CI checkout), add `--in-place`.
 
-   WT is its `path`. From here on, run every command inside WT (`cd "$WT"`).
-2. If `resumed` is true and `docs/pipeline/<KEY>/progress.md` exists in WT: restore the variables it records (keep its BASE_SHA, since the base may have moved), run steps 3 and 4 to rebuild the dependencies and `$RUN_DIR/checks.txt`, then jump to its first unticked stage. Stop reading this file.
+   WT is its `path`. From here on, the command prefix is `. '<RUN_DIR>/vars.sh' && cd "$WT" && ` (SKILL.md Setup step 2).
+2. If `resumed` is true and `docs/pipeline/<KEY>/progress.md` exists in WT: take only BASE_SHA and TASKS from its Run table (append them to vars.sh) — the base may have moved, so keep the recorded BASE_SHA rather than recomputing it — and rewrite the Run table's other rows with this run's values (KEY, NUMBER, REPO, REPO_ROOT, BRANCH, WT, BASE_REF, MODE, LANE all come from this run, not the old one: this differs from the same-run recovery in SKILL.md Setup step 2). Run steps 3 and 4 to rebuild the dependencies and `$RUN_DIR/checks.txt`, then jump to its first unticked stage. Stop reading this file.
 3. Install dependencies the way the repo does:
    - `package-lock.json` → `npm ci`
    - `pnpm-lock.yaml` → `pnpm install --frozen-lockfile`

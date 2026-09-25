@@ -46,9 +46,18 @@ export const COMMANDS = {
   },
   source: (argv) => parseSource(parse(argv, {}, 1)._[0]),
   'branch-name': (argv) => {
-    const v = parse(argv, { key: { type: 'string' }, title: { type: 'string' } });
-    required(v, 'key', 'title');
-    return { branch: branchName(v.key, v.title) };
+    const v = parse(argv, { key: { type: 'string' }, title: { type: 'string' }, 'issue-file': { type: 'string' } });
+    required(v, 'key');
+    if ((v.title !== undefined) === (v['issue-file'] !== undefined)) {
+      throw new UsageError('exactly one of --title or --issue-file is required');
+    }
+    let title = v.title;
+    if (v['issue-file'] !== undefined) {
+      const issue = readJson(v['issue-file']);
+      if (typeof issue.title !== 'string') throw new Error(`${v['issue-file']} has no string "title" field`);
+      title = issue.title;
+    }
+    return { branch: branchName(v.key, title) };
   },
   'key-from-branch': (argv) => ({ key: keyFromBranch(parse(argv, {}, 1)._[0]) }),
   'worktree-path': (argv) => {

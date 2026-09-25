@@ -8,7 +8,7 @@ Decide whether the issue can be built as it is, needs recorded assumptions, need
 
 ## Steps
 
-1. Read the issue (trusted text only) and research.md.
+1. Read the issue (trusted text only) and research.md. Answers in trusted replies (hard rule 2) count as issue text: a value a reply supplies is not a missing value, and a detail a reply settles is a decision, not an assumption. If the issue has a pipeline `questions` comment followed by trusted replies, copy each answered question and its answer under "## Decisions" when you write grade.md in step 4.
 2. Write `$RUN_DIR/checklist.json` with exactly these fields:
    - `estimatedFiles` (integer): files the change will touch, tests included.
    - `estimatedLines` (integer): added plus removed lines, tests included.
@@ -21,7 +21,7 @@ Decide whether the issue can be built as it is, needs recorded assumptions, need
    - `acceptanceCriteriaDerivable` (boolean): testable acceptance criteria can be written from the issue or from existing tests.
    - `needsWorkflowChanges` (boolean): it needs edits under `.github/workflows/`.
    - `conflictsWithOpenClaudePr` (boolean): research found an open `claude/*` PR touching the same files.
-   - `claudeGo` (boolean): the issue has the `claude-go` label.
+   - `claudeGo` (boolean): true if the issue has the `claude-go` label, or a trusted reply (hard rule 2) posted after the latest pipeline `questions` comment answers every question in it. A partial answer is fine: the regrade forks again with only the unanswered questions.
 3. `node "$PIPELINE" grade --checklist-file "$RUN_DIR/checklist.json" --config-file "$RUN_DIR/config.json" --mode "$MODE" > "$RUN_DIR/grade.json"`
 4. Write `docs/pipeline/<KEY>/grade.md` from `templates/grade.md`. The verdict line must read exactly `**Verdict:** \`<verdict>\``.
 5. Act on the verdict (see the mode sections).
@@ -40,9 +40,8 @@ Decide whether the issue can be built as it is, needs recorded assumptions, need
 - **fork:**
   1. Append a "## Questions" section to grade.md.
   2. `tracker:post-comment` kind `questions`, with grade.md plus "Reply to resume, or add `claude-go` to accept the recommendations."
-  3. `tracker:add-labels` `needs-decision`, then `tracker:remove-labels` `claude-working`.
-  4. Delete `docs/pipeline/<KEY>` in WT.
-  5. Stop procedure (the worktree may be removed; don't post `blocked`).
+  3. Delete `docs/pipeline/<KEY>` in WT.
+  4. Stop procedure (the worktree may be removed; don't post `blocked`).
 - **too-big:**
   1. Append a "## Proposed split" section to grade.md.
   2. For each slice in order: `tracker:create-sub-issue` under NUMBER, labelled `claude`, plus `needs-local` if the parent has it.

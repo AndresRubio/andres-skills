@@ -1,7 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { slugify, branchName, keyFromBranch, worktreePath } from '../skills/ship/scripts/lib/naming.mjs';
 import { runCli } from './helpers/cli.mjs';
+import { tempDir } from './helpers/git.mjs';
 
 test('slugify strips accents and punctuation', () => {
   assert.equal(slugify('Ataques del Goblin Fanático: 1D6!'), 'ataques-del-goblin-fanatico-1d6');
@@ -36,4 +39,32 @@ test('CLI branch-name, key-from-branch and worktree-path', () => {
   const r = runCli(['worktree-path', '--repo-root', '/x/sandbox', '--key', '5'], { env: { CLAUDE_PIPELINE_HOME: '/tmp/cph' } });
   assert.deepEqual(r.json(), { path: '/tmp/cph/worktrees/sandbox/5' });
   assert.equal(runCli(['branch-name', '--key', '5']).code, 2);
+});
+
+test('CLI branch-name --issue-file reads the title from JSON, keeping untrusted text out of the shell', () => {
+  const dir = tempDir();
+  const issueFile = path.join(dir, 'issue.json');
+  const title = 'Fix `npm test` flake and $(rm -rf /)';
+  writeFileSync(issueFile, JSON.stringify({ title }));
+  const r = runCli(['branch-name', '--key', '5', '--issue-file', issueFile]);
+  assert.deepEqual(r.json(), { branch: branchName('5', title) });
+});
+
+test('CLI branch-name requires exactly one of --title / --issue-file', () => {
+  const dir = tempDir();
+  const issueFile = path.join(dir, 'issue.json');
+  writeFileSync(issueFile, JSON.stringify({ title: 'x' }));
+  assert.equal(runCli(['branch-name', '--key', '5']).code, 2, 'neither');
+  assert.equal(runCli(['branch-name', '--key', '5', '--title', 'x', '--issue-file', issueFile]).code, 2, 'both');
+});
+
+test('CLI branch-name --issue-file is a domain error when the file is missing, unparsable, or has no string title', () => {
+  const dir = tempDir();
+  assert.equal(runCli(['branch-name', '--key', '5', '--issue-file', path.join(dir, 'missing.json')]).code, 1, 'missing file');
+  const badJson = path.join(dir, 'bad.json');
+  writeFileSync(badJson, 'not json');
+  assert.equal(runCli(['branch-name', '--key', '5', '--issue-file', badJson]).code, 1, 'unparsable');
+  const noTitle = path.join(dir, 'no-title.json');
+  writeFileSync(noTitle, JSON.stringify({ notTitle: 'x' }));
+  assert.equal(runCli(['branch-name', '--key', '5', '--issue-file', noTitle]).code, 1, 'no string title');
 });
