@@ -45,7 +45,9 @@ export function isolateInPlace({ repoRoot, branch, base }) {
 
 export function removeWorktreeIfEmpty({ repoRoot, path: wt, branch, base }) {
   if (path.resolve(wt) === path.resolve(repoRoot)) return { removed: false, reason: 'in-place checkout' };
-  const ahead = Number(git(wt, ['rev-list', '--count', `${base}..HEAD`]).trim());
+  const current = git(wt, ['branch', '--show-current']).trim();
+  if (current !== branch) return { removed: false, reason: `worktree is on "${current || 'detached HEAD'}", not ${branch}` };
+  const ahead = Number(git(wt, ['rev-list', '--count', `${base}..refs/heads/${branch}`]).trim());
   if (ahead > 0) return { removed: false, reason: `${ahead} commit(s) on ${branch}` };
   const dirty = git(wt, ['status', '--porcelain', '--', '.', ':(exclude)docs/pipeline']).trim();
   if (dirty) return { removed: false, reason: 'uncommitted changes outside docs/pipeline' };

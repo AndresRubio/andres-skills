@@ -74,6 +74,34 @@ test('removeWorktreeIfEmpty keeps commits and other uncommitted work', () => {
   assert.match(removeWorktreeIfEmpty(args).reason, /1 commit/);
 });
 
+test('removeWorktreeIfEmpty refuses to delete a branch the worktree is not on', () => {
+  const { root, args } = setup();
+  createWorktree(args);
+  const other = path.join(tempDir('cph-'), 'worktrees', 'work', '6');
+  createWorktree({ repoRoot: root, path: other, branch: 'claude/6-y', base: 'origin/main' });
+  writeFiles(other, { 'x.txt': 'x\n' });
+  git(other, ['add', '-A']);
+  git(other, ['commit', '-m', 'work on 6']);
+  git(root, ['worktree', 'remove', other]);
+  const r = removeWorktreeIfEmpty({ ...args, branch: 'claude/6-y' });
+  assert.equal(r.removed, false);
+  assert.match(r.reason, /claude\/5-x/);
+  assert.notEqual(git(root, ['branch', '--list', 'claude/6-y']).trim(), '');
+});
+
+test('removeWorktreeIfEmpty refuses when the worktree HEAD is detached', () => {
+  const { args } = setup();
+  createWorktree(args);
+  writeFiles(args.path, { 'a.txt': 'x\n' });
+  git(args.path, ['add', '-A']);
+  git(args.path, ['commit', '-m', 'work']);
+  git(args.path, ['switch', '--detach', 'origin/main']);
+  const r = removeWorktreeIfEmpty(args);
+  assert.equal(r.removed, false);
+  assert.match(r.reason, /detached HEAD/);
+  assert.doesNotThrow(() => git(args.repoRoot, ['rev-parse', '--verify', '--quiet', 'refs/heads/claude/5-x']));
+});
+
 test('isolateInPlace switches the checkout itself', () => {
   const { root } = setup();
   const r = isolateInPlace({ repoRoot: root, branch: 'claude/7-z', base: 'origin/main' });
