@@ -116,9 +116,9 @@ export const COMMANDS = {
     required(v, 'base');
     return diffSize(v.cwd ?? process.cwd(), v.base);
   },
-  screenshot: (argv) => {
+  screenshot: async (argv) => {
     const v = parse(argv, { url: { type: 'string' }, out: { type: 'string' }, width: { type: 'string' }, height: { type: 'string' } });
     required(v, 'url', 'out');
-    return takeScreenshot(v.url, v.out, { width: Number(v.width ?? 1280), height: Number(v.height ?? 800) });
+    return await takeScreenshot(v.url, v.out, { width: Number(v.width ?? 1280), height: Number(v.height ?? 800) });
   },
 };
