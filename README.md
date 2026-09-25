@@ -17,6 +17,8 @@ claude --plugin-dir /path/to/claude-pipeline
 
 Then, in the target repo: `/claude-pipeline:ship #12` (interactive) or `/claude-pipeline:ship #12 --mode auto`.
 
+Q10: alias probe inconclusive. `claude -p "/ship" --plugin-dir "$(pwd)" --max-budget-usd 1 --output-format json` returned an auth error (`"result":"Not logged in · Please run /login"`), not a ship-skill response or an unknown-command message, so the `/ship` alias itself is unverified. Use `/claude-pipeline:ship` until this is re-probed with an authenticated `claude` CLI.
+
 ## Develop
 
 ```bash

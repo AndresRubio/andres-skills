@@ -72,3 +72,26 @@ test('the adapter links sub-issues and blockers in single commands', () => {
   assert.doesNotMatch(text, /CHILD_ID=/);
   assert.doesNotMatch(text, /BLOCKER_ID=/);
 });
+
+test('SKILL.md is a model-invocable skill named ship', () => {
+  const text = read('SKILL.md');
+  const front = text.match(/^---\n([\s\S]*?)\n---\n/);
+  assert.ok(front, 'SKILL.md needs YAML frontmatter');
+  assert.match(front[1], /^name: ship$/m);
+  assert.match(front[1], /^description: .{40,}$/m);
+  assert.doesNotMatch(front[1], /disable-model-invocation/);
+});
+
+test('SKILL.md carries the ten hard rules and the stop procedure', () => {
+  const text = read('SKILL.md');
+  const rules = text.split('## Hard rules')[1]?.split('\n## ')[0] ?? '';
+  for (let n = 1; n <= 10; n += 1) assert.match(rules, new RegExp(`^${n}\\. \\*\\*`, 'm'), `hard rule ${n} missing`);
+  assert.ok(headings(text).includes('Stop procedure'));
+  assert.ok(headings(text).includes('Model policy'));
+});
+
+test('SKILL.md keeps variables in vars.sh', () => {
+  const text = read('SKILL.md');
+  assert.match(text, /vars\.sh/);
+  assert.match(text, /\. '<RUN_DIR>\/vars\.sh' &&/);
+});
