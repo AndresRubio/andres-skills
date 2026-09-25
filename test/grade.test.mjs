@@ -49,6 +49,12 @@ test('too-big by files, lines, tasks or subsystems, and it wins over fork', () =
   assert.equal(grade({ estimatedFiles: 7, needsWorkflowChanges: true }).verdict, 'fork');
 });
 
+test('missing values fork before the size check, even when also too-big', () => {
+  const r = grade({ estimatedFiles: 7, missingValues: ['the new price'] });
+  assert.equal(r.verdict, 'fork');
+  assert.match(r.reasons[0], /missing value: the new price/);
+});
+
 test('invalid checklists are rejected', () => {
   const { claudeGo, ...missing } = base();
   assert.throws(() => gradeVerdict(missing, LIMITS), /"claudeGo" must be boolean/);

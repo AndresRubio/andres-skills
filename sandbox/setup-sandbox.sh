@@ -36,6 +36,7 @@ label claude-fix     b60205 "Pipeline fix run requested"
 
 map='{}'
 body=$(mktemp)
+trap 'rm -f "$body"' EXIT
 for f in "$here"/issues/*.md; do
   title=$(sed -n '1s/^title: //p' "$f")
   labels=$(sed -n '2s/^labels: //p' "$f")
@@ -43,7 +44,7 @@ for f in "$here"/issues/*.md; do
   url=$(gh issue create --title "$title" --body-file "$body" --label "$labels")
   number=${url##*/}
   map=$(node -e 'const m = JSON.parse(process.argv[1]); m[process.argv[2]] = Number(process.argv[3]); console.log(JSON.stringify(m, null, 2))' "$map" "$(basename "$f")" "$number")
+  printf '%s\n' "$map" > .pipeline-fixtures.json
   echo "created #$number  $title"
 done
-printf '%s\n' "$map" > .pipeline-fixtures.json
 echo "fixture map: $dest/.pipeline-fixtures.json"

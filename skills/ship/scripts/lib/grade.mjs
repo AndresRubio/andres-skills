@@ -38,13 +38,13 @@ export function gradeVerdict(checklist, { maxPrSize, mode }) {
   if (mode === 'auto' && c.needsWorkflowChanges) {
     return { verdict: 'fork', reasons: ['needs .github/workflows changes, which automatic lanes may not make'] };
   }
+  if (c.missingValues.length) return { verdict: 'fork', reasons: c.missingValues.map((v) => `missing value: ${v}`) };
   const big = [];
   if (c.estimatedFiles > maxPrSize.files) big.push(`estimated ${c.estimatedFiles} files > limit ${maxPrSize.files}`);
   if (c.estimatedLines > maxPrSize.lines) big.push(`estimated ${c.estimatedLines} lines > limit ${maxPrSize.lines}`);
   if (c.estimatedTasks > MAX_PLAN_TASKS) big.push(`estimated ${c.estimatedTasks} plan tasks > limit ${MAX_PLAN_TASKS}`);
   if (c.independentSubsystems) big.push('spans independent subsystems that could ship separately');
   if (big.length) return { verdict: 'too-big', reasons: big };
-  if (c.missingValues.length) return { verdict: 'fork', reasons: c.missingValues.map((v) => `missing value: ${v}`) };
   if (!c.claudeGo) {
     const fork = [];
     if (c.changesUserVisibleBehaviourNotInIssue) fork.push('changes user-visible behaviour the issue does not describe');

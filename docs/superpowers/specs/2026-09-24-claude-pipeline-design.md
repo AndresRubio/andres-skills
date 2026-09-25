@@ -215,6 +215,8 @@ Every stage reads its inputs from files and writes its outputs to files under `d
 - **small gaps** if there are 1 to 3 assumptions and none of them triggers a fork.
 - **ready** otherwise.
 
+Missing values always fork first, before the size check: a change that isn't defined can't be sized or split. Otherwise too-big wins over fork, because each child issue is graded again.
+
 **On a fork:** post a `questions` comment with numbered questions, each with a recommended answer; add `needs-decision`; remove the lock; remove the worktree if nothing was committed.
 
 **On too-big:**

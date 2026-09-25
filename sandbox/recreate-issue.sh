@@ -12,7 +12,8 @@ cd "$sandbox"
 old=$(node -e 'console.log(require(process.argv[1])[process.argv[2]] ?? "")' "$PWD/.pipeline-fixtures.json" "$fixture")
 [ -n "$old" ] || { echo "no issue recorded for $fixture" >&2; exit 2; }
 
-for pr in $(gh pr list --state open --json number,headRefName --jq ".[] | select(.headRefName | startswith(\"claude/$old-\") or . == \"claude/$old\") | .number"); do
+prs=$(gh pr list --state open --limit 200 --json number,headRefName --jq ".[] | select(.headRefName | startswith(\"claude/$old-\") or . == \"claude/$old\") | .number")
+for pr in $prs; do
   gh pr close "$pr" --comment "Superseded: test issue recreated."
 done
 gh issue close "$old" --comment "Superseded: test issue recreated from $fixture." >/dev/null
@@ -21,6 +22,7 @@ f="$here/issues/$fixture"
 title=$(sed -n '1s/^title: //p' "$f")
 labels=$(sed -n '2s/^labels: //p' "$f")
 body=$(mktemp)
+trap 'rm -f "$body"' EXIT
 sed '1,3d' "$f" > "$body"
 url=$(gh issue create --title "$title" --body-file "$body" --label "$labels")
 number=${url##*/}
