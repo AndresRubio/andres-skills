@@ -9,7 +9,9 @@ Usage:
 - Records re-appended with an already-seen uuid are skipped (Claude Code sometimes rewrites history).
 - Harness-injected text (system reminders, command caveats, meta records) is dropped. Background
   task notifications are kept as NOTIFY lines, because they carry subagent reports.
-- Subagent calls (Agent/Task) show the full brief (up to --max-chars): vague briefs are evidence.
+- Subagent calls (Agent/Task) show the brief up to --max-chars (600 by default) plus its full length;
+  use --max-chars 0 to read briefs whole. Vague briefs are evidence.
+- --range limits the main file only; subagent timelines always print in full.
 - --signals prints heuristic candidates per dysfunction level first. They are leads to read, not findings.
 - --subagents also condenses <session-id>/subagents/*.jsonl next to the main file.
 - --max-chars 0 means no truncation.
@@ -304,7 +306,9 @@ LEVELS = {1: "1 trust", 2: "2 conflict", 3: "3 commitment", 4: "4 accountability
 def parse_range(r):
     if not r:
         return (0, float("inf"))
-    a, _, b = r.partition(":")
+    a, sep, b = r.partition(":")
+    if not sep or not (a or b) or not all(x.isdigit() for x in (a, b) if x):
+        raise ValueError(f"--range must look like START:END (e.g. 100:250), got {r!r}")
     return (int(a) if a else 0, int(b) if b else float("inf"))
 
 
@@ -315,11 +319,17 @@ def main():
     ap.add_argument("--signals", action="store_true", help="print heuristic signal candidates first")
     ap.add_argument("--thinking", action="store_true", help="include non-empty thinking blocks")
     ap.add_argument("--max-chars", type=int, default=600, help="truncate texts (0 = no limit)")
-    ap.add_argument("--range", default="", help="only render raw lines START:END of the main file")
+    ap.add_argument("--range", default="", help="only render raw lines START:END of the main file (subagents always print in full)")
     ap.add_argument("--out", default="", help="write to this file instead of stdout")
     a = ap.parse_args()
 
     main_path = Path(a.path).expanduser()
+    if not main_path.is_file():
+        ap.error(f"not a transcript file: {main_path}")
+    try:
+        rng = parse_range(a.range)
+    except ValueError as err:
+        ap.error(str(err))
     files = [("", main_path)]
     if a.subagents:
         sub_dir = main_path.with_suffix("") / "subagents"
@@ -355,7 +365,11 @@ def main():
     for idx, (label, p, events, _) in enumerate(parsed):
         if idx:
             out.write(f"\n\n## Subagent {p.stem}\n")
-        render(events, label, a.max_chars, a.thinking, parse_range(a.range) if idx == 0 else (0, float("inf")), out)
+        render(events, label, a.max_chars, a.thinking, rng if idx == 0 else (0, float("inf")), out)
+    main_events = parsed[0][2]
+    if a.range and main_events and not any(rng[0] <= e["line"] <= rng[1] for e in main_events):
+        last = max(e["line"] for e in main_events)
+        print(f"warning: --range {a.range} matches no events (main file events span L1..L{last})", file=sys.stderr)
 
     if a.out:
         out.close()

@@ -60,11 +60,13 @@ This isn't a license to be contrarian, verbose or preachy. Healthy teams are fas
 - For larger changes, plan first, with plan mode or a `plan.md` the user can annotate. The plan is where disagreement is cheap; the diff is not.
 - If a premise looks doubtful, check it cheaply and say what you found before you build on it.
 
-**One objection, then commit.** Disagree once: the objection, the evidence, your recommendation. If the user overrules you, carry out their decision fully: no sandbagging, no half-measures, and no reopening it without new evidence. Add one line to the report: "Aplicado por tu decisión; consecuencia: …".
+**One objection, then commit.** Disagree once: the objection, the evidence, your recommendation. If the user overrules you, carry out their decision fully: no sandbagging, no half-measures, and no reopening it without new evidence. Add one line to the report: "Aplicado por tu decisión; consecuencia: …" (in English: "Applied per your decision; consequence: …").
+
+This is an adaptation, not Lencioni verbatim. He asks teams to mine for conflict until every view is on the table. Between an agent and the user who owns the decision, that becomes: put your whole objection on the table once, then commit.
 
 **While working:**
 - **Keep a deviation log** with every place you left the plan or spec and why. Add every error or reverted edit that changes what the user should trust. A silent fix leaves them trusting something they shouldn't.
-- **Corrected twice on the same thing?** Say you're going in circles and propose a reset: `/clear`, plus a better prompt that carries what you learned. Don't make a third attempt.
+- **Corrected twice on the same thing?** Say you're going in circles and offer a reset once: the user runs `/clear` with a better prompt that carries what you learned. If they'd rather continue, continue with a genuinely different approach, not a third variation of the same one.
 - **Blocked?** Say so and name what would unblock you. Don't change the scope quietly.
 - **If the user contradicts an agreed decision,** point it out once, neutrally.
 
@@ -72,7 +74,7 @@ This isn't a license to be contrarian, verbose or preachy. Healthy teams are fas
 - Show the evidence against the check: the command and its output.
 - Name what's unverified.
 - Lead with the user's outcome, then the gaps, then the deviation log.
-- If `verification-before-completion` is also active, run only the checkpoint below.
+- If `verification-before-completion` is also active, let it own the evidence step, and add only checkpoint questions 1, 2 and 5 below.
 
 **Checkpoint** (other skills can call it):
 1. Trust: is there a mistake, deviation or doubt the user doesn't know about?
@@ -93,11 +95,10 @@ This isn't a license to be contrarian, verbose or preachy. Healthy teams are fas
 2. **Cite raw line numbers** (`L123`) so every claim can be checked. Keep three things apart: what the transcript shows, what you infer, and what the transcript can't tell you, such as facts about the environment. The audit has to practice level 1 itself.
 3. **Walk the levels bottom-up.** Rate each one OK / RIESGO / FALLO, name one root, and say what worked.
 4. **Put each fix where it will actually hold.** "CLAUDE.md is advice; a hook is a rule." In order of strength:
-   1. A hook, for what must always happen
+   1. A hook, or the sandbox and permissions, for what must always or never happen at tool-call time
    2. A test or CI gate
-   3. Permissions or the sandbox
-   4. A skill, for knowledge needed only sometimes
-   5. One line in CLAUDE.md, only if Claude would get it wrong without it. Keep that file short.
+   3. A skill, for knowledge needed only sometimes
+   4. One line in CLAUDE.md, only if Claude would get it wrong without it. Keep that file short.
 
    Tie each fix to the moment in the session it would have changed.
 
@@ -106,7 +107,7 @@ Signal catalogue, rubric and template: `references/audit.md`.
 ## Mode 3: multi-agent team design
 
 - **Start from the check** that proves the whole result works. That check is the team's done-criterion.
-- **One owner per file**, and one git worktree per parallel worker.
+- **One owner per file**, and one git worktree per parallel worker. Subagent worktrees branch from the repository's default branch, not your current work, unless `worktree.baseRef` is `"head"`. Commit the base first and set that, or workers build on stale code.
 - **Every brief has** a goal, a done-check, out-of-scope, interfaces, and a report contract:
   - status: done / partial / blocked
   - evidence
@@ -114,6 +115,8 @@ Signal catalogue, rubric and template: `references/audit.md`.
   - deviations
   - disagreements with the brief
   - issues seen in teammates' areas
+  - changes outside owned files
+  - the base commit the work started from
 
   Say explicitly that "partial" with reasons is a good outcome and a false "done" is the worst one.
 - **Accountability is peer-first.** Use a fresh-context reviewer with a mandate to fail, and have consumers check the interfaces they depend on. The orchestrator re-runs the headline check as a backstop. Treat every report as a claim.

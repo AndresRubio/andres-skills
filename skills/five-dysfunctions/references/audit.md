@@ -12,18 +12,20 @@
 ## 1. Workflow with the script
 
 ```bash
-python3 <skill-dir>/scripts/condense_transcript.py <session.jsonl> --subagents --signals --out /tmp/timeline.md
+python3 <skill-dir>/scripts/condense_transcript.py <session.jsonl> --subagents --signals --out <file>
 ```
+
+Write `<file>` somewhere private, such as the session's scratchpad, not a shared `/tmp`: transcripts can contain secrets.
 
 - The header gives the size and the noise removed. That covers duplicate records re-appended to the file, harness messages dropped, background notifications, tool errors, and how many thinking blocks were empty.
 - **SIGNALS** lists heuristic candidates per level, each with a raw line number. Treat each one as a lead. Open the timeline around it, confirm or discard it, and never copy it into the report unchecked.
-- The **timeline** prefixes every event with its raw JSONL line (`L123`). Subagent briefs appear in full (up to `--max-chars`), because a vague brief is evidence of a commitment failure. For a very long session, use `--range START:END` to read one window at a time.
+- The **timeline** prefixes every event with its raw JSONL line (`L123`). Subagent briefs appear up to `--max-chars` (600 by default) with their full length; rerun with `--max-chars 0` to read them whole, because a vague brief is evidence of a commitment failure. For a very long session, use `--range START:END` to read the main timeline one window at a time; subagent timelines always print in full.
 - In real transcripts most thinking blocks are empty. Absence of visible doubt isn't evidence that there was none.
 
 ## 2. Evidence standard
 
 Every finding needs:
-- **Where:** `L123`, or `agent-x L45` for a subagent file.
+- **Where:** `L123`, or `agent-x:L45` for a subagent file.
 - **What it shows:** a short quote or the tool call.
 - **Claim type:**
   - *shown*: the transcript contains it
@@ -31,6 +33,8 @@ Every finding needs:
   - *unknown*: the transcript can't settle it. Environment facts, the state of the repo after the session and production behavior usually fall here.
 
 An audit that states inferences as facts commits the level-1 dysfunction it is meant to catch.
+
+Redact secrets (tokens, keys, passwords, connection strings) in anything you quote.
 
 ## 3. Signal catalogue
 
@@ -106,7 +110,7 @@ CLAUDE.md is advice; a hook is a rule. Pick the strongest mechanism that fits th
 | "Tests pass" claimed without running the suite | A `Stop` / `SubagentStop` hook, or a CI gate that runs the full suite; the report shows the command and its output |
 | Writes to a dangerous path (migrations, prod config) | A `PreToolUse` hook that blocks or asks |
 | Lint or format drift | A `PostToolUse` hook that lints after edits |
-| Shortcuts (`skip`, `--no-verify`, `--fake`) | A hook or CI check that rejects them; permissions that deny the flag |
+| Shortcuts (`skip`, `--no-verify`, `--fake`) | A `PreToolUse` hook that inspects the command, or a CI check, that rejects them. Permission deny rules on arguments are easy to get around: use them only as a backup |
 | Approval fatigue (the user approving without reading) | Pre-approve the safe tools, use the sandbox for the rest, and ask only for the risky ones |
 | Vague subagent briefs, unverified reports | A brief and report template (a skill or a project agent file), plus orchestrator re-verification |
 | Goal never measured | A done-check that *is* the measurement (a benchmark script, a timing command) agreed at kickoff |
@@ -114,7 +118,9 @@ CLAUDE.md is advice; a hook is a rule. Pick the strongest mechanism that fits th
 | Going in circles after corrections | `/clear`, plus a rewritten prompt that carries what was learned |
 | Something Claude would get wrong without being told | One line in CLAUDE.md |
 
-Tie every fix to the moment in the session it would have changed: "At L812 a Stop hook running `pytest -q` would have blocked the 'todos los tests pasan' claim."
+A `Stop` or `SubagentStop` hook runs after the response, so it can't stop a false claim from appearing. On exit code 2 it keeps Claude working until the claim is fixed. A gate script should read `stop_hook_active` from its input, which is true when Claude is already continuing because of a stop hook, so it can't block forever.
+
+Tie every fix to the moment in the session it would have changed: "At L812 a Stop hook running `pytest -q` would have kept Claude working until it corrected the 'todos los tests pasan' claim, before the user deployed."
 
 ## 6. Report template
 
@@ -150,4 +156,4 @@ Use the user's language (Spanish shown). The **first screen** (at most 250 words
 
 ## 7. Example finding
 
-> - **4 Responsabilidades: "todos los tests pasan" tras ejecutar un solo fichero** (L812, shown). La única ejecución de tests anterior (L790) es `pytest tests/test_writer.py`, y la suite completa falló en L455. Impacto: el usuario desplegó sobre una afirmación falsa. Raíz: nivel 3, porque "terminado" nunca se definió como un check. Arreglo: un hook `Stop` que ejecute `pytest -q`, y acordar al empezar "terminado = suite completa + benchmark < 2 min".
+> - **4 Responsabilidades: "todos los tests pasan" tras ejecutar un solo fichero** (L812, shown). La única ejecución de tests anterior (L790) es `pytest tests/test_writer.py`, y la suite completa falló en L455. Impacto: el usuario desplegó sobre una afirmación falsa. Raíz: nivel 3, porque "terminado" nunca se definió como un check. Arreglo: un hook `Stop` que ejecute `pytest -q` y obligue a corregir la afirmación antes de cerrar el turno, y acordar al empezar "terminado = suite completa + benchmark < 2 min".

@@ -1,6 +1,6 @@
 # andres-skills
 
-Personal [Claude Code skills](https://docs.claude.com/en/docs/claude-code/skills).
+Personal [Claude Code skills](https://code.claude.com/docs/en/skills).
 
 | Skill | What it does |
 |---|---|
@@ -9,7 +9,7 @@ Personal [Claude Code skills](https://docs.claude.com/en/docs/claude-code/skills
 ## Install
 
 ```bash
-git clone git@github.com:AndresRubio/andres-skills.git
+git clone https://github.com/AndresRubio/andres-skills.git
 mkdir -p ~/.claude/skills
 ln -s "$PWD/andres-skills/skills/five-dysfunctions" ~/.claude/skills/five-dysfunctions
 ```

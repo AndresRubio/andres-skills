@@ -60,6 +60,7 @@ This is trust by design: make the honest answer the easy answer.
 - Disagreements with the brief: …
 - Issues seen in teammates' areas: …
 - Changes outside my files: … (or "none")
+- Base commit: `git rev-parse HEAD` of the commit I started from
 ```
 
 Treat each report as a claim. An empty "not verified" or "deviations" field on non-trivial work is a reason to look harder, not reassurance. Read the disagreement and teammate-issue fields first: that is where buried conflict surfaces.
@@ -95,12 +96,15 @@ When workers, reviewers or proposers disagree:
 ## 7. Claude Code mechanics that make the structure hold
 
 Prompts are advice; mechanisms are rules. Prefer:
-- **One git worktree per parallel worker**, so two agents never edit the same files.
-- **Hooks:** `PreToolUse` to block writes outside a worker's files or to frozen tests; `PostToolUse` to lint after edits; `Stop` / `SubagentStop` to require the check before a report is accepted.
+- **One git worktree per parallel worker**, so two agents never edit the same files. Subagent worktrees branch from the repository's default branch unless `worktree.baseRef` is `"head"` in settings. Commit the base and set it, or create the worktrees yourself with `git worktree add` from the feature branch. Otherwise workers build on stale code and integration fails.
+- **Hooks:**
+  - `PreToolUse` to block writes outside a worker's files or to frozen tests. Inside a worktree, read the path from the hook input's `cwd`: `${CLAUDE_PROJECT_DIR}` stays at the main checkout.
+  - `PostToolUse` to lint after edits.
+  - `Stop` / `SubagentStop` to require the check before a report is accepted. They run after the response and, on exit code 2, keep the agent working. Check `stop_hook_active` so the gate can't block forever.
 - **A task list** the orchestrator updates, as visible, shared commitments.
 - **Plan first:** a `plan.md` the user annotates before any worker starts.
 
-Keep version-specific settings out of the design unless you verified them. Mark them "verify in phase 0" instead (see the verification budget in SKILL.md).
+Keep version-specific settings out of the design unless you verified them. Mark them "unverified" instead (see the verification budget in SKILL.md).
 
 ## 8. Anti-patterns and fixes
 
