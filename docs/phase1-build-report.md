@@ -88,4 +88,5 @@ Most of the problems below were in the plan's own text, not in how it was carrie
 - Declare the plugin's dependencies.
 - `maxParallel` versus "nothing merges" in Phase 1.
 - Trust for sub-issues created by the bot.
+- Modal Sandboxes as an optional GitHub-lane runner (spec D14, §6.2, Q11–Q12).
 - Cua (trycua/cua) as optional VM isolation for the local runner and for visual checks of desktop apps. Avoid its AGPL parts.

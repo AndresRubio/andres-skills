@@ -44,6 +44,7 @@ The pipeline is **generic**: nothing in the core is tied to a particular repo. E
 | D11 | Parallelism | Parallel issues per repo, capped by `maxParallel` (default 2); merges happen one at a time | User decision |
 | D12 | Delivery | Three phases, each with its own implementation plan (§11) | Adversarial review recommendation |
 | D13 | Identity | Local, manual and Routine runs act as AndresRubio; Actions runs as `claude[bot]`; every commit carries a `Co-Authored-By: Claude …` trailer | Global CLAUDE.md; review finding I9 |
+| D14 | Optional cloud sandbox runner | Modal Sandboxes as a second runner for the GitHub lane, chosen per repo in Phase 2: Actions for public repos (free, no infrastructure), Modal where egress control, private-repo run volume or a heavy custom image matter. Never for `needs-local` (§6.2) | User decision, 2026-09-28 |
 
 ## 3. What is reused
 
@@ -264,6 +265,7 @@ Every subagent dispatch names its model explicitly.
 |---|---|---|---|---|
 | Manual | 1 | You type `/ship …` | Whatever you pass | You, in a worktree outside the repo |
 | GitHub | 2 | `issues: labeled` (`claude`, `claude-go`); `issue_comment` on `needs-decision` issues; `pull_request: labeled claude-fix` (fix mode, skipped for PRs labelled `needs-local`) | One issue per run; one run per issue at a time | `claude[bot]` (Claude GitHub App) on `CLAUDE_CODE_OAUTH_TOKEN` |
+| GitHub via Modal (optional) | 2 | A GitHub webhook to a Modal web endpoint, plus a scheduled sweep as a backstop | Same as the GitHub lane: one issue per sandbox | The token the orchestrator mints (§6.2) |
 | Linear | 3 | Routine hourly during weekday working hours (exact cron set in Phase 3) | The oldest eligible issue, one per run | You (Routines act as your account) |
 | Local | 3 | Desktop scheduled task every 15 min, one per repo (Mac awake, app open) | `claude` + `needs-local` issues from the repo's tracker, and PRs labelled both `needs-local` and `claude-fix`; one per run | You, sandboxed |
 
@@ -289,6 +291,15 @@ An issue is eligible when all of these hold:
 - The job gets the minimum permissions it needs.
 - Can't reach the Linear connector (the subscription token doesn't carry claude.ai connectors). It doesn't need to.
 - Installed in every opted-in repo, including Linear-tracked ones, because it also handles fix runs for any `claude/*` PR, whichever lane opened it.
+
+**GitHub via Modal (optional runner, `runners/modal/`):**
+- A small Modal app. Its web endpoint receives the same GitHub events as `claude-ship.yml`, applies the same trusted-author guards, and starts one Sandbox per issue (or per `claude-fix` PR). A scheduled function re-checks eligibility as a backstop. A repo uses either this runner or `claude-ship.yml`, never both.
+- The image holds Node, `git`, `gh`, Chrome and the plugin at a pinned tag. It runs as a non-root user. Filesystem snapshots keep the target repo's dependencies warm.
+- The run: clone the repo, then `claude -p "/claude-pipeline:ship #N --mode auto"` with `CI=true` (stage 1 works in place) and `CLAUDE_PIPELINE_LANE=github`.
+- Isolation: gVisor. Egress is limited with `outbound_domain_allowlist` to the Anthropic API, GitHub and the package registry (§12, Q11). Inside that boundary the run may use `--dangerously-skip-permissions`, which Claude Code's docs endorse only inside a container or VM. The same deny rules as the Actions lane still apply as `--disallowedTools`.
+- The Sandbox `timeout` is shorter than `lockTtlHours` (for example 2.5 h against 3 h). A run must never outlive its lock, or a second runner could take the issue while the first is still working.
+- Marker run links point at the Sandbox in the Modal dashboard instead of `local`.
+- Cost: compute at Modal's Sandbox rates (about $0.29 for a 45-minute run on 2 cores and 4 GiB, as of 2026-09); Claude usage stays the main cost.
 
 **Linear (Routine `ship-linear`, one per repo):**
 - Only the Linear connector is attached.
@@ -395,6 +406,7 @@ flowchart TB
 - **Secrets:**
   - `CLAUDE_CODE_OAUTH_TOKEN` (a one-year subscription token) exists only in `claude-ship.yml` and `claude-review.yml`.
   - `PIPELINE_MERGE_TOKEN` exists only in `pipeline-merge.yml`.
+  - Modal runner: `CLAUDE_CODE_OAUTH_TOKEN` and the GitHub token are Modal Secrets passed to each Sandbox. Unlike Anthropic's cloud sessions, which keep the GitHub token outside the sandbox behind a proxy, the agent can read them. The orchestrator therefore mints a short-lived GitHub App installation token per run, scoped to the one repo with contents, issues and pull-request write (§12, Q12). If the app's bot is the author, its login is added to `PIPELINE_BOTS`.
   - Jobs get minimal permissions, turn caps and timeouts.
   - Never set `allowed_non_write_users`.
 - **Plugin supply chain:** consumers pin `claude-pipeline` and its dependencies to tags or commits, never HEAD.
@@ -485,7 +497,7 @@ flowchart LR
 | Phase | Builds | Exit criteria |
 |---|---|---|
 | 1 | Plugin skeleton, `ship` with all stages and both modes, GitHub tracker adapter, manual lane | Test issues 1, 2 and 5 pass interactively. `--mode auto` gives the right outcome with every file in place for test issues 1–4 (up to an open PR) |
-| 2 | The four workflows, `pipeline-setup`, merge token, fix mode | Test issues 1–9 pass end to end on **both** sandboxes. The gate fails safe when `claude-review` is broken on purpose |
+| 2 | The four workflows, `pipeline-setup`, merge token, fix mode; optionally the Modal runner (D14) | Test issues 1–9 pass end to end on **both** sandboxes. The gate fails safe when `claude-review` is broken on purpose. If the Modal runner is built: test issues 1–4 and 7 pass through it on the private sandbox, and a run killed at its timeout leaves a lock that goes stale |
 | 3 | Linear adapter, Routine lane, local runner, stale-lock sweep, reminders | Q1 verified first. Linear lane passes 1–4 and 8 against a sandbox Linear team or project; the local runner passes a `needs-local` test issue |
 
 **Real repos, in this order:**
@@ -508,6 +520,8 @@ Each phase gets its own implementation plan. The next step after this spec is th
 | Q8 | Can a sandbox Linear team or project be created on the current Linear plan? Does the marker line render in Linear comments? | 3 | A sandbox project inside the existing team; plain-text marker |
 | Q9 | Desktop task + sandbox + auto mode together: are any tools still stalling? | 3 | Adjust the task's saved "always allow" rules |
 | Q10 | Can `/ship` be used as a short alias for `/claude-pipeline:ship`? | 1 | Use the full name |
+| Q11 | Does Modal's `outbound_domain_allowlist` (beta) cover everything a run needs: Anthropic API and OAuth refresh, GitHub, the package registry, Chrome? | 2 (if D14) | `outbound_cidr_allowlist`, or no allowlist plus a narrowly scoped GitHub token |
+| Q12 | Modal runner's GitHub token: a GitHub App installation token minted per run, or a fine-grained personal token? | 2 (if D14) | Fine-grained token scoped to the one repo |
 
 ## 13. Appendix: review of installed capabilities
 
@@ -546,6 +560,8 @@ Each phase gets its own implementation plan. The next step after this spec is th
 | Desktop scheduled tasks | Local lane. Every minute at most; needs the Mac awake |
 | Linear coding sessions | Alternative for the Linear lane (Claude Code in Linear's sandbox; uses AI credits); re-evaluate in Phase 3 |
 | Workflow tool / `claude -p` | Possible future orchestration engine; not used in v1 |
+| Modal Sandboxes | Optional GitHub-lane runner (D14). gVisor isolation, egress allowlists, custom images and snapshots, runs up to 24 h, paid per second. Not for `needs-local` (the files live on your Mac) |
+| Cua (trycua/cua) | Not adopted. Lume macOS/Linux VMs and a desktop driver; a candidate later for VM isolation of the local runner or visual checks of desktop apps. Avoid its AGPL components |
 
 ### Sources
 
@@ -553,3 +569,6 @@ Each phase gets its own implementation plan. The next step after this spec is th
 - claude-code-action: https://github.com/anthropics/claude-code-action (`docs/usage.md`, `docs/security.md`, `action.yml`)
 - GitHub docs: protected branches, auto-merge and repository rules availability; "Triggering a workflow" (GITHUB_TOKEN events); "About status checks" (skipped jobs)
 - Linear docs: https://linear.app/docs/github, https://linear.app/docs/coding-sessions, https://linear.app/docs/mcp
+- Modal docs: https://modal.com/docs/guide/sandbox, https://modal.com/docs/guide/sandbox-networking, https://modal.com/docs/guide/sandbox-snapshots, https://modal.com/pricing, https://modal.com/docs/examples/sandbox_agent
+- Claude Code sandbox environments: https://code.claude.com/docs/en/sandbox-environments
+- Cua: https://github.com/trycua/cua
