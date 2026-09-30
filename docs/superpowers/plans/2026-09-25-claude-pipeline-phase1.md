@@ -4221,6 +4221,16 @@ Anything not denied is allowed.
 - **Fewer false positives.** The catch-all counts `git` and `push` only as standalone shell words, case-insensitive. M3 needs `graphql` in the command, and M4–M6 match only `repos/…` endpoint paths. The gh segment rule also catches `gh pr -R o/r merge`.
 - **Narrower activation.** Only Setup's `runs/run-XXXXXX` template, or a path under `runs/run-<id>/vars.sh`, switches the guard on.
 - **Stage text.** Stage 9 records the SHA in a command of its own. SKILL.md Setup and stage 6 keep pushes in commands of their own.
+- **Rounds 3–5** (`task-16a-fix-3.md` to `fix-5.md`) close the rest of the single-command indirection family. All of the following are `forbidden`:
+  - a git or gh subcommand hidden in a variable or glob (`g=push; git $g …`);
+  - `eval`;
+  - `-c`/`--config-env` on the git command line, except an allowlist: `core.quotepath`, `color.*`, `user.name`, `user.email`, `advice.*` and `init.defaultBranch`;
+  - any environment assignment before git or gh;
+  - any `GIT_*`, `GH_*`, `HOME`, `XDG_CONFIG_*`, `PATH` or askpass assignment anywhere in the command;
+  - git push plumbing (`send-pack`, `http-push`, `remote-*`);
+  - `gh repo sync`, `edit`, `delete`, `rename` and `archive`.
+
+  The catch-all also reads dequoted words, so `pu"sh"` counts as push. Two false positives are accepted: `git log --grep=push` and `echo HOME=x`. Five fix rounds are done. The final fable re-review found no clean single-command push or merge, and judged the guard fit for Phase 1 as a seatbelt.
 
 ---
 
@@ -4350,7 +4360,7 @@ Note for the automation, from the maintainers: our release checklist needs a rea
 - [ ] **Step 1: Ask the user for permission**
 
 This publishes to GitHub. Ask exactly:
-"Ready to create two GitHub repos under AndresRubio: `pipeline-sandbox` (public) and `pipeline-sandbox-private` (private). Each gets the sandbox app, 7 labels and 11 test issues; the private one also gets a random marker file, CANARY.md, for the leak test. Go ahead?"
+"Ready to create two GitHub repos under AndresRubio: `pipeline-sandbox` (public) and `pipeline-sandbox-private` (private). Each gets the sandbox app, 7 labels and 11 test issues; the private one also gets a random marker file, CANARY.md, for the leak test. The public one also gets branch protection on `main` (no direct pushes, no force-pushes, enforced for admins), which is free on public repos and is what backs the run guard. Go ahead?"
 
 Continue only on an explicit yes.
 
@@ -4387,6 +4397,19 @@ Expected, for each repo:
 - A config JSON with `"ref":"origin/main"`.
 
 And finally `public has no canary`.
+
+- [ ] **Step 4b: Protect `main` on the public sandbox**
+
+Run:
+```bash
+gh api -X PUT repos/AndresRubio/pipeline-sandbox/branches/main/protection --input - <<'JSON'
+{"required_status_checks": null, "enforce_admins": true, "required_pull_request_reviews": null, "restrictions": null, "allow_force_pushes": false, "allow_deletions": false}
+JSON
+gh api repos/AndresRubio/pipeline-sandbox/branches/main/protection --jq '{admins: .enforce_admins.enabled, force: .allow_force_pushes.enabled}'
+```
+Expected: `{"admins":true,"force":false}`. On GitHub Free, a private repo has no branch protection. There, the scoped token (Task 18) is the only boundary.
+
+This blocks force-pushes and deletions of `main`, including by the owner. A plain push to `main` is still possible for the owner, because a PR requirement would also block the sandbox's own setup pushes. Phase 2 adds the required checks (§7.1).
 
 - [ ] **Step 5: Check the sandbox CI passed**
 

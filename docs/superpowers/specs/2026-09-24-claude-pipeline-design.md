@@ -403,10 +403,19 @@ flowchart TB
 ```
 
 **Run guard** (`hooks/guard.mjs`, Phase 1). A plugin `PreToolUse` hook on Bash. It switches on for a session once that session runs a pipeline command (anything that sources a run's `vars.sh`), or always when `CLAUDE_PIPELINE_GUARD=1`, which runners set. `CLAUDE_PIPELINE_GUARD=0` switches it off. While it is on:
-- it allows only `git push [-u] origin "$BRANCH"`, run as its own command after sourcing vars.sh, where vars.sh sets BRANCH to a `claude/*` branch, or a push naming a literal `claude/*` branch;
-- it blocks PR merges and ref or file writes through the GitHub API.
+- It allows only `git push [-u] origin "$BRANCH"`, where vars.sh sets BRANCH to a `claude/*` branch, or a push that names a literal `claude/*` branch. The push's command may contain nothing else except the vars.sh source, `cd`, `git add`, `git commit` and `git status`.
+- It blocks:
+  - PR merges;
+  - ref or file writes through the GitHub API;
+  - changes to remotes or push-related git config;
+  - git or gh subcommands hidden in variables;
+  - config on the git command line (outside a small allowlist);
+  - environment variables that redirect git or gh;
+  - git's push plumbing;
+  - `gh repo sync` and `gh repo edit`.
+- A denial that is only about the command's shape, after the push, tells the agent to split the command. Every other denial tells it to follow the stop procedure.
 
-It is a seatbelt, not a boundary: a script written to a file and then run gets past it. The boundaries are a token that reaches only the repo being worked on (§7.3) and, on public repos, branch protection.
+It is a seatbelt, not a boundary. Commands written to a file and then run get past it, and so do commands assembled from strings inside an interpreter. The boundaries are a token that reaches only the repo being worked on (§7.3) and, on public repos, branch protection. The public sandbox gets branch protection in Phase 1. Five rounds of adversarial review hardened the guard (see `docs/phase1-build-report.md`).
 
 ### 7.3 Trust and secrets
 
