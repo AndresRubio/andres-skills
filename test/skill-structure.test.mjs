@@ -311,6 +311,16 @@ test('no backticked span under skills/ship combines a git push with a command su
   }
 });
 
+test('Setup says what a pushing command may contain, and stage 6 keeps the ledger copy out of it (16a round 2)', () => {
+  const setup = read('SKILL.md').match(/^2\. \*\*Shell variables.*$/m)?.[0] ?? '';
+  assert.match(setup, /A command that pushes contains only that prefix, `git add`, `git commit`, `git status` and the push itself/);
+  assert.match(setup, /do anything else \(copying files, recording a SHA\) in a separate command/);
+
+  const build = read('stages/06-build.md');
+  assert.match(build, /under "## SDD ledger" \(the file-writing tool, or a command of its own\), then commit and push in a separate command: `git add [^`]* && git commit [^`]* && git push origin "\$BRANCH"`/);
+  assert.doesNotMatch(build, /"## SDD ledger", commit, and push/);
+});
+
 test('stage 9 pushes as its own command and records the SHA in a separate one (16a fix)', () => {
   const step1 = read('stages/09-finish.md').match(/^1\. .*$/m)?.[0] ?? '';
   assert.match(step1, /push with `git push -u origin "\$BRANCH"` as its own command/);

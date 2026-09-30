@@ -11,8 +11,12 @@ import path from 'node:path';
 // file write in an earlier call. The boundaries are a token scoped to the repo and branch
 // protection.
 
+// A denial is one of two kinds. 'reshape': the push is fine and only what surrounds it is wrong,
+// so the agent can split the command and carry on. 'forbidden': anything else (a bad push, a
+// merge, a remote or config change, a command it can't read, anything that could change what
+// is pushed), so the agent should stop.
 const ALLOW = { allow: true };
-const deny = (reason) => ({ allow: false, reason });
+const deny = (reason, kind = 'forbidden') => ({ allow: false, reason, kind });
 
 // --- activation ---
 
@@ -336,7 +340,9 @@ function redirectProblem(seg) {
 
 // Checks one push segment against the one allowed shape:
 //   git push [-u|--set-upstream] origin <claude/... | $BRANCH>
-// Returns { reason } when it's denied, or { usesBranchVar } when it's allowed.
+// Returns { reason } when it's denied, or { usesBranchVar } when it's allowed. A redirection on
+// the push itself is the one problem that is only about shape: it returns { reason, reshape,
+// usesBranchVar } so the caller can still look at the rest of the command.
 function inspectPush(seg, parts) {
   if (parts.assigns > 0) return { reason: 'environment assignments before git' };
   if (!isGit(parts.words[0])) return { reason: "a command the guard can't identify as git, followed by push" };
@@ -356,7 +362,7 @@ function inspectPush(seg, parts) {
   const form = refForm(rest[1]);
   if (!form) return { reason: refProblem(rest[1]) };
   const redirect = redirectProblem(seg);
-  if (redirect) return { reason: redirect };
+  if (redirect) return { reason: redirect, reshape: true, usesBranchVar: form === 'var' };
   return { usesBranchVar: form === 'var' };
 }
 
@@ -395,6 +401,16 @@ function gitSettingsProblem(segments) {
   return null;
 }
 
+// The same two rules on raw text, for a command that can't be tokenized (a heredoc, say).
+const RAW_REMOTE_WRITE = /\bgit\s+remote\s+(add|set-url|rename|remove|rm|set-branches)\b/i;
+const RAW_CONFIG_WRITE = /\bgit\s+config\b[^\n]*\b((remote|url|push|branch|alias|include|includeif|credential|http)\.|core\.(hookspath|sshcommand)\b)/i;
+
+function rawSettingsProblem(text) {
+  if (RAW_REMOTE_WRITE.test(text)) return 'changing git remotes';
+  if (RAW_CONFIG_WRITE.test(text)) return 'changing git config that controls pushes';
+  return null;
+}
+
 // --- the whitelist for a command that pushes ---
 
 const AROUND = 'a push must run with only the vars.sh source, cd, git add, git commit and git status around it';
@@ -422,14 +438,14 @@ function commitProblem(args) {
   return null;
 }
 
-// What a segment of a pushing command is: 'source' (first segment only), 'cd', 'git' (add,
+// What a segment of a pushing command is: 'source' (exactly `. <path>`), 'cd', 'git' (add,
 // commit or status), 'push', or 'pipe' (a tail or head right after a push), else null.
-function segmentKind(parts, index, joiner, previous) {
+function segmentKind(parts, joiner, previous) {
   const { words } = parts;
   if (joiner === '|') return previous === 'push' && isTailOrHead(parts) ? 'pipe' : null;
   if (words.length === 0) return null;
   if (isPushSegment(parts)) return 'push';
-  if (index === 0 && SOURCE_WORDS.has(words[0].text) && words.length === 2) return 'source';
+  if (SOURCE_WORDS.has(words[0].text) && words.length === 2) return 'source';
   if (words[0].text === 'cd' && words.length === 2) return 'cd';
   if (isGit(words[0]) && words.length >= 2 && !words[1].expands && GIT_AROUND.has(words[1].text)) return 'git';
   return null;
@@ -476,43 +492,70 @@ function sourceProblem(pathWord, home) {
 // redirection except to /dev/null or a descriptor duplication. So nothing in it can change
 // what the push does, and the vars.sh the guard reads is the one the shell sources. When the
 // push uses $BRANCH, that vars.sh must be sourced and end with a claude/ branch.
+//
+// Returns null, or { reason, kind }. The kind says whether the agent can just split the command:
+//   'forbidden' when anything that runs before the last push is wrong (a segment outside the
+//     whitelist, a redirection, a substitution or an assignment), because that could have
+//     written the vars.sh the guard is about to trust (a glob or cp before the source) or
+//     otherwise changed the push. Also when a vars.sh path or its BRANCH line is bad, and for
+//     git commit --no-verify. This is stricter than it has to be for a harmless cp between the
+//     source and the push, and that is on purpose: the stage text, not this, keeps the model
+//     from writing that chain.
+//   'reshape' when the only problems are after the last push (more segments, a substitution, a
+//     redirection), or are about the joins and the source: a separator other than && (and the
+//     one |), or a source that is missing or not first while everything before the push is
+//     allowed. The source path is still checked, so a missing source is a shape problem only
+//     because there is no vars.sh to distrust.
 function whitelistProblem({ segments, seps }, home, readFile, usesBranchVar) {
-  if (seps.length !== segments.length - 1) return AROUND;
+  const parts = segments.map(split);
+  const lastPush = parts.findLastIndex(isPushSegment);
+  const forbidden = (reason) => ({ reason, kind: 'forbidden' });
+  let shape = null; // the first problem that is only about the command's shape
+  if (seps.length !== segments.length - 1) shape ??= AROUND;
+
   const kinds = [];
-  let sourceWord = null;
+  const sources = [];
   for (let i = 0; i < segments.length; i += 1) {
     const seg = segments[i];
-    const parts = split(seg);
+    const p = parts[i];
     const joiner = i === 0 ? null : seps[i - 1];
-    if (joiner !== null && joiner !== '&&' && joiner !== '|') return AROUND;
-    if (seg.subst || parts.assigns > 0 || redirectProblem(seg)) return AROUND;
-    const kind = segmentKind(parts, i, joiner, kinds[i - 1]);
-    if (!kind) return AROUND;
-    if (kind === 'source') sourceWord = parts.words[1];
-    if (kind === 'git' && parts.words[1].text === 'commit') {
-      const problem = commitProblem(parts.words.slice(2));
-      if (problem) return problem;
-    }
+    if (joiner !== null && joiner !== '&&' && joiner !== '|') shape ??= AROUND;
+    const kind = segmentKind(p, joiner, kinds[i - 1]);
     kinds.push(kind);
+    const wrong = seg.subst || p.assigns > 0 || kind === null || (kind !== 'push' && redirectProblem(seg));
+    if (wrong) {
+      if (i < lastPush) return forbidden(AROUND);
+      shape ??= AROUND;
+    }
+    if (kind === 'source') {
+      sources.push(p.words[1]);
+      if (i !== 0) shape ??= AROUND;
+    }
+    if (kind === 'git' && p.words[1].text === 'commit') {
+      const problem = commitProblem(p.words.slice(2));
+      if (problem) return forbidden(problem);
+    }
   }
 
-  if (sourceWord) {
-    const problem = sourceProblem(sourceWord, home);
-    if (problem) return problem;
+  for (const word of sources) {
+    const problem = sourceProblem(word, home);
+    if (problem) return forbidden(problem);
   }
-  if (!usesBranchVar) return null;
-  if (!sourceWord) return "$BRANCH used without sourcing the run's vars.sh";
-
-  let body;
-  try {
-    body = readFile(path.resolve(sourceWord.text));
-  } catch {
-    return "a vars.sh the guard couldn't read";
+  if (usesBranchVar) {
+    if (sources.length === 0) shape ??= "$BRANCH used without sourcing the run's vars.sh";
+    for (const word of sources) {
+      let body;
+      try {
+        body = readFile(path.resolve(word.text));
+      } catch {
+        return forbidden("a vars.sh the guard couldn't read");
+      }
+      const vars = lastBranch(body);
+      if (vars.error) return forbidden(vars.error);
+      if (!isClaudeBranch(vars.branch)) return forbidden("a vars.sh whose BRANCH isn't a claude/ branch");
+    }
   }
-  const vars = lastBranch(body);
-  if (vars.error) return vars.error;
-  if (!isClaudeBranch(vars.branch)) return "a vars.sh whose BRANCH isn't a claude/ branch";
-  return null;
+  return shape ? { reason: shape, kind: 'reshape' } : null;
 }
 
 // --- the check ---
@@ -541,28 +584,37 @@ export function checkCommand(command, { home, readFile = defaultReadFile } = {})
 
   const text = command.trim();
   const tokens = tokenize(text);
-  if (!tokens) return mentionsPush(text) ? deny('a command too complex to check') : ALLOW;
+  if (!tokens) {
+    if (mentionsPush(text)) return deny('a command too complex to check');
+    const settings = rawSettingsProblem(text);
+    return settings ? deny(settings) : ALLOW;
+  }
 
   const other = ghMergeProblem(tokens.segments) ?? gitSettingsProblem(tokens.segments);
   if (other) return deny(other);
 
+  // Forbidden problems return at once. A reshape problem is kept while the rest is checked,
+  // because a forbidden one anywhere in the command wins.
+  let shape = null;
   const allowedSpans = [];
   let usesBranchVar = false;
   for (const seg of tokens.segments) {
     const parts = split(seg);
     if (!isPushSegment(parts)) continue;
     const result = inspectPush(seg, parts);
-    if (result.reason) return deny(result.reason);
+    if (result.reason && !result.reshape) return deny(result.reason);
+    shape ??= result.reason ?? null;
     usesBranchVar ||= result.usesBranchVar;
     allowedSpans.push([seg.start, seg.end]);
   }
   if (allowedSpans.length > 0) {
     const problem = whitelistProblem(tokens, home, readFile, usesBranchVar);
-    if (problem) return deny(problem);
+    if (problem?.kind === 'forbidden') return deny(problem.reason);
+    shape ??= problem?.reason ?? null;
   }
 
   if (mentionsPush(removeSpans(text, allowedSpans))) {
     return deny("a push the guard can't check (inside a string, script, alias or subshell)");
   }
-  return ALLOW;
+  return shape ? deny(shape, 'reshape') : ALLOW;
 }

@@ -10,6 +10,11 @@ import { checkCommand, isActivating } from '../skills/ship/scripts/lib/guard.mjs
 
 const MARKER_MAX_AGE_MS = 14 * 24 * 3600 * 1000;
 
+// What the agent is told. A reshape denial means the push is fine and its command just needs
+// splitting; a forbidden one means stop. Neither names the off switch.
+const RESHAPE_ADVICE = 'Split the command: run the push on its own as `. \'<RUN_DIR>/vars.sh\' && cd "$WT" && git push origin "$BRANCH"` (use `-u` if this is the branch\'s first push), with only `git add`, `git commit` and `git status` allowed before it. Do everything else in a separate command.';
+const FORBIDDEN_ADVICE = 'The pipeline pushes only with `git push origin "$BRANCH"` or `git push -u origin "$BRANCH"`, after sourcing vars.sh, with nothing but `cd`, `git add`, `git commit` and `git status` in the same command, and it never merges. Don\'t look for another way to do this: follow the stop procedure. If the command only mentions push or merge in text, put that text in a file with the file-writing tool.';
+
 async function readStdin() {
   const chunks = [];
   for await (const chunk of process.stdin) chunks.push(chunk);
@@ -73,10 +78,7 @@ async function main() {
     if (!active) return;
     const verdict = checkCommand(command, { home });
     if (verdict.allow) return;
-    block([
-      `claude-pipeline guard: ${verdict.reason}.`,
-      'The pipeline pushes only with `git push origin "$BRANCH"` or `git push -u origin "$BRANCH"`, after sourcing vars.sh, with nothing but `cd`, `git add`, `git commit` and `git status` in the same command, and it never merges. Don\'t look for another way to do this: follow the stop procedure. If the command only mentions push or merge in text, put that text in a file with the file-writing tool.',
-    ].join('\n'));
+    block(`claude-pipeline guard: ${verdict.reason}.\n${verdict.kind === 'reshape' ? RESHAPE_ADVICE : FORBIDDEN_ADVICE}`);
   } catch (err) {
     if (active && /\b(push|merge)\b/.test(command)) {
       block(`claude-pipeline guard: could not check this command (${err.message})`);

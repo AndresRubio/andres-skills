@@ -50,7 +50,16 @@ function assertDenied(command, reasonPattern, home = HOME) {
   assert.equal(v.allow, false, `should deny: ${command}`);
   assert.equal(typeof v.reason, 'string', `reason for: ${command}`);
   assert.ok(v.reason.length > 0, `non-empty reason for: ${command}`);
+  assert.ok(['reshape', 'forbidden'].includes(v.kind), `kind for: ${command} (${v.kind})`);
   if (reasonPattern) assert.match(v.reason, reasonPattern, `reason for: ${command}`);
+}
+
+// 'reshape': the push is fine and only what surrounds it is wrong, so the agent can split the
+// command. 'forbidden': anything else, so the agent should stop.
+function assertKind(command, kind, home = HOME) {
+  const v = check(command, home);
+  assert.equal(v.allow, false, `should deny: ${command}`);
+  assert.equal(v.kind, kind, `kind for: ${command} (${v.reason})`);
 }
 
 // --- checkCommand: allowed ---
@@ -412,6 +421,107 @@ test('denies a push whose command has a source that is not first, or a shape the
   assertDenied(`${s} && export GIT_CONFIG_COUNT=1 && git push origin claude/1-x`, ONLY_AROUND);
 });
 
+// --- checkCommand: reshape or forbidden (16a round 2) ---
+
+test('a harmless command around a good push is a reshape denial', () => {
+  const s = source(HOME);
+  const push = 'git push origin "$BRANCH"';
+  for (const command of [
+    `${s} && cd "$WT" && ${push} > out.txt`,
+    'git push origin claude/1-x > out.txt',
+    'git push origin claude/1-x; true',
+    'git push origin claude/1-x || true',
+    'git push origin claude/1-x &',
+    'git push origin claude/1-x\necho done',
+    '(git push origin claude/1-x)',
+    `${s} && cd "$WT" && ${push} && cp a b`,
+    `${s} && cd "$WT" && ${push} 2>&1 | tail -5 > out.txt`,
+    `${s} && ${push} | cat`,
+    `${s} && ${push} && echo "$(date)"`,
+    'git add -A && git commit -F f && git push origin claude/1-x && echo done',
+    // only the joiner is wrong, between segments that are all allowed
+    'git status; git push origin claude/1-x',
+    // the source is missing, or not first, but everything before the push is allowed
+    `cd "$WT" && ${push}`,
+    `cd "$WT" && ${s} && ${push}`,
+    `git add -A && ${s} && ${push}`,
+    `${push}; ${s}`,
+    `${s} && ${s} && ${push}`,
+  ]) {
+    assertKind(command, 'reshape');
+  }
+  assertDenied(`${s} && cd "$WT" && ${push} && cp a b`, ONLY_AROUND);
+});
+
+test('anything that could change what is pushed, or a bad push, is a forbidden denial', () => {
+  const s = source(HOME);
+  const push = 'git push origin "$BRANCH"';
+  const glob = varsFile(HOME).replace('vars.sh', "vars'?'sh");
+  for (const command of [
+    // something outside the whitelist runs before the push
+    `${s} && cp a b && git add -A && git commit -F f && ${push}`,
+    `printf '\nBRANCH=claude/12-fix-month:main\n' > '${glob}' && ${s} && cd "$WT" && ${push}`,
+    `${s} && printf x > '${glob}' && ${push}`,
+    `${s} && git status > out.txt && ${push}`,
+    `${s} && git add $(ls) && ${push}`,
+    `${s} && X=1 git add -A && ${push}`,
+    `${s} && export GIT_CONFIG_COUNT=1 && git push origin claude/1-x`,
+    `${s} && echo hi && ${push}`,
+    `false && ${s}; ${push}`,
+    `{ ${s}; } && ${push}`,
+    `git commit --no-verify -m x && git push origin claude/1-x`,
+    // the push itself is wrong
+    'git push origin main',
+    'git push origin claude/1-x:main',
+    'git push --force origin claude/1-x',
+    'git push upstream claude/1-x',
+    'git -C x push origin claude/1-x',
+    'GIT_DIR=x git push origin claude/1-x',
+    'git push origin claude/1-x && git push origin main',
+    'git push origin claude/1-x > out.txt; git push origin main',
+    // $BRANCH that can't be trusted, even with only trailing problems
+    `${source(HOME, 'lastmain')} && ${push}`,
+    `${source(HOME, 'lastmain')} && ${push}; true`,
+    `${source(HOME, 'subst')} && ${push} && cp a b`,
+    `. '/tmp/x/runs/run-abc123/vars.sh' && ${push}`,
+    `. '/tmp/x/vars.sh' && git push origin claude/1-x`,
+    `. "$RUN_DIR/vars.sh" && ${push}; true`,
+    // merges, API writes, remotes and config
+    'gh pr merge 5',
+    'git push origin claude/1-x; gh pr merge 5',
+    'gh api -X PUT repos/o/r/pulls/5/merge',
+    'git remote set-url origin x',
+    'git config core.hooksPath /tmp/h',
+    // a push hidden where the guard can't check it, or a command it can't read
+    'git push origin claude/1-x; bash -c "git push origin main"',
+    "git push origin 'claude/1-x",
+    'git push origin claude/1-x <<< "x"',
+  ]) {
+    assertKind(command, 'forbidden');
+  }
+});
+
+test('an unparseable command still gets the remote and config rules', () => {
+  for (const command of [
+    'cat <<EOF\nx\nEOF\ngit remote add evil x',
+    'git remote set-url origin https://evil.example/x.git <<< x',
+    'git REMOTE\tSet-Url origin x <<EOF\nx\nEOF',
+    'git remote rm origin <<< x',
+    'git config remote.origin.pushurl x <<EOF\nx\nEOF',
+    'git config --global url.https://evil.example/.insteadOf https://github.com/ <<< x',
+    'git config core.hooksPath /tmp/h <<< x',
+    'git config core.sshCommand evil <<< x',
+    'git config alias.p !evil <<< x',
+    'git config credential.helper store <<< x',
+    "git config http.proxy x 'unbalanced",
+  ]) {
+    assertKind(command, 'forbidden');
+  }
+  assertAllowed('cat <<EOF\nx\nEOF\ngit remote -v');
+  assertAllowed('git config user.name <<< x');
+  assertAllowed('git remote get-url origin <<< x');
+});
+
 test('denies a literal push sourced from a vars.sh outside the run folder', () => {
   assertDenied('. /tmp/x/vars.sh && git push origin claude/1-x', /vars\.sh/);
   assertAllowed(`${source(HOME)} && git push origin claude/1-x`);
@@ -715,6 +825,27 @@ test('hook: ignores other tools and input it cannot read', () => {
     assert.equal(r.code, 0, `input: ${input}`);
     assert.equal(r.stderr, '');
   }
+});
+
+test('hook: a reshape denial tells the agent to split the command; a forbidden one says to stop', () => {
+  const home = makeHome('guard-kinds-');
+  const reshape = runHook({ home, guard: '1', input: bashInput('git push origin claude/1-x; true') });
+  assert.equal(reshape.code, 2);
+  assert.ok(reshape.stderr.startsWith('claude-pipeline guard: '), reshape.stderr);
+  assert.match(reshape.stderr, /Split the command: run the push on its own as `\. '<RUN_DIR>\/vars\.sh' && cd "\$WT" && git push origin "\$BRANCH"` \(use `-u` if this is the branch's first push\), with only `git add`, `git commit` and `git status` allowed before it\. Do everything else in a separate command\./);
+  assert.doesNotMatch(reshape.stderr, /stop procedure/);
+  assert.doesNotMatch(reshape.stderr, /CLAUDE_PIPELINE_GUARD/);
+
+  const forbidden = runHook({ home, guard: '1', input: bashInput('git push origin main') });
+  assert.equal(forbidden.code, 2);
+  assert.match(forbidden.stderr, /follow the stop procedure/);
+  assert.doesNotMatch(forbidden.stderr, /Split the command/);
+
+  // a cp between the source and the push is forbidden, and a cp after it is a reshape
+  const between = runHook({ home, guard: '1', input: bashInput(`${source(home)} && cp a b && git push origin "$BRANCH"`) });
+  assert.match(between.stderr, /follow the stop procedure/);
+  const after = runHook({ home, guard: '1', input: bashInput(`${source(home)} && git push origin "$BRANCH" && cp a b`) });
+  assert.match(after.stderr, /Split the command/);
 });
 
 test('hook: the Setup command switches the guard on; merely mentioning the pipeline home does not', () => {
