@@ -522,6 +522,98 @@ test('an unparseable command still gets the remote and config rules', () => {
   assertAllowed('git remote get-url origin <<< x');
 });
 
+// --- checkCommand: a subcommand the guard can't read, and eval (16a round 3) ---
+
+test('denies a git or gh subcommand supplied by a variable or a glob', () => {
+  for (const command of [
+    'g=push; git $g origin main',
+    'g=push; git $g origin claude/1-x:main',
+    'g=git; p=push; $g $p origin main',
+    'git "$g" origin main',
+    'git ${g} origin main',
+    'git $(echo push) origin main',
+    'git pu* origin main',
+    'git -C "$WT" $g origin main',
+    'git -c a=b --git-dir x $g origin main',
+    '$g $p origin main',
+    'p=merge; gh pr $p 5',
+    'gh $x merge 5',
+    'gh pr -R o/r $p 5',
+    'gh pr --repo o/r $p 5',
+    'gh pr --repo=o/r $p 5',
+    'gh "$x" 5',
+    'gh pr $p',
+    'GH pr $p 5',
+    '$GH pr $p 5',
+    '/usr/bin/gh p? 5',
+    `${prefix(HOME)}git push origin "$BRANCH" && g=x; git $g origin main`,
+  ]) {
+    assertKind(command, 'forbidden');
+    assertDenied(command, /hidden|push|git|gh/);
+  }
+  assertDenied('g=push; git $g origin main', /a git or gh subcommand hidden in a variable or glob/);
+  assertDenied('gh pr -R o/r $p 5', /a git or gh subcommand hidden in a variable or glob/);
+});
+
+test('still allows git and gh commands whose subcommand is written out', () => {
+  for (const command of [
+    'git status',
+    'git -C "$WT" status',
+    'git -C "$WT" diff --name-only "$BASE_SHA"...HEAD',
+    'git -c core.quotepath=off diff "$BASE_SHA"',
+    'git log --oneline -5',
+    'git diff "$BASE_SHA"...HEAD',
+    'git add "$FILE" && git commit -F "$RUN_DIR/commit-msg.txt"',
+    'git merge --ff-only "origin/$BRANCH"',
+    'git status "$WT"',
+    'gh pr view 5 --json mergeable',
+    'gh pr view "$PR" --repo "$REPO" --json number,url',
+    'gh pr list --repo "$REPO" --json number',
+    'gh pr list --repo "$REPO" --head "$BRANCH" --state open --json number,url',
+    'gh pr -R "$REPO" view 5',
+    'gh pr --repo "$REPO" list',
+    'gh pr create --repo "$REPO" --title "$(cat "$RUN_DIR/pr-title.txt")" --body-file "$RUN_DIR/pr-body.md"',
+    'gh pr comment "$PR" --repo "$REPO" --body-file "$RUN_DIR/fix-comment.md"',
+    'gh api "repos/$REPO/issues/$NUMBER" --jq .id',
+    'gh issue view "$NUMBER" --repo "$REPO" --json title',
+    'node "$PIPELINE" config',
+    '"$EDITOR" notes.md',
+    '$EDITOR notes.md',
+  ]) {
+    assertAllowed(command);
+  }
+});
+
+test('denies eval, however it is reached', () => {
+  for (const command of [
+    'eval "git status"',
+    'eval x',
+    'X=1 eval x',
+    'true && eval "$cmd"',
+    '{ eval x; }',
+    'if true; then eval x; fi',
+    'command eval x',
+    'builtin eval x',
+  ]) {
+    assertKind(command, 'forbidden');
+  }
+  assertDenied('eval "git status"', /^eval$/);
+  assertAllowed('git log --grep=eval');
+  assertAllowed('echo eval');
+  assertAllowed('grep -rn eval src');
+  assertAllowed('ls evaluate.txt');
+});
+
+test('counts push and git after an equals sign as words', () => {
+  assertKind('g=push; git status', 'forbidden');
+  assertKind('g=git; p=push; echo $g $p', 'forbidden');
+  assertKind('x=git y=push', 'forbidden');
+  assertAllowed('g=x; git status');
+  assertAllowed('a=pushes; git status');
+  assertAllowed('a=git-hooks; echo push-docs');
+  assertAllowed('git grep -n "--push=x" -- src');
+});
+
 test('denies a literal push sourced from a vars.sh outside the run folder', () => {
   assertDenied('. /tmp/x/vars.sh && git push origin claude/1-x', /vars\.sh/);
   assertAllowed(`${source(HOME)} && git push origin claude/1-x`);
@@ -548,7 +640,8 @@ test('allows only vars.sh source, cd, git add, git commit, git status and tail/h
   }
 });
 
-test('allows every push the skill documents, in the form the skill gives it', () => {
+// Every backticked span in the skill's markdown, as { file, span }.
+function documentedSpans() {
   const skillDir = fileURLToPath(new URL('../skills/ship/', import.meta.url));
   const files = [];
   const walk = (dir) => {
@@ -558,14 +651,21 @@ test('allows every push the skill documents, in the form the skill gives it', ()
     }
   };
   walk(skillDir);
-  let seen = 0;
-  for (const file of files) {
-    for (const m of readFileSync(file, 'utf8').matchAll(/`([^`\n]*git push[^`\n]*)`/g)) {
-      seen += 1;
-      assertAllowed(`${prefix(HOME)}${m[1]}`);
-    }
-  }
-  assert.ok(seen >= 10, `expected to find the documented pushes, found ${seen}`);
+  return files.flatMap((file) => [...readFileSync(file, 'utf8').matchAll(/`([^`\n]+)`/g)].map((m) => ({ file, span: m[1] })));
+}
+
+test('allows every push the skill documents, in the form the skill gives it', () => {
+  const pushes = documentedSpans().filter(({ span }) => span.includes('git push'));
+  for (const { span } of pushes) assertAllowed(`${prefix(HOME)}${span}`);
+  assert.ok(pushes.length >= 10, `expected to find the documented pushes, found ${pushes.length}`);
+});
+
+test('allows every git and gh command the skill documents (placeholders filled in)', () => {
+  const commands = documentedSpans()
+    .map(({ span }) => span.replace(/<[^<>\s]*>/g, 'x'))
+    .filter((span) => /^(git|gh) /.test(span) && !/^gh pr merge\b/.test(span));
+  for (const span of commands) assertAllowed(span.includes('git push') ? `${prefix(HOME)}${span}` : span);
+  assert.ok(commands.length >= 25, `expected to find the documented commands, found ${commands.length}`);
 });
 
 // --- checkCommand: changing remotes and push-related config ---
@@ -840,6 +940,13 @@ test('hook: a reshape denial tells the agent to split the command; a forbidden o
   assert.equal(forbidden.code, 2);
   assert.match(forbidden.stderr, /follow the stop procedure/);
   assert.doesNotMatch(forbidden.stderr, /Split the command/);
+
+  // a subcommand hidden in a variable is forbidden, not something to reshape
+  const hidden = runHook({ home, guard: '1', input: bashInput('g=push; git $g origin claude/1-x:main') });
+  assert.equal(hidden.code, 2);
+  assert.ok(hidden.stderr.startsWith('claude-pipeline guard: a git or gh subcommand hidden in a variable or glob.'), hidden.stderr);
+  assert.match(hidden.stderr, /follow the stop procedure/);
+  assert.doesNotMatch(hidden.stderr, /Split the command/);
 
   // a cp between the source and the push is forbidden, and a cp after it is a reshape
   const between = runHook({ home, guard: '1', input: bashInput(`${source(home)} && cp a b && git push origin "$BRANCH"`) });

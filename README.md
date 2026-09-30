@@ -40,7 +40,7 @@ The plugin ships a `PreToolUse` hook (`hooks/guard.mjs`) that checks every Bash 
 
 To switch it off for a session you started by mistake, delete `<home>/guard/<session id>`, or start Claude Code with `CLAUDE_PIPELINE_GUARD=0` (the hook reads the environment Claude Code started with). The deny message doesn't mention this on purpose.
 
-It is a seatbelt, not a security boundary. It doesn't cover a `.git/config` or a git hook edited by a file write in an earlier call, or a script written to a file and then run. Pair it with a token scoped to the repo and with branch protection on the default branch.
+It is a seatbelt, not a security boundary. It doesn't cover a `.git/config` or a git hook edited by a file write in an earlier call, a script written to a file and then run, commands assembled from strings at run time inside an interpreter (`node -e`, `python -c`, `sh -c` with pieces joined at run time), or GitHub API writes whose endpoint is assembled from variables. Scoped tokens and branch protection are the boundary for those, so pair it with a token scoped to the repo and with branch protection on the default branch.
 
 ## Develop
 

@@ -296,8 +296,8 @@ function split(seg) {
 // runs `GIT` and `/usr/bin/Git` as git.
 const isGit = (w) => !w.expands && /^(?:[^*?[]*\/)?git$/i.test(w.text);
 const isGh = (w) => !w.expands && /^(?:[^*?[]*\/)?gh$/i.test(w.text);
-// A first word the guard can't read (an expansion or a glob): if a push word follows, it is
-// treated as a push it can't vouch for.
+// A word the guard can't read (an expansion or a glob). As a first word followed by a push word
+// it is treated as a push it can't vouch for; as the subcommand of git or gh it is denied.
 const isDynamic = (w) => w.expands || /[*?[]/.test(w.text);
 
 function isPushSegment({ words }) {
@@ -376,6 +376,55 @@ function ghMergeProblem(segments) {
     const texts = words.slice(1).map((w) => w.text.toLowerCase());
     const pr = texts.indexOf('pr');
     if (pr >= 0 && texts.indexOf('merge', pr + 1) > pr) return 'merging a pull request';
+  }
+  return null;
+}
+
+// A git or gh subcommand the guard can't read (`g=push; git $g origin main`) is forbidden: the
+// guard can't tell what it runs. git's subcommand is the first word that isn't an option or an
+// option's value; gh's is words[1], and for `gh pr` the first word after its flags (skipping
+// -R/--repo and their values). A dynamic first word followed by a dynamic second word is the
+// same thing (`$g $p origin main`).
+const HIDDEN_SUBCOMMAND = 'a git or gh subcommand hidden in a variable or glob';
+const GIT_OPTIONS_WITH_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace']);
+
+function skipFlags(words, from, withValue) {
+  let i = from;
+  while (i < words.length && words[i].text.startsWith('-')) i += withValue.has(words[i].text) ? 2 : 1;
+  return i;
+}
+
+function hiddenSubcommandProblem(segments) {
+  for (const seg of segments) {
+    const { words } = split(seg);
+    if (words.length < 2) continue;
+    const [first, second] = words;
+    const git = isGit(first);
+    const gh = isGh(first);
+    const dynamic = isDynamic(first);
+    if (!git && !gh && !dynamic) continue;
+    const gitSubcommand = words[git ? skipFlags(words, 1, GIT_OPTIONS_WITH_VALUE) : 1];
+    if ((git || dynamic) && gitSubcommand && isDynamic(gitSubcommand)) return HIDDEN_SUBCOMMAND;
+    if (!gh && !dynamic) continue;
+    if (isDynamic(second)) return HIDDEN_SUBCOMMAND;
+    if (second.text.toLowerCase() === 'pr') {
+      const target = words[skipFlags(words, 2, new Set(['-R', '--repo']))];
+      if (target && isDynamic(target)) return HIDDEN_SUBCOMMAND;
+    }
+  }
+  return null;
+}
+
+// eval builds commands from strings at run time, so nothing the guard reads is what runs. The
+// pipeline never uses it. The command word is the first word after assignments, compound-command
+// words and command/builtin.
+const COMMAND_PREFIXES = new Set(['{', '!', 'if', 'then', 'elif', 'else', 'while', 'until', 'do', 'time', 'command', 'builtin']);
+
+function evalProblem(segments) {
+  for (const seg of segments) {
+    const { words } = split(seg);
+    const word = words.find((w) => !COMMAND_PREFIXES.has(w.text));
+    if (word && word.text === 'eval') return 'eval';
   }
   return null;
 }
@@ -572,8 +621,9 @@ function removeSpans(text, spans) {
 
 // Standalone shell words: `git` and `push` count only when set off by whitespace, a quote, a
 // bracket or a separator, so src/push.ts, push-docs and lib/git/refs.js don't.
-const STANDALONE_PUSH = /(?<=^|[\s'"`({;&|])push(?=$|[\s'"`)};&|])/i;
-const STANDALONE_GIT = /(?<=^|[\s'"`({;&|/])git(?=$|[\s'"`)};&|])/i;
+// An = before the word counts (g=push), so a variable can't hold the word unseen.
+const STANDALONE_PUSH = /(?<=^|[\s'"`({;&|=])push(?=$|[\s'"`)};&|])/i;
+const STANDALONE_GIT = /(?<=^|[\s'"`({;&|/=])git(?=$|[\s'"`)};&|])/i;
 const mentionsPush = (text) => STANDALONE_GIT.test(text) && STANDALONE_PUSH.test(text);
 
 const defaultReadFile = (file) => readFileSync(file, 'utf8');
@@ -590,7 +640,8 @@ export function checkCommand(command, { home, readFile = defaultReadFile } = {})
     return settings ? deny(settings) : ALLOW;
   }
 
-  const other = ghMergeProblem(tokens.segments) ?? gitSettingsProblem(tokens.segments);
+  const other = ghMergeProblem(tokens.segments) ?? gitSettingsProblem(tokens.segments)
+    ?? hiddenSubcommandProblem(tokens.segments) ?? evalProblem(tokens.segments);
   if (other) return deny(other);
 
   // Forbidden problems return at once. A reshape problem is kept while the rest is checked,
