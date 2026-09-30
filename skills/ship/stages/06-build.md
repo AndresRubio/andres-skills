@@ -18,7 +18,7 @@ Implement the plan test-first, committing and pushing as you go.
    - The worktree already exists: skip its worktree setup.
    - Implementers run on sonnet (opus for fix rounds 4–5) and reviewers on opus. Name the model every time.
    - The plan task that fixes the bug: tell its implementer to start from the reproduction test recorded in progress.md (path, command, failing output), not to write a new one.
-   - After each task its ledger marks complete: copy the ledger (`progress.md` in its SDD workspace) into this issue's progress.md under "## SDD ledger" (the file-writing tool, or a command of its own), then commit and push in a separate command: `git add "docs/pipeline/$KEY/progress.md" && git commit -F "$RUN_DIR/commit-msg.txt" && git push origin "$BRANCH"`.
+   - After each task its ledger marks complete: copy the ledger (`progress.md` in its SDD workspace) into this issue's progress.md under "## SDD ledger" (the file-writing tool, or a command of its own); write `docs(pipeline): SDD ledger for #<NUMBER>` plus the trailer to `$RUN_DIR/commit-msg.txt` with the file-writing tool; then commit and push in a separate command: `git add "docs/pipeline/$KEY/progress.md" && git commit -F "$RUN_DIR/commit-msg.txt" && git push origin "$BRANCH"`.
    - Its questions for a human are handled as the mode sections below say.
    - When it reaches its final step, don't invoke finishing-a-development-branch. Return here and go on to stage 7.
 4. After every task: `node "$PIPELINE" diff-size --base "$BASE_SHA"`. If `files` exceeds `maxPrSize.files` or `lines` exceeds `maxPrSize.lines`, hard rule 9 applies: stop and propose a split of the remaining work.

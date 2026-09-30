@@ -317,7 +317,7 @@ test('Setup says what a pushing command may contain, and stage 6 keeps the ledge
   assert.match(setup, /do anything else \(copying files, recording a SHA\) in a separate command/);
 
   const build = read('stages/06-build.md');
-  assert.match(build, /under "## SDD ledger" \(the file-writing tool, or a command of its own\), then commit and push in a separate command: `git add [^`]* && git commit [^`]* && git push origin "\$BRANCH"`/);
+  assert.match(build, /under "## SDD ledger" \(the file-writing tool, or a command of its own\)[^\n]*then commit and push in a separate command: `git add [^`]* && git commit [^`]* && git push origin "\$BRANCH"`/);
   assert.doesNotMatch(build, /"## SDD ledger", commit, and push/);
 });
 
