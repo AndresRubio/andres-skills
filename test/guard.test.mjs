@@ -418,7 +418,8 @@ test('denies a push whose command has a source that is not first, or a shape the
     assertDenied(command);
   }
   assertDenied(`git push origin claude/1-x; true`, ONLY_AROUND);
-  assertDenied(`${s} && export GIT_CONFIG_COUNT=1 && git push origin claude/1-x`, ONLY_AROUND);
+  // export GIT_CONFIG_COUNT=... is now caught by the git-env rule (round 4), a more specific reason
+  assertDenied(`${s} && export GIT_CONFIG_COUNT=1 && git push origin claude/1-x`, /environment variables/);
 });
 
 // --- checkCommand: reshape or forbidden (16a round 2) ---
@@ -638,6 +639,102 @@ test('allows only vars.sh source, cd, git add, git commit, git status and tail/h
   ]) {
     assertAllowed(command);
   }
+});
+
+// --- checkCommand: command-line config, GIT_* env, dequoted push, plumbing, gh repo (16a round 4) ---
+
+test('denies git config given on the command line that controls pushes', () => {
+  for (const command of [
+    'git -c alias.p=pu"sh" p origin claude/1-x:main',
+    'git -c include.path=/tmp/evil x origin main',
+    'V=pu"sh"; git --config-env=alias.x=V x origin main',
+    'git -c alias.x=push x origin main',
+    "git -c 'alias.x=!git push origin main' x",
+    'git -c "$k=push" x',
+    "git -c alias.p=pu''sh p origin claude/1-x:main",
+    'git --config-env alias.x=V x origin main',
+    'git -c "core.hooksPath=/dev/null" push origin claude/1-x',
+    'git -C "$WT" -c alias.x=push status',
+    'git -c "alias.x=$V" x origin main',
+    'git -c "credential.helper=!f" x',
+    'git -c "protocol.ext.allow=always" x',
+    'git -c uploadpack.allowAnySHA1InWant=true x',
+    'git -c "core.gitProxy=evil" x',
+    'git -c "url.https://evil/.insteadOf=https://github.com/" x',
+  ]) {
+    assertKind(command, 'forbidden');
+  }
+  assertDenied('git -c include.path=/tmp/evil x origin main', /command line/);
+});
+
+test('denies setting git environment variables', () => {
+  for (const command of [
+    'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0=pu"sh" git x origin main',
+    'export GIT_DIR=/tmp/x && git status',
+    'env GIT_CONFIG_PARAMETERS="\'alias.x=push\'" git x',
+    'GIT_DIR=x git status',
+    'GIT_SSH_COMMAND=evil git status',
+    'declare -x GIT_DIR=/tmp/x',
+    'GIT_WORK_TREE=/tmp git status',
+    `${source(HOME)} && export GIT_CONFIG_COUNT=1 && git push origin claude/1-x`,
+  ]) {
+    assertKind(command, 'forbidden');
+  }
+  assertDenied('export GIT_DIR=/tmp/x && git status', /environment variables/);
+  assertAllowed('echo GIT_DIR');
+  assertAllowed('GITHUB_TOKEN=x git status');
+});
+
+test('denies git plumbing that pushes', () => {
+  for (const command of [
+    'git send-pack /tmp/o.git claude/1-x:main',
+    'git-send-pack /tmp/o.git x',
+    'git remote-ext x y',
+    'git http-push /tmp/o.git',
+    'git-http-push x',
+    'git-remote-https origin url',
+    'git remote-fd 3 4',
+    '/usr/bin/git send-pack /tmp/o.git x',
+    'git -C "$WT" send-pack /tmp/o.git x',
+  ]) {
+    assertKind(command, 'forbidden');
+  }
+  assertDenied('git send-pack /tmp/o.git claude/1-x:main', /plumbing/);
+  assertAllowed('git remote -v');
+  assertAllowed('git remote get-url origin');
+  assertAllowed('git remote prune origin');
+});
+
+test('denies gh repo commands that rewrite branches or settings', () => {
+  for (const command of [
+    'gh repo sync o/r --branch main --force',
+    'gh repo edit --default-branch x',
+    'gh repo delete o/r --yes',
+    'gh repo rename new-name',
+    'gh repo archive o/r',
+    'GH repo edit --default-branch x',
+    '/usr/local/bin/gh repo sync o/r',
+  ]) {
+    assertKind(command, 'forbidden');
+  }
+  assertDenied('gh repo edit --default-branch x', /gh repo/);
+  assertAllowed('gh repo view --json nameWithOwner -q .nameWithOwner');
+  assertAllowed('gh repo view o/r --json defaultBranchRef');
+  assertAllowed('gh repo clone o/r');
+});
+
+test('denies a push whose word is split by quotes or escapes (dequoted catch-all)', () => {
+  for (const command of [
+    "git submodule foreach 'git pu''sh origin main'",
+    "'git' pu\\sh origin main",
+    'git status && echo pu"sh"',
+    "git status && echo pu''sh",
+  ]) {
+    assertKind(command, 'forbidden');
+  }
+  // the dequoted check does not deny a benign command that merely contains git and a split word
+  assertAllowed('echo pu"sh" && ls');
+  assertAllowed('git status');
 });
 
 // Every backticked span in the skill's markdown, as { file, span }.

@@ -431,7 +431,7 @@ function evalProblem(segments) {
 
 const REMOTE_WRITES = new Set(['add', 'set-url', 'rename', 'remove', 'rm', 'set-branches']);
 const CONFIG_READS = new Set(['--get', '--get-all', '--get-regexp', '--list', '-l']);
-const PUSH_CONFIG_KEY = /^(?:(?:remote|url|push|branch|alias|include|includeif|credential|http)\.|core\.(?:hookspath|sshcommand)$)/i;
+const PUSH_CONFIG_KEY = /^(?:(?:remote|url|push|branch|alias|include|includeif|credential|http|protocol|uploadpack|receivepack)\.|core\.(?:hookspath|sshcommand|gitproxy|askpass)$)/i;
 
 function gitSettingsProblem(segments) {
   for (const seg of segments) {
@@ -457,6 +457,104 @@ const RAW_CONFIG_WRITE = /\bgit\s+config\b[^\n]*\b((remote|url|push|branch|alias
 function rawSettingsProblem(text) {
   if (RAW_REMOTE_WRITE.test(text)) return 'changing git remotes';
   if (RAW_CONFIG_WRITE.test(text)) return 'changing git config that controls pushes';
+  return null;
+}
+
+// --- command-line config, git env vars, push plumbing, gh repo rewrites (round 4) ---
+
+// git config given on git's own command line (before the subcommand) can redefine an alias,
+// pull in a whole config file, or point a remote/proxy/hook elsewhere, so a benign-looking
+// literal subcommand then pushes (`git -c alias.p=pu"sh" p origin main`). git's own options come
+// before the subcommand. Deny a -c/--config-env whose dequoted key controls pushes, or whose key
+// can't be read (an expansion or glob). Keying on the config key, not the value, also closes the
+// forms whose push word is quote-split or delivered through an env var (`-c alias.x=$V`).
+const CONFIG_CLI_REASON = 'git config on the command line that controls pushes';
+
+function configKeyProblem(keyText) {
+  const key = keyText.split('=')[0];
+  if (PUSH_CONFIG_KEY.test(key) || /[$`*?[]/.test(key)) return CONFIG_CLI_REASON;
+  return null;
+}
+
+function commandLineConfigProblem(segments) {
+  for (const seg of segments) {
+    const { words } = split(seg);
+    if (words.length < 1 || !isGit(words[0])) continue;
+    let i = 1;
+    while (i < words.length && words[i].text.startsWith('-')) {
+      const t = words[i].text;
+      if (t === '-c' || t === '--config-env') {
+        const arg = words[i + 1];
+        if (!arg) break;
+        const problem = configKeyProblem(arg.text);
+        if (problem) return problem;
+        i += 2;
+      } else if (t.startsWith('--config-env=')) {
+        const problem = configKeyProblem(t.slice('--config-env='.length));
+        if (problem) return problem;
+        i += 1;
+      } else if (t.startsWith('-c') && !t.startsWith('--')) {
+        const problem = configKeyProblem(t.slice(2));
+        if (problem) return problem;
+        i += 1;
+      } else if (GIT_OPTIONS_WITH_VALUE.has(t)) {
+        i += 2; // a git option that consumes the next word (-C <path>, --git-dir <path>, ...)
+      } else {
+        i += 1;
+      }
+    }
+  }
+  return null;
+}
+
+// Setting a GIT_* environment variable (GIT_DIR, GIT_SSH_COMMAND, the GIT_CONFIG_* family, ...)
+// can redirect the repo or inject config, so a plain push writes somewhere else. The pipeline
+// sets none. Any word whose dequoted text is a GIT_* assignment is denied, wherever it sits: a
+// leading assignment, a standalone assignment segment, or an argument to export/declare -x/env.
+const GIT_ENV_ASSIGN = /^GIT_[A-Z0-9_]*=/;
+
+function gitEnvProblem(segments) {
+  for (const seg of segments) {
+    for (const w of seg.words) {
+      if (GIT_ENV_ASSIGN.test(w.text)) return 'setting git environment variables';
+    }
+  }
+  return null;
+}
+
+// git plumbing that speaks a push protocol directly (send-pack, http-push, the remote-* helpers),
+// whether as a git subcommand (`git send-pack`, `git remote-ext`) or as a git-<helper> command.
+const PLUMBING_SUB = /^(?:send-pack|http-push|remote-.+)$/i;
+const PLUMBING_FIRST = /^(?:[^*?[]*\/)?git-(?:send-pack|http-push|remote-.+)$/i;
+
+function pushPlumbingProblem(segments) {
+  for (const seg of segments) {
+    const { words } = split(seg);
+    if (words.length < 1) continue;
+    const first = words[0];
+    if (!first.expands && PLUMBING_FIRST.test(first.text)) return 'git plumbing that pushes';
+    if (isGit(first)) {
+      const sub = words[skipFlags(words, 1, GIT_OPTIONS_WITH_VALUE)];
+      if (sub && !sub.expands && PLUMBING_SUB.test(sub.text)) return 'git plumbing that pushes';
+    }
+  }
+  return null;
+}
+
+// gh repo subcommands that move a repo's default branch or change its settings. The repo action
+// is the first non-flag word after `repo` (found the way round 3 finds a subcommand).
+const GH_REPO_WRITES = new Set(['sync', 'edit', 'delete', 'rename', 'archive']);
+
+function ghRepoProblem(segments) {
+  for (const seg of segments) {
+    const { words } = split(seg);
+    if (words.length < 3 || !isGh(words[0])) continue;
+    if (words[1].expands || words[1].text.toLowerCase() !== 'repo') continue;
+    const action = words.slice(2).find((w) => !w.text.startsWith('-'));
+    if (action && !action.expands && GH_REPO_WRITES.has(action.text.toLowerCase())) {
+      return 'gh repo commands that change branches or settings';
+    }
+  }
   return null;
 }
 
@@ -641,7 +739,9 @@ export function checkCommand(command, { home, readFile = defaultReadFile } = {})
   }
 
   const other = ghMergeProblem(tokens.segments) ?? gitSettingsProblem(tokens.segments)
-    ?? hiddenSubcommandProblem(tokens.segments) ?? evalProblem(tokens.segments);
+    ?? hiddenSubcommandProblem(tokens.segments) ?? evalProblem(tokens.segments)
+    ?? commandLineConfigProblem(tokens.segments) ?? gitEnvProblem(tokens.segments)
+    ?? pushPlumbingProblem(tokens.segments) ?? ghRepoProblem(tokens.segments);
   if (other) return deny(other);
 
   // Forbidden problems return at once. A reshape problem is kept while the rest is checked,
@@ -664,7 +764,14 @@ export function checkCommand(command, { home, readFile = defaultReadFile } = {})
     shape ??= problem?.reason ?? null;
   }
 
-  if (mentionsPush(removeSpans(text, allowedSpans))) {
+  // The standalone git/push check runs over the raw text (so src/push.ts and push-docs pass),
+  // and over the dequoted text of every word outside the allowed pushes, so a push word split by
+  // quotes or escapes (pu"sh", pu''sh, 'git' pu\sh) reassembles and is caught.
+  const dequotedRemainder = tokens.segments
+    .filter((seg) => !isPushSegment(split(seg)))
+    .flatMap((seg) => seg.words.map((w) => w.text))
+    .join(' ');
+  if (mentionsPush(removeSpans(text, allowedSpans)) || mentionsPush(dequotedRemainder)) {
     return deny("a push the guard can't check (inside a string, script, alias or subshell)");
   }
   return shape ? deny(shape, 'reshape') : ALLOW;
