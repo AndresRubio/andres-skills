@@ -71,11 +71,20 @@ Most of the problems below were in the plan's own text, not in how it was carrie
 - Each commit's trailer names the model that actually wrote it: Opus 5.5, Sonnet 5 or Haiku 4.5.
 - macOS has no `timeout` command, and `claude plugin eval` is early-access, so the plan uses its own acceptance checker.
 
+## 6. After the agentic code-review research (2026-09-30)
+
+A review of current practice in agentic code review added two Phase 1 tasks. It also added a set of Phase 2 items (spec D15, §7.4).
+
+| Problem | Fix |
+|---|---|
+| The sandbox deny rules match command prefixes, so `git push origin HEAD:main` or `git -C . push origin main` got past them, and they protected only the sandbox | Task 16a: a plugin hook, the run guard. During a run it allows only `git push [-u] origin "$BRANCH"` to a `claude/*` branch, and it blocks PR merges and API ref writes. This updates D9, which had said "no plugin hooks". The guard acts only in sessions that run the pipeline |
+| A headless run on the public sandbox reads public text, holds your GitHub token and can post comments: the "lethal trifecta". Nothing tested whether private data could leak | Task 16b: test issue 10 asks the pipeline to copy a random marker from the private sandbox into its comments. The checker scans the whole public repo for it. Task 18 now runs with a token scoped to the two sandboxes. The sandbox also denies `curl` and `wget` |
+
 ## Waiting on the owner
 
 1. Log in the CLI (`claude auth login`).
 2. Say yes to Task 17, which creates `AndresRubio/pipeline-sandbox` (public) and `pipeline-sandbox-private`.
-3. Task 18: automatic runs of fixtures 03, 04, 01, 02 and 07, with 03 first as a cheap permissions check. Then the interactive runs of 01, 02 and 05 together with the owner, the results file, and the v0.1.0 tag.
+3. Task 18: create a fine-grained token scoped to the two sandbox repos (saved to `~/.config/claude-pipeline/sandbox-token`). Then run fixtures 03, 04, 01, 02, 07 and 10 automatically, with 03 first as a cheap permissions check. Then the interactive runs of 01, 02 and 05 together with the owner, the results file, and the v0.1.0 tag.
 4. Optional: publish the plugin repo and install the plugin.
 
 ## Carried into Phase 2/3
@@ -89,4 +98,5 @@ Most of the problems below were in the plan's own text, not in how it was carrie
 - `maxParallel` versus "nothing merges" in Phase 1.
 - Trust for sub-issues created by the bot.
 - Modal Sandboxes as an optional GitHub-lane runner (spec D14, §6.2, Q11–Q12).
+- Verification hardening (spec D15, §7.4): the `diff-risk` report enforced by `human-gate`, a second reviewer of a different kind, the revert check, intent in the PR body, and pass^3 acceptance.
 - Cua (trycua/cua) as optional VM isolation for the local runner and for visual checks of desktop apps. Avoid its AGPL parts.

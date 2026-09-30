@@ -4520,6 +4520,8 @@ Ask:
 | §8 worktrees outside the repo, free ports, per-issue folders | 2, 8, 9, 14 (stage 7) |
 | §9 error handling for Phase 1 stops | 11 (stop procedure), 12–14 |
 | §10 sandboxes and test issues 1–5 (6–9 seeded for Phase 2) | 15, 16, 17 |
+| §7.2 run guard, D9 (updated) | 16a |
+| §7.3 private data, §10 test issue 10 | 16b, 17, 18 |
 | §11 Phase 1 exit criteria | 18 |
 | §12 Q4, Q7, Q10 | Findings section, 11, 18 |
 
