@@ -8,7 +8,7 @@ BRANCH, BASE_REF, NUMBER, KEY, REPO, spec.md, evidence.md, `$RUN_DIR/issue.json`
 
 ## Steps
 
-1. `git status --porcelain` must be empty. Commit anything left (with the trailer), then `git push -u origin "$BRANCH"`. `SHA=$(git rev-parse HEAD)`.
+1. `git status --porcelain` must be empty. Commit anything left (with the trailer), then push with `git push -u origin "$BRANCH"` as its own command. Then, as a separate command, record the SHA: `echo "SHA='$(git rev-parse HEAD)'" >> "$RUN_DIR/vars.sh"`.
 2. `gh pr list --repo "$REPO" --head "$BRANCH" --state open --json number,url`. If a PR already exists for BRANCH, PR_URL is its `url`: reuse it, skipping only the create step (see the mode sections below).
 3. Write the PR body to `$RUN_DIR/pr-body.md`:
    1. The first line is the output of `node "$PIPELINE" marker report`.

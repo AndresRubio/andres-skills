@@ -66,7 +66,7 @@ async function main() {
   const marker = markerPath(home, input.session_id);
   let active = mode === '1' || (marker !== null && existsSync(marker));
   try {
-    if (isActivating(command, home)) {
+    if (isActivating(command)) {
       activate(marker);
       active = true;
     }
@@ -75,7 +75,7 @@ async function main() {
     if (verdict.allow) return;
     block([
       `claude-pipeline guard: ${verdict.reason}.`,
-      'The pipeline pushes only with `git push origin "$BRANCH"` or `git push -u origin "$BRANCH"`, run as its own command after sourcing vars.sh, and it never merges. Don\'t look for another way to do this: follow the stop procedure. If the command only mentions push or merge in text, put that text in a file with the file-writing tool.',
+      'The pipeline pushes only with `git push origin "$BRANCH"` or `git push -u origin "$BRANCH"`, after sourcing vars.sh, with nothing but `cd`, `git add`, `git commit` and `git status` in the same command, and it never merges. Don\'t look for another way to do this: follow the stop procedure. If the command only mentions push or merge in text, put that text in a file with the file-writing tool.',
     ].join('\n'));
   } catch (err) {
     if (active && /\b(push|merge)\b/.test(command)) {

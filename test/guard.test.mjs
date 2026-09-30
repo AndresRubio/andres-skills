@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, utimesSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, utimesSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkCommand, isActivating } from '../skills/ship/scripts/lib/guard.mjs';
@@ -38,6 +38,7 @@ const prefix = (home, id) => `${source(home, id)} && cd "$WT" && `;
 const HOME = makeHome();
 const SPACE_HOME = makeHome('guard space ');
 const check = (command, home = HOME) => checkCommand(command, { home });
+const ONLY_AROUND = /only the vars\.sh source, cd, git add, git commit and git status/;
 
 function assertAllowed(command, home = HOME) {
   const v = check(command, home);
@@ -73,7 +74,7 @@ test('allows a literal claude/ branch, however it is quoted or spelled', () => {
   assertAllowed('git push origin claude/1.2_x/y');
   assertAllowed('git push origin \\\nclaude/1-x');
   assertAllowed('git push origin claude/1-x # the run branch');
-  assertAllowed('git push origin claude/1-x; echo done');
+  assertAllowed('git push origin claude/1-x\n');
 });
 
 test('allows a push that redirects only to /dev/null or duplicates a descriptor', () => {
@@ -182,7 +183,7 @@ test('names the problem in the reason for representative pushes', () => {
 test('denies $BRANCH when vars.sh was not sourced from the run folder', () => {
   const push = 'git push origin "$BRANCH"';
   assertDenied(`cd "$WT" && ${push}`, /vars\.sh/);
-  assertDenied(`${source(HOME)} && ${source(HOME)} && ${push}`, /more than one/);
+  assertDenied(`${source(HOME)} && ${source(HOME)} && ${push}`, ONLY_AROUND);
   assertDenied(`. "$RUN_DIR/vars.sh" && ${push}`);
   assertDenied(`. '/tmp/elsewhere/runs/run-abc123/vars.sh' && ${push}`);
   assertDenied(`. '${path.join(HOME, 'vars.sh')}' && ${push}`);
@@ -236,8 +237,8 @@ test('denies $BRANCH when something in the command could change it', () => {
   ]) {
     assertDenied(command);
   }
-  assertDenied(`${s} && BRANCH=main; ${push}`, /BRANCH/);
-  assertDenied(`${s} && $(true) && ${push}`, /substitution/);
+  assertDenied(`${s} && BRANCH=main; ${push}`, ONLY_AROUND);
+  assertDenied(`${s} && $(true) && ${push}`, ONLY_AROUND);
 });
 
 test('denies $BRANCH when vars.sh does not name a safe claude/ branch', () => {
@@ -328,18 +329,292 @@ test('denies merging and writing refs through gh and the API', () => {
   assertDenied('gh api -X PUT repos/o/r/contents/README.md -f message=x', /contents/);
 });
 
+// --- checkCommand: a command that pushes may contain nothing else (16a fix round 1) ---
+
+test('denies a command that rewrites vars.sh (by glob or by cp) before sourcing it and pushing', () => {
+  const v = varsFile(HOME);
+  const glob = v.replace('vars.sh', "vars'?'sh");
+  const star = v.replace('vars.sh', "va'*'.sh");
+  const push = 'git push origin "$BRANCH"';
+  for (const command of [
+    `printf '\\nBRANCH=claude/12-fix-month:main\\n' > '${glob}' && ${source(HOME)} && cd "$WT" && ${push}`,
+    `printf '\\nBRANCH=claude/12-fix-month:main\\n' > '${star}' && ${source(HOME)} && cd "$WT" && ${push}`,
+    `cp evil '${star}' && ${source(HOME)} && cd "$WT" && ${push}`,
+    `${source(HOME)} && printf x > '${glob}' && ${push}`,
+    `${source(HOME)} && cp evil '${star}' && ${push}`,
+    `${source(HOME)} && cd "$WT" && ${push} 2>&1 | tail -5 > out.txt`,
+  ]) {
+    assertDenied(command, ONLY_AROUND);
+  }
+  assertDenied(`${source(HOME)} && cd "$WT" && ${push} > out.txt`, /redirection/);
+});
+
+test('denies a push whose command has a source that is not first, or a shape the whitelist lacks', () => {
+  const s = source(HOME);
+  const push = 'git push origin "$BRANCH"';
+  for (const command of [
+    `{ ${s}; } && ${push}`,
+    `if true; then ${s}; fi; ${push}`,
+    `(${s}) && ${push}`,
+    `false && ${s}; ${push}`,
+    `${push}; ${s}`,
+    `cd "$WT" && ${s} && ${push}`,
+    `${s} && echo \${X:-$(true)} && ${push}`,
+    `${s} && echo \${X:-\`true\`} && ${push}`,
+    `${s} && export GIT_CONFIG_COUNT=1 && git push origin claude/1-x`,
+    `${s} && ls && ${push}`,
+    `echo hi && git push origin claude/1-x`,
+    // every segment is one the whitelist knows; only the joiner, a substitution or an assignment is wrong
+    `git status; git push origin claude/1-x`,
+    `git status || git push origin claude/1-x`,
+    `git status | git push origin claude/1-x`,
+    `cd /tmp & git push origin claude/1-x`,
+    `git status\ngit push origin claude/1-x`,
+    `git status && git push origin claude/1-x ; git status`,
+    `git add $(ls) && git push origin claude/1-x`,
+    `cd "$(pwd)" && git push origin claude/1-x`,
+    'git add `ls` && git push origin claude/1-x',
+    `git add \${X:-$(true)} && git push origin claude/1-x`,
+    `git add \${X:-\`true\`} && git push origin claude/1-x`,
+    `git add -A && git commit -m "$(cat msg.txt)" && git push origin claude/1-x`,
+    `git push origin claude/1-x && git commit -m x > out.txt`,
+    `GIT_DIR=/tmp/x git add -A && git push origin claude/1-x`,
+    `git push origin claude/1-x; true`,
+    `git push origin claude/1-x || true`,
+    `git push origin claude/1-x &`,
+    `git push origin claude/1-x; echo done`,
+    `git push origin claude/1-x\necho done`,
+    `git push origin claude/1-x && (true)`,
+    `X=1 git status && git push origin claude/1-x`,
+    `cd a b && git push origin claude/1-x`,
+    `cd && git push origin claude/1-x`,
+    `git -C x status && git push origin claude/1-x`,
+    `git log && git push origin claude/1-x`,
+    `git push origin claude/1-x | cat`,
+    `git push origin claude/1-x | tail $(echo 5)`,
+    `git push origin claude/1-x | tail -f /etc/hosts`,
+    `git push origin claude/1-x | tail -5 | head -1`,
+    `tail -5 && git push origin claude/1-x`,
+    `true | tail -5 && git push origin claude/1-x`,
+    `git push origin claude/1-x && ! true`,
+    `git push origin claude/1-x && \`true\``,
+    `${s} extra && ${push}`,
+    `X=1 . '${varsFile(HOME)}' && ${push}`,
+    `git commit --no-verify -m x && git push origin claude/1-x`,
+    `git commit -n -m x && git push origin claude/1-x`,
+    `git commit -nm x && git push origin claude/1-x`,
+    `git commit -m x --no-verif && git push origin claude/1-x`,
+    `git commit -m x >out.txt && git push origin claude/1-x`,
+  ]) {
+    assertDenied(command);
+  }
+  assertDenied(`git push origin claude/1-x; true`, ONLY_AROUND);
+  assertDenied(`${s} && export GIT_CONFIG_COUNT=1 && git push origin claude/1-x`, ONLY_AROUND);
+});
+
+test('denies a literal push sourced from a vars.sh outside the run folder', () => {
+  assertDenied('. /tmp/x/vars.sh && git push origin claude/1-x', /vars\.sh/);
+  assertAllowed(`${source(HOME)} && git push origin claude/1-x`);
+});
+
+test('allows only vars.sh source, cd, git add, git commit, git status and tail/head around a push', () => {
+  const p = prefix(HOME);
+  for (const command of [
+    `${p}git status --porcelain && git push -u origin "$BRANCH"`,
+    `${p}git add docs/pipeline/$KEY && git commit -m "docs(pipeline): spec for #12" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" && git push -u origin "$BRANCH"`,
+    `${p}git add -A && git commit -m "wip(pipeline): 12 stopped at stage 3" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>" && git push origin "$BRANCH"`,
+    `${p}git add -A && git commit -F "$RUN_DIR/commit-msg.txt" && git push origin "$BRANCH"`,
+    `${p}git add -A && git commit -mnote && git push origin "$BRANCH"`,
+    `${p}git commit -m "-n is not a flag here" && git push origin "$BRANCH"`,
+    `${p}git push origin "$BRANCH" 2>&1 | tail -5`,
+    `${p}git push origin "$BRANCH" 2>&1 | head -n 20`,
+    `${p}git push origin "$BRANCH" 2>&1 | tail -n +3 && git status`,
+    `${source(HOME)} && git push origin "$BRANCH"`,
+    'git push origin claude/12-fix-month',
+    'cd /tmp && git push origin claude/12-fix-month',
+    'git status && git push origin claude/12-fix-month',
+  ]) {
+    assertAllowed(command);
+  }
+});
+
+test('allows every push the skill documents, in the form the skill gives it', () => {
+  const skillDir = fileURLToPath(new URL('../skills/ship/', import.meta.url));
+  const files = [];
+  const walk = (dir) => {
+    for (const name of readdirSync(dir)) {
+      const full = path.join(dir, name);
+      if (statSync(full).isDirectory()) { if (name !== 'scripts') walk(full); } else if (name.endsWith('.md')) files.push(full);
+    }
+  };
+  walk(skillDir);
+  let seen = 0;
+  for (const file of files) {
+    for (const m of readFileSync(file, 'utf8').matchAll(/`([^`\n]*git push[^`\n]*)`/g)) {
+      seen += 1;
+      assertAllowed(`${prefix(HOME)}${m[1]}`);
+    }
+  }
+  assert.ok(seen >= 10, `expected to find the documented pushes, found ${seen}`);
+});
+
+// --- checkCommand: changing remotes and push-related config ---
+
+test('denies changing git remotes and the git config that controls pushes', () => {
+  for (const command of [
+    'git remote set-url origin https://evil.example/x.git',
+    'git remote add evil x',
+    'git remote rename origin x',
+    'git remote remove origin',
+    'git remote rm origin',
+    'git remote set-branches origin main',
+    'git -C "$WT" remote add evil x',
+    'git config url.https://evil.example/.insteadOf https://github.com/',
+    'git config remote.origin.pushurl x',
+    'git config --global alias.p push',
+    'git config core.hooksPath /tmp/h',
+    'git config core.sshCommand evil',
+    'git config --unset remote.origin.url',
+    'git config --unset-all core.hooksPath',
+    'git config --local --add remote.origin.url x',
+    'git config credential.helper store',
+    'git config http.proxy x',
+    'git config includeIf.gitdir:/x.path /y',
+    'git config branch.main.remote x',
+    'git config PUSH.default matching',
+  ]) {
+    assertDenied(command);
+  }
+  assertDenied('git remote set-url origin https://evil.example/x.git', /remotes/);
+  assertDenied('git config core.hooksPath /tmp/h', /config/);
+});
+
+test('allows reading remotes and config, and config that does not steer pushes', () => {
+  for (const command of [
+    'git remote -v',
+    'git remote get-url origin',
+    'git remote prune origin',
+    'git remote set-head origin --auto',
+    'git config --get remote.origin.url',
+    'git config --get-all remote.origin.fetch',
+    'git config --get-regexp remote',
+    'git config --list',
+    'git config -l',
+    'git config user.name',
+    'git config user.name "A Name"',
+    'git config core.editor true',
+  ]) {
+    assertAllowed(command);
+  }
+});
+
+// --- checkCommand: fewer false positives ---
+
+test('does not mistake files and identifiers that contain push, git or merge for a push or a merge', () => {
+  for (const command of [
+    'git add src/push.ts && git commit -F "$RUN_DIR/commit-msg.txt"',
+    'git diff -- src/push-notifications.ts',
+    "git grep -n '.push('",
+    `. '${varsFile(HOME)}' && echo "BRANCH='claude/12-git-push-hook'" >> "$RUN_DIR/vars.sh"`,
+    'git add lib/git/refs.js',
+    'grep -rn updateRef src',
+    'git add docs/merges.md',
+    'git add docs/git/commits.md docs/git/tags.md',
+    'cat pulls/5/merge-notes.md',
+    'npm run push-docs',
+    'echo pushed && git status',
+    'git log --oneline -- lib/pushers.js',
+  ]) {
+    assertAllowed(command);
+  }
+});
+
+test('still denies a standalone push next to git, in any case', () => {
+  for (const command of [
+    'git status && echo PUSH',
+    'echo "(push)" && git status',
+    'echo {push} && git status',
+    "git log --grep='push'",
+    'git commit -m "push the fix"',
+    'bash -c "git push origin main"',
+    "sh -c 'git push origin claude/1-x'",
+    'echo x;git;push',
+    '/usr/bin/git log --grep="Push"',
+  ]) {
+    assertDenied(command);
+  }
+});
+
+test('applies the GraphQL and API rules only to GraphQL queries and API endpoint paths', () => {
+  assertDenied('gh api graphql -f query=\'mutation { mergeBranch(input:{}) { clientMutationId } }\'');
+  assertDenied('gh api GraphQL -f query=@q.txt -f x=updateRef');
+  assertDenied('gh api "repos/$REPO/pulls/5/merge" -X PUT', /merge API/);
+  assertDenied('gh api /repos/o/r/merges -f base=main', /merge API/);
+  assertDenied('gh api "repos/$REPO/git/refs" -f ref=x', /refs/);
+  assertDenied('gh api "repos/$REPO/contents/x.md" -X PUT', /contents/);
+  assertAllowed('gh api "repos/$REPO/contents/x.md" --jq .content');
+  assertAllowed('gh api "repos/$REPO/pulls/5/comments"');
+  assertAllowed('cat docs/git/refs.md docs/merges.md lib/contents/x.js -f');
+});
+
+test('denies gh pr merge however it is spelled', () => {
+  for (const command of [
+    'gh pr -R o/r merge 5 --squash',
+    'gh pr "merge" 5',
+    "gh pr 'merge' --auto 5",
+    'GH pr merge 5',
+    '/usr/local/bin/gh pr --repo o/r "merge" 5',
+    'gh pr\tmerge 5',
+  ]) {
+    assertDenied(command, /merg/i);
+  }
+  assertAllowed('gh pr view 5 --json mergeable');
+  assertAllowed('gh pr view 5 --json mergeStateStatus,mergeable');
+  assertAllowed('gh pr list --search "merged"');
+});
+
+test('denies a push through a git spelled with another case, a glob or an expansion', () => {
+  for (const command of [
+    'GIT push origin main',
+    '/usr/bin/Git push origin main',
+    '/usr/bin/gi? push origin main',
+    '/usr/bin/gi[t] push origin claude/1-x',
+    '/usr/bin/g* push origin claude/1-x',
+    '$GIT push origin claude/1-x',
+    '"$GIT" push origin claude/1-x',
+    '$HOME/bin/git push origin claude/1-x',
+  ]) {
+    assertDenied(command);
+  }
+  assertAllowed('GIT status && git push origin claude/1-x');
+  assertAllowed('/usr/bin/Git push origin claude/1-x');
+});
+
 // --- isActivating ---
 
-test('isActivating recognises pipeline commands', () => {
-  const home = '/srv/pipeline-home';
-  assert.equal(isActivating('echo $CLAUDE_PIPELINE_HOME', home), true);
-  assert.equal(isActivating('ls ~/.claude-pipeline/runs/run-x', home), true);
-  assert.equal(isActivating('. /srv/pipeline-home/runs/run-x/vars.sh', home), true);
-  assert.equal(isActivating('. /srv/pipeline-home/runs/run-x/vars.sh', `${home}/`), true);
-  assert.equal(isActivating('node /p/skills/ship/scripts/pipeline.mjs config', home), true);
-  assert.equal(isActivating('git push origin main', home), false);
-  assert.equal(isActivating('ls /srv/other/runs/', home), false);
-  assert.equal(isActivating('gh pr list', home), false);
+// The Setup command exactly as SKILL.md gives it.
+const SETUP_COMMAND = readFileSync(fileURLToPath(new URL('../skills/ship/SKILL.md', import.meta.url)), 'utf8')
+  .match(/`(mkdir -p [^`\n]*mktemp -d[^`\n]*)`/)?.[1];
+
+test('isActivating recognises the Setup command and a source of a run\'s vars.sh, and nothing else', () => {
+  assert.ok(SETUP_COMMAND, 'SKILL.md Setup command not found');
+  assert.equal(isActivating(SETUP_COMMAND), true);
+  assert.equal(isActivating('RUN_DIR=$(mktemp -d "$H/runs/run-XXXXXX")'), true);
+  assert.equal(isActivating('. /srv/pipeline-home/runs/run-x1/vars.sh && node "$PIPELINE" config'), true);
+  assert.equal(isActivating(". '/srv/pipeline home/runs/run-AbC123/vars.sh' && git status"), true);
+  for (const command of [
+    'ls ~/.claude-pipeline/runs/',
+    'ls ~/.claude-pipeline/runs/run-x1',
+    'grep -rn CLAUDE_PIPELINE_HOME .',
+    'echo $CLAUDE_PIPELINE_HOME',
+    'node /p/skills/ship/scripts/pipeline.mjs config',
+    'cat /srv/x/runs/run-abc/notes.txt',
+    'cat /srv/x/runs/run-a.b/vars.sh',
+    'git push origin main',
+    'gh pr list',
+  ]) {
+    assert.equal(isActivating(command), false, command);
+  }
 });
 
 // --- hook wrapper ---
@@ -440,6 +715,42 @@ test('hook: ignores other tools and input it cannot read', () => {
     assert.equal(r.code, 0, `input: ${input}`);
     assert.equal(r.stderr, '');
   }
+});
+
+test('hook: the Setup command switches the guard on; merely mentioning the pipeline home does not', () => {
+  const home = makeHome('guard-setup-');
+  const quiet = runHook({ home, input: bashInput('grep -rn CLAUDE_PIPELINE_HOME . && ls ~/.claude-pipeline/runs/', 's5') });
+  assert.equal(quiet.code, 0);
+  assert.equal(existsSync(path.join(home, 'guard', 's5')), false);
+  assert.equal(runHook({ home, input: bashInput('git push origin main', 's5') }).code, 0);
+
+  const setup = runHook({ home, input: bashInput(SETUP_COMMAND, 's6') });
+  assert.equal(setup.code, 0, setup.stderr);
+  assert.ok(existsSync(path.join(home, 'guard', 's6')), 'marker file');
+  assert.equal(runHook({ home, input: bashInput('git push origin main', 's6') }).code, 2);
+});
+
+test('hook: the deny message states the whitelist but does not name the off switch', () => {
+  const home = makeHome('guard-msg-');
+  const r = runHook({ home, guard: '1', input: bashInput('git push origin main') });
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /after sourcing vars\.sh, with nothing but `cd`, `git add`, `git commit` and `git status` in the same command, and it never merges\./);
+  assert.match(r.stderr, /follow the stop procedure/);
+  assert.doesNotMatch(r.stderr, /CLAUDE_PIPELINE_GUARD/);
+  assert.doesNotMatch(r.stderr, /guard\//);
+});
+
+test('hook: a command the guard cannot even tokenize fails closed when it mentions push or merge', () => {
+  const home = makeHome('guard-deep-');
+  const nest = '"$('.repeat(20000);
+  const blocked = runHook({ home, guard: '1', input: bashInput(`${nest} git push origin main`) });
+  assert.equal(blocked.code, 2);
+  assert.ok(blocked.stderr.startsWith('claude-pipeline guard: could not check this command ('), blocked.stderr);
+  const merge = runHook({ home, guard: '1', input: bashInput(`${nest} gh pr merge 5`) });
+  assert.equal(merge.code, 2);
+  const quiet = runHook({ home, guard: '1', input: bashInput(nest) });
+  assert.equal(quiet.code, 0);
+  assert.equal(quiet.stderr, '');
 });
 
 test('hooks.json registers the guard as a PreToolUse hook on Bash', () => {

@@ -296,6 +296,27 @@ test('every push instruction under skills/ship names the branch explicitly (R2)'
   }
 });
 
+test('hard rule 3 lists what may share a command with a push (16a fix)', () => {
+  const rules = read('SKILL.md').split('## Hard rules')[1]?.split('\n## ')[0] ?? '';
+  const rule3 = rules.match(/^3\. \*\*.*$/m)?.[0] ?? '';
+  assert.match(rule3, /after sourcing vars\.sh, with only `cd`, `git add`, `git commit` and `git status` in the same command/);
+  assert.doesNotMatch(rule3, /as its own command/);
+});
+
+test('no backticked span under skills/ship combines a git push with a command substitution (16a fix)', () => {
+  for (const file of markdownFiles()) {
+    for (const m of readFileSync(file, 'utf8').matchAll(/`([^`\n]+)`/g)) {
+      assert.ok(!(m[1].includes('git push') && m[1].includes('$(')), `${path.relative(SKILL_DIR, file)}: ${m[1]}`);
+    }
+  }
+});
+
+test('stage 9 pushes as its own command and records the SHA in a separate one (16a fix)', () => {
+  const step1 = read('stages/09-finish.md').match(/^1\. .*$/m)?.[0] ?? '';
+  assert.match(step1, /push with `git push -u origin "\$BRANCH"` as its own command/);
+  assert.match(step1, /as a separate command, record the SHA: `echo "SHA='\$\(git rev-parse HEAD\)'" >> "\$RUN_DIR\/vars\.sh"`/);
+});
+
 test('hard rule 3 names the run guard hook and the stop procedure (16a)', () => {
   const rules = read('SKILL.md').split('## Hard rules')[1]?.split('\n## ')[0] ?? '';
   const rule3 = rules.match(/^3\. \*\*.*$/m)?.[0] ?? '';

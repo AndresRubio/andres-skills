@@ -4,32 +4,36 @@ import path from 'node:path';
 // The run guard's logic. hooks/guard.mjs is the thin I/O wrapper around it.
 //
 // A seatbelt, not a security boundary: it reads a Bash command as text and refuses the
-// shapes that push somewhere other than the run's claude/* branch, or that merge. A script
-// written to a file and then run gets past it. The boundaries are a token scoped to the repo
-// and branch protection.
+// shapes that push somewhere other than the run's claude/* branch, or that merge. A command
+// that pushes may contain nothing but the vars.sh source, cd, git add, git commit, git status
+// and a tail/head of the push's output, so nothing in it can change what is pushed. A script
+// written to a file and then run gets past it, and so does a .git/config or hook edited by a
+// file write in an earlier call. The boundaries are a token scoped to the repo and branch
+// protection.
 
 const ALLOW = { allow: true };
 const deny = (reason) => ({ allow: false, reason });
 
 // --- activation ---
 
-// Every pipeline command sources vars.sh from the runs folder or calls pipeline.mjs, so
-// a run switches the guard on for its session from Setup onward.
-export function isActivating(command, home) {
-  const homes = [home, path.resolve(home)].map((h) => h.replace(/\/+$/, ''));
-  const needles = ['CLAUDE_PIPELINE_HOME', '.claude-pipeline/runs/', 'scripts/pipeline.mjs', ...homes.map((h) => `${h}/runs/`)];
-  return needles.some((needle) => command.includes(needle));
+// A run switches the guard on for its session at Setup: the command that creates the run
+// folder names Setup's mktemp template, and every later pipeline command sources that
+// folder's vars.sh. Merely mentioning the pipeline home (ls, grep) doesn't count.
+export function isActivating(command) {
+  return command.includes('/runs/run-XXXXXX') || /\/runs\/run-[A-Za-z0-9]+\/vars\.sh/.test(command);
 }
 
 // --- merges and ref writes (raw text, including text inside quotes) ---
 
+// The API rules match endpoint paths (repos/<owner>/<repo>/…) and the GraphQL rule matches only
+// a command that mentions graphql, so file names like docs/git/refs.md don't trip them.
 const MERGE_RULES = [
   [/\bpr\s+merge\b/, 'merging a pull request'],
   [/\bgh\s+alias\b/, 'gh aliases'],
-  [/\b(mergePullRequest|enablePullRequestAutoMerge|mergeBranch|createCommitOnBranch|updateRefs?)\b/, 'a GraphQL mutation that merges or moves a branch'],
-  [/\/pulls\/[^\s/'"]+\/merge\b|\/merges\b/, 'the merge API'],
-  [/\/git\/(refs|commits|trees|tags)\b/, 'git objects or refs through the API'],
+  [/repos\/[^\s'"]+\/(pulls\/[^\s/'"]+\/merge|merges)\b/, 'the merge API'],
+  [/repos\/[^\s'"]+\/git\/(refs|commits|trees|tags)\b/, 'git objects or refs through the API'],
 ];
+const GRAPHQL_MERGE = /\b(mergePullRequest|enablePullRequestAutoMerge|mergeBranch|createCommitOnBranch|updateRefs?)\b/;
 
 const WRITE_FLAGS = [
   /(?:^|[\s'"])(?:-X|--method)[\s=]*['"]?(?:PUT|POST|PATCH|DELETE)\b/i,
@@ -41,7 +45,10 @@ function mergeProblem(command) {
   for (const [pattern, reason] of MERGE_RULES) {
     if (pattern.test(command)) return reason;
   }
-  if (/\/contents\//.test(command) && WRITE_FLAGS.some((flag) => flag.test(command))) {
+  if (/graphql/i.test(command) && GRAPHQL_MERGE.test(command)) {
+    return 'a GraphQL mutation that merges or moves a branch';
+  }
+  if (/repos\/[^\s'"]+\/contents\//.test(command) && WRITE_FLAGS.some((flag) => flag.test(command))) {
     return 'writing files through the contents API';
   }
   return null;
@@ -104,8 +111,11 @@ const REDIRECT_OP = /^(?:&>>|&>|<<<|<<-|<<|>>|>&|>\||<>|<&|>|<)/;
 // Splits a command the way a POSIX shell would: into segments (separated by && || ; | & newline
 // ( and )), each with its words and redirections. A word is { text, raw, expands, subst,
 // start, end }: `text` has the quotes removed and any expansion left as written, `raw` is the
-// source slice, and `expands` is true when the word contains a $ expansion or a backtick.
-// Returns null for a command it can't tokenize (unbalanced quotes, a heredoc, and so on).
+// source slice, `expands` is true when the word contains a $ expansion or a backtick, and
+// `subst` when it contains a command substitution (also inside ${...}). `seps` lists every
+// separator in order, empty segments included, so a whitelist can see exactly what joined the
+// segments. Returns null for a command it can't tokenize (unbalanced quotes, a heredoc, and so
+// on).
 function tokenize(cmd) {
   try {
     return tokenizeUnchecked(cmd);
@@ -118,6 +128,7 @@ function tokenize(cmd) {
 function tokenizeUnchecked(cmd) {
   const n = cmd.length;
   const segments = [];
+  const seps = [];
   let seg = { words: [], redirs: [], subst: false, start: -1, end: -1 };
   let word = null;
   let pending = null; // a redirection operator still waiting for its target word
@@ -170,7 +181,8 @@ function tokenizeUnchecked(cmd) {
     if (next === '{') {
       const close = cmd.indexOf('}', at + 2);
       if (close < 0) throw new Unparseable('unbalanced brace');
-      take(cmd.slice(at, close + 1), close + 1, { expands: true });
+      const slice = cmd.slice(at, close + 1);
+      take(slice, close + 1, { expands: true, subst: /\$\(|`/.test(slice) });
       return close + 1;
     }
     take('$', at + 1, { expands: true });
@@ -212,6 +224,7 @@ function tokenizeUnchecked(cmd) {
       i += 1;
     } else if (c === '\n') {
       endSegment();
+      seps.push('\n');
       i += 1;
     } else if (c === '\\') {
       if (i + 1 >= n) throw new Unparseable('trailing backslash');
@@ -251,7 +264,9 @@ function tokenizeUnchecked(cmd) {
       i += op.length;
     } else if (';&|()'.includes(c)) {
       endSegment();
-      i += (c === '&' || c === '|') && cmd[i + 1] === c ? 2 : 1;
+      const width = (c === '&' || c === '|') && cmd[i + 1] === c ? 2 : 1;
+      seps.push(cmd.slice(i, i + width));
+      i += width;
     } else {
       ensureWord();
       take(c, i + 1);
@@ -259,7 +274,7 @@ function tokenizeUnchecked(cmd) {
     }
   }
   endSegment();
-  return segments;
+  return { segments, seps };
 }
 
 // --- reading the segments ---
@@ -273,10 +288,16 @@ function split(seg) {
   return { assigns: k, words: seg.words.slice(k) };
 }
 
-const isGit = (w) => w.text === 'git' || w.text.endsWith('/git');
+// A literal path ending in git or gh. Case-insensitive, because a case-insensitive file system
+// runs `GIT` and `/usr/bin/Git` as git.
+const isGit = (w) => !w.expands && /^(?:[^*?[]*\/)?git$/i.test(w.text);
+const isGh = (w) => !w.expands && /^(?:[^*?[]*\/)?gh$/i.test(w.text);
+// A first word the guard can't read (an expansion or a glob): if a push word follows, it is
+// treated as a push it can't vouch for.
+const isDynamic = (w) => w.expands || /[*?[]/.test(w.text);
 
 function isPushSegment({ words }) {
-  return words.length >= 2 && isGit(words[0]) && words.slice(1).some((w) => w.text === 'push');
+  return words.length >= 2 && (isGit(words[0]) || isDynamic(words[0])) && words.slice(1).some((w) => w.text === 'push');
 }
 
 const isClaudeBranch = (text) => (
@@ -302,6 +323,7 @@ function refProblem(word) {
   return "a refspec that isn't a claude/ branch";
 }
 
+// Redirections are allowed only to /dev/null or as a file-descriptor duplication (2>&1, >&2).
 function redirectProblem(seg) {
   for (const { op, target } of seg.redirs) {
     const dup = (op === '>&' || op === '<&') && /^(\d+|-)$/.test(target.text);
@@ -317,6 +339,7 @@ function redirectProblem(seg) {
 // Returns { reason } when it's denied, or { usesBranchVar } when it's allowed.
 function inspectPush(seg, parts) {
   if (parts.assigns > 0) return { reason: 'environment assignments before git' };
+  if (!isGit(parts.words[0])) return { reason: "a command the guard can't identify as git, followed by push" };
   const [, sub, ...args] = parts.words;
   if (sub.text.startsWith('-')) return { reason: 'git options before push' };
   if (sub.text !== 'push') return { reason: 'a push through another git subcommand' };
@@ -337,28 +360,79 @@ function inspectPush(seg, parts) {
   return { usesBranchVar: form === 'var' };
 }
 
-// --- resolving $BRANCH ---
+// --- merges by another spelling, remotes and push-related config ---
 
-const SOURCE_WORDS = new Set(['.', 'source']);
-const BRANCH_ASSIGNMENT = /^BRANCH(?:\[[^\]]*\])?\+?=/;
-// Words that run the next word as a command (or start a compound command) and so hide a
-// builtin that follows them, as in `{ read BRANCH; }`.
-const COMMAND_PREFIXES = new Set(['{', '!', 'if', 'then', 'elif', 'else', 'while', 'until', 'do', 'time']);
-const BUILTINS_THAT_SET_VARIABLES = new Set([
-  'export', 'declare', 'typeset', 'local', 'readonly', 'read', 'eval', 'unset', 'mapfile', 'readarray',
-  'set', 'alias', 'builtin', 'command', 'exec', 'trap', 'for', 'select', 'getopts',
-]);
-
-function commandWords(parts) {
-  let k = 0;
-  while (k < parts.words.length && COMMAND_PREFIXES.has(parts.words[k].text)) k += 1;
-  return parts.words.slice(k);
+// `gh pr merge` with the words split up or quoted: gh, then pr, then merge.
+function ghMergeProblem(segments) {
+  for (const seg of segments) {
+    const { words } = split(seg);
+    if (words.length < 3 || !isGh(words[0])) continue;
+    const texts = words.slice(1).map((w) => w.text.toLowerCase());
+    const pr = texts.indexOf('pr');
+    if (pr >= 0 && texts.indexOf('merge', pr + 1) > pr) return 'merging a pull request';
+  }
+  return null;
 }
 
-function startsWithBuiltin(parts) {
-  const [first, second] = commandWords(parts);
-  if (!first) return false;
-  return BUILTINS_THAT_SET_VARIABLES.has(first.text) || (first.text === 'printf' && /^-v/.test(second?.text ?? ''));
+const REMOTE_WRITES = new Set(['add', 'set-url', 'rename', 'remove', 'rm', 'set-branches']);
+const CONFIG_READS = new Set(['--get', '--get-all', '--get-regexp', '--list', '-l']);
+const PUSH_CONFIG_KEY = /^(?:(?:remote|url|push|branch|alias|include|includeif|credential|http)\.|core\.(?:hookspath|sshcommand)$)/i;
+
+function gitSettingsProblem(segments) {
+  for (const seg of segments) {
+    const { words } = split(seg);
+    if (words.length < 2 || !isGit(words[0])) continue;
+    const args = words.slice(1).map((w) => w.text);
+    const remote = args.indexOf('remote');
+    if (remote >= 0 && args.slice(remote + 1).some((a) => REMOTE_WRITES.has(a))) return 'changing git remotes';
+    const config = args.indexOf('config');
+    if (config < 0) continue;
+    const after = args.slice(config + 1);
+    if (!after.some((a) => CONFIG_READS.has(a)) && after.some((a) => !a.startsWith('-') && PUSH_CONFIG_KEY.test(a))) {
+      return 'changing git config that controls pushes';
+    }
+  }
+  return null;
+}
+
+// --- the whitelist for a command that pushes ---
+
+const AROUND = 'a push must run with only the vars.sh source, cd, git add, git commit and git status around it';
+const SOURCE_WORDS = new Set(['.', 'source']);
+const GIT_AROUND = new Set(['add', 'commit', 'status']);
+const PIPE_ARG = /^(?:-{1,2}[A-Za-z0-9][A-Za-z0-9=-]*|\+?\d+)$/;
+// Short git commit options that take the rest of the word as their value, as in -mnote.
+const COMMIT_VALUE_FLAGS = new Set(['m', 'F', 'C', 'c', 't', 'S', 'u']);
+
+const isTailOrHead = ({ words }) => (
+  words.length >= 1 && !words[0].expands && ['tail', 'head'].includes(words[0].text)
+  && words.slice(1).every((w) => !w.expands && PIPE_ARG.test(w.text))
+);
+
+// git commit without its hooks: --no-verify (or an abbreviation of it) and -n, alone or in a cluster.
+function commitProblem(args) {
+  for (const { text } of args) {
+    if (text.startsWith('--no-v') && '--no-verify'.startsWith(text)) return 'git commit without its hooks';
+    if (!/^-[A-Za-z]+$/.test(text)) continue;
+    for (const ch of text.slice(1)) {
+      if (ch === 'n') return 'git commit without its hooks';
+      if (COMMIT_VALUE_FLAGS.has(ch)) break;
+    }
+  }
+  return null;
+}
+
+// What a segment of a pushing command is: 'source' (first segment only), 'cd', 'git' (add,
+// commit or status), 'push', or 'pipe' (a tail or head right after a push), else null.
+function segmentKind(parts, index, joiner, previous) {
+  const { words } = parts;
+  if (joiner === '|') return previous === 'push' && isTailOrHead(parts) ? 'pipe' : null;
+  if (words.length === 0) return null;
+  if (isPushSegment(parts)) return 'push';
+  if (index === 0 && SOURCE_WORDS.has(words[0].text) && words.length === 2) return 'source';
+  if (words[0].text === 'cd' && words.length === 2) return 'cd';
+  if (isGit(words[0]) && words.length >= 2 && !words[1].expands && GIT_AROUND.has(words[1].text)) return 'git';
+  return null;
 }
 
 function isRunVarsFile(file, home) {
@@ -389,28 +463,49 @@ function lastBranch(body) {
   return { branch };
 }
 
-function branchProblem(segments, home, readFile) {
-  const parts = segments.map(split);
-  const sources = parts.filter((p) => p.words.length > 0 && SOURCE_WORDS.has(p.words[0].text));
-  if (sources.length === 0) return "$BRANCH used without sourcing the run's vars.sh";
-  if (sources.length > 1) return 'more than one source command';
-  const { words } = sources[0];
-  if (words.length !== 2) return 'a source command with extra arguments';
-  const pathWord = words[1];
+function sourceProblem(pathWord, home) {
   if (pathWord.expands) return 'a vars.sh path that uses an expansion';
   if (!path.isAbsolute(pathWord.text)) return 'a vars.sh path that is not absolute';
-  const file = path.resolve(pathWord.text);
-  if (!isRunVarsFile(file, home)) return "a vars.sh that isn't in the run folder under the pipeline home";
+  if (!isRunVarsFile(path.resolve(pathWord.text), home)) return "a vars.sh that isn't in the run folder under the pipeline home";
+  return null;
+}
 
-  const all = segments.flatMap((s) => [...s.words, ...s.redirs.map((r) => r.target)]);
-  if (all.some((w) => BRANCH_ASSIGNMENT.test(w.text))) return 'an assignment to BRANCH';
-  if (parts.some(startsWithBuiltin)) return 'a shell builtin that can change BRANCH';
-  if (segments.some((s) => s.subst)) return 'a command substitution alongside a push of $BRANCH';
-  if (all.some((w) => w !== pathWord && w.text.includes('vars.sh'))) return 'another reference to vars.sh';
+// A command with a push in it may contain only: a vars.sh source as its first segment, cd,
+// git add, git commit (not --no-verify), git status, the push itself, and a tail or head of the
+// push's output; joined by && (and that one |); with no substitution, no assignment and no
+// redirection except to /dev/null or a descriptor duplication. So nothing in it can change
+// what the push does, and the vars.sh the guard reads is the one the shell sources. When the
+// push uses $BRANCH, that vars.sh must be sourced and end with a claude/ branch.
+function whitelistProblem({ segments, seps }, home, readFile, usesBranchVar) {
+  if (seps.length !== segments.length - 1) return AROUND;
+  const kinds = [];
+  let sourceWord = null;
+  for (let i = 0; i < segments.length; i += 1) {
+    const seg = segments[i];
+    const parts = split(seg);
+    const joiner = i === 0 ? null : seps[i - 1];
+    if (joiner !== null && joiner !== '&&' && joiner !== '|') return AROUND;
+    if (seg.subst || parts.assigns > 0 || redirectProblem(seg)) return AROUND;
+    const kind = segmentKind(parts, i, joiner, kinds[i - 1]);
+    if (!kind) return AROUND;
+    if (kind === 'source') sourceWord = parts.words[1];
+    if (kind === 'git' && parts.words[1].text === 'commit') {
+      const problem = commitProblem(parts.words.slice(2));
+      if (problem) return problem;
+    }
+    kinds.push(kind);
+  }
+
+  if (sourceWord) {
+    const problem = sourceProblem(sourceWord, home);
+    if (problem) return problem;
+  }
+  if (!usesBranchVar) return null;
+  if (!sourceWord) return "$BRANCH used without sourcing the run's vars.sh";
 
   let body;
   try {
-    body = readFile(file);
+    body = readFile(path.resolve(sourceWord.text));
   } catch {
     return "a vars.sh the guard couldn't read";
   }
@@ -432,7 +527,11 @@ function removeSpans(text, spans) {
   return out + text.slice(pos);
 }
 
-const mentionsPush = (text) => /\bgit\b/.test(text) && /\bpush\b/.test(text);
+// Standalone shell words: `git` and `push` count only when set off by whitespace, a quote, a
+// bracket or a separator, so src/push.ts, push-docs and lib/git/refs.js don't.
+const STANDALONE_PUSH = /(?<=^|[\s'"`({;&|])push(?=$|[\s'"`)};&|])/i;
+const STANDALONE_GIT = /(?<=^|[\s'"`({;&|/])git(?=$|[\s'"`)};&|])/i;
+const mentionsPush = (text) => STANDALONE_GIT.test(text) && STANDALONE_PUSH.test(text);
 
 const defaultReadFile = (file) => readFileSync(file, 'utf8');
 
@@ -440,12 +539,16 @@ export function checkCommand(command, { home, readFile = defaultReadFile } = {})
   const merge = mergeProblem(command);
   if (merge) return deny(merge);
 
-  const segments = tokenize(command);
-  if (!segments) return mentionsPush(command) ? deny('a command too complex to check') : ALLOW;
+  const text = command.trim();
+  const tokens = tokenize(text);
+  if (!tokens) return mentionsPush(text) ? deny('a command too complex to check') : ALLOW;
+
+  const other = ghMergeProblem(tokens.segments) ?? gitSettingsProblem(tokens.segments);
+  if (other) return deny(other);
 
   const allowedSpans = [];
   let usesBranchVar = false;
-  for (const seg of segments) {
+  for (const seg of tokens.segments) {
     const parts = split(seg);
     if (!isPushSegment(parts)) continue;
     const result = inspectPush(seg, parts);
@@ -453,12 +556,12 @@ export function checkCommand(command, { home, readFile = defaultReadFile } = {})
     usesBranchVar ||= result.usesBranchVar;
     allowedSpans.push([seg.start, seg.end]);
   }
-  if (usesBranchVar) {
-    const problem = branchProblem(segments, home, readFile);
+  if (allowedSpans.length > 0) {
+    const problem = whitelistProblem(tokens, home, readFile, usesBranchVar);
     if (problem) return deny(problem);
   }
 
-  if (mentionsPush(removeSpans(command, allowedSpans))) {
+  if (mentionsPush(removeSpans(text, allowedSpans))) {
     return deny("a push the guard can't check (inside a string, script, alias or subshell)");
   }
   return ALLOW;
