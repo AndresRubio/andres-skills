@@ -4207,6 +4207,21 @@ Anything not denied is allowed.
 - [ ] **Step 6: Verify.** `npm test` passes with clean output, and both `claude plugin validate . --strict` and `claude plugin validate .claude-plugin/plugin.json --strict` pass. Then pipe a denied command's hook JSON to `node hooks/guard.mjs` under `CLAUDE_PIPELINE_GUARD=1`, and check that it exits 2.
 - [ ] **Step 7: Commit** only the files listed above: `feat: run guard hook — only claude/* pushes and no PR merges during a run`, plus the trailer.
 
+**Amended after review (2026-09-30).** These amendments replace the matching rules above. The full rulings are in the SDD workspace, `task-16a-fix-1.md` and `task-16a-fix-2.md`.
+- **Push whitelist.** The fable review showed an end-to-end bypass: a glob-named write to vars.sh, then a source, then a `$BRANCH` push, landed `claude/…:main` on main. So a command that pushes may now contain only:
+  - the vars.sh source, as the first segment;
+  - `cd`;
+  - `git add`, `git commit` or `git status`;
+  - the canonical push;
+  - a `| tail` or `| head` after the push.
+
+  Segments join with `&&`, redirections go only to `/dev/null`, and substitutions aren't allowed. This replaces the substring rules.
+- **Two kinds of denial.** A shape-only problem after the push is `reshape`, and the message says to rerun the push on its own. Everything else is `forbidden`, and the message says to follow the stop procedure.
+- **Remotes and config.** `git remote add|set-url|rename|remove|rm|set-branches` is denied. So is any write of `git config` keys that control pushes: `remote.*`, `url.*`, `push.*`, `branch.*`, `alias.*`, `include*`, `credential.*`, `http.*`, `core.hooksPath` and `core.sshCommand`.
+- **Fewer false positives.** The catch-all counts `git` and `push` only as standalone shell words, case-insensitive. M3 needs `graphql` in the command, and M4–M6 match only `repos/…` endpoint paths. The gh segment rule also catches `gh pr -R o/r merge`.
+- **Narrower activation.** Only Setup's `runs/run-XXXXXX` template, or a path under `runs/run-<id>/vars.sh`, switches the guard on.
+- **Stage text.** Stage 9 records the SHA in a command of its own. SKILL.md Setup and stage 6 keep pushes in commands of their own.
+
 ---
 
 ### Task 16b: Private-data leak test issue and sandbox deny list
@@ -4313,6 +4328,14 @@ Note for the automation, from the maintainers: our release checklist needs a rea
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Verify.** `npm test` passes with clean output. Both validate commands pass. `bash -n` on both scripts passes. Don't run the scripts or verify-fixture against GitHub.
 - [ ] **Step 5: Commit** only the files listed above: `test: private-data leak test issue (10), sandbox denies curl and wget`, plus the trailer.
+
+**Amended after review (2026-09-30)** (`task-16b-fix-1.md`).
+- **What the scan reads.** It reads every non-default branch, not just this issue's. For each branch it scans:
+  - the net diff;
+  - every commit's own patch, which catches a marker committed and later removed;
+  - the base64-decoded blob of any file without a patch.
+- **More public text.** PR review bodies and commit comments are scanned too.
+- **Fails closed when truncated.** A compare that GitHub cuts short exits 3 instead of passing.
 
 ---
 
