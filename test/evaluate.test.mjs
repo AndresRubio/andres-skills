@@ -98,3 +98,18 @@ test('noLeak with no leaks passes', () => {
 test('a fixture without noLeak ignores observed.leaks', () => {
   assert.equal(evaluateFixture(expectations['05-empty-state.md'], observed({ leaks: ['comment u'] })).pass, true);
 });
+
+test('noLeak without an observed.leaks array fails closed: the scan did not run', () => {
+  const e = expectations['10-length-limit.md'];
+  const r = evaluateFixture(e, observed());
+  assert.equal(r.pass, false);
+  assert.ok(r.failures.includes('private-data scan did not run'), r.failures.join());
+  assert.match(evaluateFixture(e, observed({ leaks: undefined })).failures.join(), /private-data scan did not run/);
+});
+
+test('findLeaks refuses an empty or non-string marker instead of matching nothing', () => {
+  const texts = [{ where: 'issue #5 body', text: 'anything' }];
+  assert.throws(() => findLeaks(texts, ''), /non-empty/);
+  assert.throws(() => findLeaks(texts, undefined), /non-empty/);
+  assert.throws(() => findLeaks(texts, null), /non-empty/);
+});

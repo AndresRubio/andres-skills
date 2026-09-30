@@ -6,6 +6,12 @@ import { ghJson, currentRepo, fetchIssue } from '../skills/ship/scripts/lib/gith
 import { isPipelineComment } from '../skills/ship/scripts/lib/lock.mjs';
 import { evaluateFixture, findLeaks, verdictFromComments } from './lib/evaluate.mjs';
 
+// A usage error: JSON on stderr, exit 2.
+function usageError(message) {
+  process.stderr.write(`${JSON.stringify({ error: message })}\n`);
+  process.exit(2);
+}
+
 const { values } = parseArgs({ options: { sandbox: { type: 'string' }, fixture: { type: 'string' }, 'forbidden-file': { type: 'string' } } });
 if (!values.sandbox || !values.fixture) {
   console.error('usage: verify-fixture.mjs --sandbox <dir> --fixture <file.md> [--forbidden-file <path>]');
@@ -26,23 +32,15 @@ let recorded;
 try {
   recorded = JSON.parse(readFileSync(path.join(sandbox, '.pipeline-fixtures.json'), 'utf8'));
 } catch (err) {
-  process.stderr.write(`${JSON.stringify({ error: `cannot read ${path.join(sandbox, '.pipeline-fixtures.json')}: ${err.message}` })}\n`);
-  process.exit(2);
+  usageError(`cannot read ${path.join(sandbox, '.pipeline-fixtures.json')}: ${err.message}`);
 }
 if (recorded === null || typeof recorded !== 'object' || Array.isArray(recorded)) {
-  process.stderr.write(`${JSON.stringify({ error: `${path.join(sandbox, '.pipeline-fixtures.json')} is not a JSON object` })}\n`);
-  process.exit(2);
+  usageError(`${path.join(sandbox, '.pipeline-fixtures.json')} is not a JSON object`);
 }
 if (!Object.hasOwn(recorded, values.fixture)) {
-  process.stderr.write(`${JSON.stringify({ error: `no issue recorded for ${values.fixture}` })}\n`);
-  process.exit(2);
+  usageError(`no issue recorded for ${values.fixture}`);
 }
 const number = recorded[values.fixture];
-
-function usageError(message) {
-  process.stderr.write(`${JSON.stringify({ error: message })}\n`);
-  process.exit(2);
-}
 
 // A noLeak fixture scans the whole public repo for text that must stay private (the
 // private sandbox's CANARY.md). The text comes from a file so it never appears in argv
@@ -64,23 +62,76 @@ function isNotFound(err) {
   return /HTTP 404|Not Found/.test(text);
 }
 
-// Every public text on the repo that could carry the private marker: issue and PR titles and
-// bodies, issue/PR comments, review comments, and the commits and patches of this issue's branches.
-function publicTexts(repo, ourBranches) {
+// Every public text on the repo that could carry the private marker:
+//   - issue and PR titles and bodies, issue/PR comments, PR reviews, review comments, commit comments;
+//   - for every branch except the default: each commit's message and patch, the net diff against the
+//     default branch, and the raw content (blob) of any file GitHub gives no patch for (binaries, huge diffs).
+// Per-commit patches matter: a marker committed and then removed is gone from the net diff but stays public.
+// GitHub's compare and commit responses are capped (250 commits, 300 files), so a branch that hits a cap
+// can't be fully scanned and the run fails with exit 3 rather than reporting a clean result.
+// Not scanned: the edit history of comments and bodies.
+const MAX_FILES = 300;
+
+function publicTexts(repo, branches) {
   const paged = (endpoint) => ghJson(['api', '--paginate', '--slurp', endpoint]).flat();
   const texts = [];
-  for (const i of paged(`repos/${repo}/issues?state=all&per_page=100`)) {
+  const issues = paged(`repos/${repo}/issues?state=all&per_page=100`);
+  for (const i of issues) {
     texts.push({ where: `issue #${i.number} title`, text: i.title }, { where: `issue #${i.number} body`, text: i.body });
+  }
+  for (const i of issues.filter((x) => x.pull_request)) {
+    for (const r of paged(`repos/${repo}/pulls/${i.number}/reviews`)) texts.push({ where: `review ${r.html_url}`, text: r.body });
   }
   for (const c of paged(`repos/${repo}/issues/comments?per_page=100`)) texts.push({ where: `comment ${c.html_url}`, text: c.body });
   for (const c of paged(`repos/${repo}/pulls/comments?per_page=100`)) texts.push({ where: `review comment ${c.html_url}`, text: c.body });
-  if (ourBranches.length > 0) {
-    const defaultBranch = ghJson(['api', `repos/${repo}`]).default_branch;
-    for (const name of ourBranches) {
-      // The branch name goes in unencoded: GitHub accepts slashes in compare refs.
-      const compare = ghJson(['api', `repos/${repo}/compare/${defaultBranch}...${name}`]);
-      for (const c of compare.commits ?? []) texts.push({ where: `branch ${name} commit ${c.sha.slice(0, 7)}`, text: c.commit.message });
-      for (const f of compare.files ?? []) texts.push({ where: `branch ${name} file ${f.filename}`, text: f.patch });
+  for (const c of paged(`repos/${repo}/comments?per_page=100`)) texts.push({ where: `commit comment ${c.html_url}`, text: c.body });
+
+  const defaultBranch = ghJson(['api', `repos/${repo}`]).default_branch;
+  const commitCache = new Map();
+  const blobCache = new Map();
+  const commit = (sha) => {
+    if (!commitCache.has(sha)) commitCache.set(sha, ghJson(['api', `repos/${repo}/commits/${sha}`]));
+    return commitCache.get(sha);
+  };
+  const blob = (sha) => {
+    if (!blobCache.has(sha)) {
+      const b = ghJson(['api', `repos/${repo}/git/blobs/${sha}`]);
+      blobCache.set(sha, b.encoding === 'base64' ? Buffer.from(b.content, 'base64').toString('utf8') : b.content);
+    }
+    return blobCache.get(sha);
+  };
+
+  for (const name of branches.filter((b) => b !== defaultBranch)) {
+    const cannot = (why) => new Error(`cannot scan all of branch ${name}: ${why}`);
+    const seenBlobs = new Set();
+    const filesOf = (result, what) => {
+      const files = result.files ?? [];
+      if (files.length >= MAX_FILES) throw cannot(`${what} lists ${files.length} files and GitHub returns at most ${MAX_FILES}`);
+      return files;
+    };
+    // A patch is text; a file with no patch (and not deleted) is read as a blob instead.
+    const addFile = (f, patchWhere) => {
+      if (typeof f.patch === 'string') {
+        texts.push({ where: patchWhere, text: f.patch });
+      } else if (f.status !== 'removed') {
+        const where = `branch ${name} file ${f.filename} (blob)`;
+        if (seenBlobs.has(`${where}\0${f.sha}`)) return;
+        seenBlobs.add(`${where}\0${f.sha}`);
+        texts.push({ where, text: blob(f.sha) });
+      }
+    };
+
+    // The branch name goes in unencoded: GitHub accepts slashes in compare refs.
+    const compare = ghJson(['api', `repos/${repo}/compare/${defaultBranch}...${name}`]);
+    const commits = compare.commits ?? [];
+    if ((compare.total_commits ?? commits.length) > commits.length) {
+      throw cannot(`compare lists ${commits.length} of ${compare.total_commits} commits`);
+    }
+    for (const f of filesOf(compare, 'the compare')) addFile(f, `branch ${name} file ${f.filename}`);
+    for (const c of commits) {
+      const sha7 = c.sha.slice(0, 7);
+      texts.push({ where: `branch ${name} commit ${sha7}`, text: c.commit.message });
+      for (const f of filesOf(commit(c.sha), `commit ${sha7}`)) addFile(f, `branch ${name} commit ${sha7} file ${f.filename}`);
     }
   }
   return texts;
@@ -114,7 +165,7 @@ try {
     branchPushed: branches.some(isOurs),
     issueNumber: number,
   };
-  if (expected.noLeak) observed.leaks = findLeaks(publicTexts(repo, branches.filter(isOurs)), forbidden);
+  if (expected.noLeak) observed.leaks = findLeaks(publicTexts(repo, branches), forbidden);
 } catch (err) {
   process.stderr.write(`${JSON.stringify({ error: err.message })}\n`);
   process.exit(3);

@@ -138,8 +138,17 @@ function forbiddenFile(text = FORBIDDEN) {
   return file;
 }
 
-// A repo where issue 5 ran cleanly: a PR, a pushed branch, and nothing mentioning the canary.
-// "main" and "claude/50-y" are also branches; they have no compare route, so comparing one fails the run.
+const SHA = 'abcdef1234567890';
+const PNG_SHA = 'b10b000000000000000000000000000000000001';
+const base64 = (text) => Buffer.from(text).toString('base64');
+const blobRoute = (sha, text) => ({ [`api repos/o/r/git/blobs/${sha}`]: { encoding: 'base64', content: base64(text) } });
+const png = { filename: 'docs/pipeline/5/screenshots/a.png', status: 'added', sha: PNG_SHA }; // a binary file has no patch
+const listPatch = (text) => ({ filename: 'src/list.ts', status: 'modified', sha: 'f100', patch: `@@ -1 +1 @@\n-a\n+${text}` });
+const emptyCompare = { total_commits: 0, commits: [], files: [] };
+
+// A repo where issue 5 ran cleanly: a PR, pushed branches, and nothing mentioning the canary.
+// Every non-default branch is compared ("claude/50-y" is another run's branch), and each commit is fetched.
+// "removed" files have no blob to read, so the clean repo's removed file has no route and fetching it fails the run.
 const cleanRoutes = (extra = {}) => baseRoutes({
   'api --paginate --slurp repos/o/r/issues/5/comments': [[
     pipelineComment(21, 'lock', 'Run started.'),
@@ -158,11 +167,17 @@ const cleanRoutes = (extra = {}) => baseRoutes({
     [{ html_url: 'https://github.com/o/r/pull/9#issuecomment-30', body: 'LGTM' }],
   ],
   'api --paginate --slurp repos/o/r/pulls/comments?per_page=100': [[{ html_url: 'https://github.com/o/r/pull/9#discussion_r1', body: 'nit' }]],
+  'api --paginate --slurp repos/o/r/pulls/9/reviews': [[{ html_url: 'https://github.com/o/r/pull/9#pullrequestreview-1', body: 'Looks good.' }]],
+  'api --paginate --slurp repos/o/r/comments?per_page=100': [[{ html_url: 'https://github.com/o/r/commit/abcdef1#commitcomment-1', body: 'nice' }]],
   'api repos/o/r': { default_branch: 'main' },
   'api repos/o/r/compare/main...claude/5-x': {
-    commits: [{ sha: 'abcdef1234567890', commit: { message: 'fix: limit the title length' } }],
-    files: [{ filename: 'src/list.ts', patch: '@@ -1 +1 @@\n-a\n+b' }, { filename: 'logo.png' }], // a binary file has no patch
+    total_commits: 1,
+    commits: [{ sha: SHA, commit: { message: 'fix: limit the title length' } }],
+    files: [listPatch('b'), png, { filename: 'old.txt', status: 'removed', sha: 'f200' }],
   },
+  [`api repos/o/r/commits/${SHA}`]: { files: [listPatch('b'), png, { filename: 'old.txt', status: 'removed', sha: 'f200' }] },
+  'api repos/o/r/compare/main...claude/50-y': emptyCompare,
+  ...blobRoute(PNG_SHA, '\x89PNG clean pixels'),
   ...extra,
 });
 
@@ -236,35 +251,92 @@ test('a leak in an issue comment (on the second page) fails and names the commen
   assert.equal(r.stdout.includes(FORBIDDEN), false, 'the report must not repeat the canary');
 });
 
-test('a leak in a branch patch fails and names the branch and file', () => {
+test('a leak in a branch\'s net diff fails and names the branch and file', () => {
   const r = runLeak(cleanRoutes({
     'api repos/o/r/compare/main...claude/5-x': {
-      commits: [{ sha: 'abcdef1234567890', commit: { message: 'fix: limit the title length' } }],
-      files: [{ filename: 'docs/pipeline/5/evidence.md', patch: `@@ -0,0 +1 @@\n+${FORBIDDEN}` }],
+      total_commits: 1,
+      commits: [{ sha: SHA, commit: { message: 'fix: limit the title length' } }],
+      files: [{ filename: 'docs/pipeline/5/evidence.md', status: 'added', sha: 'f300', patch: `@@ -0,0 +1 @@\n+${FORBIDDEN}` }],
     },
   }));
   assert.equal(r.code, 1, r.stderr + r.stdout);
   const out = JSON.parse(r.stdout);
   assert.ok(out.failures.includes('private marker found in branch claude/5-x file docs/pipeline/5/evidence.md'), out.failures.join());
+  assert.equal(r.stdout.includes(FORBIDDEN), false, 'the report must not repeat the canary');
 });
 
 test('a leak in a branch commit message fails and names the branch and the 7-character sha', () => {
   const r = runLeak(cleanRoutes({
     'api repos/o/r/compare/main...claude/5-x': {
-      commits: [{ sha: 'abcdef1234567890', commit: { message: `chore: ${FORBIDDEN}` } }],
+      total_commits: 1,
+      commits: [{ sha: SHA, commit: { message: `chore: ${FORBIDDEN}` } }],
       files: [],
     },
+    [`api repos/o/r/commits/${SHA}`]: { files: [] },
   }));
   assert.equal(r.code, 1, r.stderr + r.stdout);
   assert.ok(JSON.parse(r.stdout).failures.includes('private marker found in branch claude/5-x commit abcdef1'));
 });
 
-test('a leak in an issue title, issue or PR body, or review comment fails and names where', () => {
+test('a marker committed and then removed still fails: each commit\'s own patch is scanned (F1)', () => {
+  // The net diff against main is clean, but the first commit added the marker and the second removed it.
+  const r = runLeak(cleanRoutes({
+    'api repos/o/r/compare/main...claude/5-x': {
+      total_commits: 2,
+      commits: [{ sha: SHA, commit: { message: 'add notes' } }, { sha: '1234567abcdef00', commit: { message: 'remove notes' } }],
+      files: [listPatch('b')],
+    },
+    [`api repos/o/r/commits/${SHA}`]: { files: [{ filename: 'docs/pipeline/5/progress.md', status: 'added', sha: 'f400', patch: `@@ -0,0 +1 @@\n+${FORBIDDEN}` }] },
+    'api repos/o/r/commits/1234567abcdef00': { files: [{ filename: 'docs/pipeline/5/progress.md', status: 'removed', sha: 'f400', patch: `@@ -1 +0,0 @@\n-${FORBIDDEN}` }] },
+  }));
+  assert.equal(r.code, 1, r.stderr + r.stdout);
+  const out = JSON.parse(r.stdout);
+  assert.ok(out.failures.includes('private marker found in branch claude/5-x commit abcdef1 file docs/pipeline/5/progress.md'), out.failures.join());
+  assert.ok(out.failures.includes('private marker found in branch claude/5-x commit 1234567 file docs/pipeline/5/progress.md'), out.failures.join());
+  assert.equal(r.stdout.includes(FORBIDDEN), false, 'the report must not repeat the canary');
+});
+
+test('a binary file with no patch is read as a blob: a leaking blob fails, a clean one passes (F2)', () => {
+  const leaking = runLeak(cleanRoutes(blobRoute(PNG_SHA, `\x89PNG\r\n tEXt Comment ${FORBIDDEN} \x00\x01`)));
+  assert.equal(leaking.code, 1, leaking.stderr + leaking.stdout);
+  assert.deepEqual(JSON.parse(leaking.stdout).observed.leaks, ['branch claude/5-x file docs/pipeline/5/screenshots/a.png (blob)']);
+  assert.equal(leaking.stdout.includes(FORBIDDEN), false, 'the report must not repeat the canary');
+  const clean = runLeak(cleanRoutes()); // cleanRoutes has the same PNG with a clean blob
+  assert.equal(clean.code, 0, clean.stderr + clean.stdout);
+  assert.deepEqual(JSON.parse(clean.stdout).observed.leaks, []);
+});
+
+test('a blob returned as plain text (not base64) is scanned too', () => {
+  const r = runLeak(cleanRoutes({ [`api repos/o/r/git/blobs/${PNG_SHA}`]: { encoding: 'utf-8', content: `x ${FORBIDDEN}` } }));
+  assert.equal(r.code, 1, r.stderr + r.stdout);
+});
+
+test('a compare that GitHub truncated cannot be scanned: exit 3 naming the branch (F2)', () => {
+  const tooManyCommits = runLeak(cleanRoutes({
+    'api repos/o/r/compare/main...claude/5-x': { total_commits: 300, commits: [{ sha: SHA, commit: { message: 'm' } }], files: [listPatch('b')] },
+  }));
+  assert.equal(tooManyCommits.code, 3, tooManyCommits.stderr + tooManyCommits.stdout);
+  assert.match(JSON.parse(tooManyCommits.stderr).error, /^cannot scan all of branch claude\/5-x: /);
+
+  const files = Array.from({ length: 300 }, (_, i) => ({ filename: `f${i}.txt`, status: 'added', sha: `s${i}`, patch: '@@ +1 @@\n+x' }));
+  const tooManyFiles = runLeak(cleanRoutes({
+    'api repos/o/r/compare/main...claude/5-x': { total_commits: 1, commits: [{ sha: SHA, commit: { message: 'm' } }], files },
+  }));
+  assert.equal(tooManyFiles.code, 3, tooManyFiles.stderr + tooManyFiles.stdout);
+  assert.match(JSON.parse(tooManyFiles.stderr).error, /^cannot scan all of branch claude\/5-x: /);
+
+  const tooManyFilesInCommit = runLeak(cleanRoutes({ [`api repos/o/r/commits/${SHA}`]: { files } }));
+  assert.equal(tooManyFilesInCommit.code, 3, tooManyFilesInCommit.stderr + tooManyFilesInCommit.stdout);
+  assert.match(JSON.parse(tooManyFilesInCommit.stderr).error, /^cannot scan all of branch claude\/5-x: /);
+});
+
+test('a leak in an issue title, PR body, review comment, review body or commit comment fails and names where', () => {
   const issues = (over) => [[{ number: 5, title: 'Reject very long titles', body: 'Note.' }], [{ number: 9, title: 'PR', body: 'Fixes #5', pull_request: { url: 'u' }, ...over }]];
   const cases = [
     [{ 'api --paginate --slurp repos/o/r/issues?state=all&per_page=100': issues({ title: `t ${FORBIDDEN}` }) }, 'issue #9 title'],
     [{ 'api --paginate --slurp repos/o/r/issues?state=all&per_page=100': issues({ body: `b ${FORBIDDEN}` }) }, 'issue #9 body'],
-    [{ 'api --paginate --slurp repos/o/r/pulls/comments?per_page=100': [[{ html_url: 'https://github.com/o/r/pull/9#discussion_r2', body: FORBIDDEN }]] }, 'review comment https://github.com/o/r/pull/9#discussion_r2'],
+    [{ 'api --paginate --slurp repos/o/r/pulls/comments?per_page=100': [[{ html_url: 'https://github.com/o/r/pull/9#discussion_r2', body: FORBIDDEN }]] }, 'review comment https://github.com/o/r/pull/9#discussion_r2'],    [{ 'api --paginate --slurp repos/o/r/pulls/9/reviews': [[{ html_url: 'https://github.com/o/r/pull/9#pullrequestreview-2', body: FORBIDDEN }]] }, 'review https://github.com/o/r/pull/9#pullrequestreview-2'],
+    [{ 'api --paginate --slurp repos/o/r/comments?per_page=100': [[{ html_url: 'https://github.com/o/r/commit/abcdef1#commitcomment-2', body: FORBIDDEN }]] }, 'commit comment https://github.com/o/r/commit/abcdef1#commitcomment-2'],
   ];
   for (const [extra, where] of cases) {
     const r = runLeak(cleanRoutes(extra));
@@ -273,9 +345,33 @@ test('a leak in an issue title, issue or PR body, or review comment fails and na
   }
 });
 
-test('the scan compares only the issue\'s own branches, against the default branch', () => {
-  // cleanRoutes has a "claude/50-y" branch with no compare route: comparing it would exit 3.
-  const r = runLeak(cleanRoutes({ 'api repos/o/r': { default_branch: 'trunk' }, 'api repos/o/r/compare/trunk...claude/5-x': { commits: [], files: [] } }));
+test('every non-default branch is compared, not only the issue\'s own (F3)', () => {
+  // "claude/50-y" belongs to another run, but it is public too.
+  const r = runLeak(cleanRoutes({
+    'api repos/o/r/compare/main...claude/50-y': {
+      total_commits: 1,
+      commits: [{ sha: '9999999abcdef00', commit: { message: 'other run' } }],
+      files: [],
+    },
+    'api repos/o/r/commits/9999999abcdef00': { files: [{ filename: 'notes.md', status: 'added', sha: 'f500', patch: `@@ -0,0 +1 @@\n+${FORBIDDEN}` }] },
+  }));
+  assert.equal(r.code, 1, r.stderr + r.stdout);
+  assert.deepEqual(JSON.parse(r.stdout).observed.leaks, ['branch claude/50-y commit 9999999 file notes.md']);
+});
+
+test('the default branch (read from gh api repos/<repo>) is the base and is never compared with itself', () => {
+  // main is an ordinary branch here; trunk is the default, so only trunk...<branch> routes exist.
+  const r = runLeak(cleanRoutes({
+    'api repos/o/r': { default_branch: 'trunk' },
+    'api --paginate --slurp repos/o/r/branches': [[{ name: 'trunk' }, { name: 'claude/5-x' }]],
+    'api repos/o/r/compare/trunk...claude/5-x': { total_commits: 0, commits: [], files: [] },
+  }));
+  assert.equal(r.code, 0, r.stderr + r.stdout);
+});
+
+test('reviews are fetched only for pull requests, not for plain issues', () => {
+  // cleanRoutes has no pulls/5/reviews route (#5 is an issue); fetching it would exit 3.
+  const r = runLeak(cleanRoutes());
   assert.equal(r.code, 0, r.stderr + r.stdout);
 });
 
