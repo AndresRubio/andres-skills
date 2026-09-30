@@ -460,19 +460,22 @@ function rawSettingsProblem(text) {
   return null;
 }
 
-// --- command-line config, git env vars, push plumbing, gh repo rewrites (round 4) ---
+// --- command-line config, environment redirection, push plumbing, gh repo rewrites (rounds 4-5) ---
 
 // git config given on git's own command line (before the subcommand) can redefine an alias,
-// pull in a whole config file, or point a remote/proxy/hook elsewhere, so a benign-looking
-// literal subcommand then pushes (`git -c alias.p=pu"sh" p origin main`). git's own options come
-// before the subcommand. Deny a -c/--config-env whose dequoted key controls pushes, or whose key
-// can't be read (an expansion or glob). Keying on the config key, not the value, also closes the
-// forms whose push word is quote-split or delivered through an env var (`-c alias.x=$V`).
-const CONFIG_CLI_REASON = 'git config on the command line that controls pushes';
+// pull in a whole config file, point a remote/proxy/hook elsewhere, or run a program (a pager,
+// an editor, fsmonitor, a textconv), so a benign-looking literal subcommand then pushes. git's
+// own options come before the subcommand. A -c/--config-env key (dequoted, case-insensitive) is
+// allowed only from a short list of display and identity settings; any other key, or a key the
+// guard can't read (an expansion or glob), is denied. Keying on the key, not the value, also
+// closes the forms whose value is quote-split or comes from an env var (`-c alias.x=$V`).
+// PUSH_CONFIG_KEY stays for the `git config` subcommand rule.
+const CONFIG_CLI_REASON = 'git config on the command line';
+const CONFIG_CLI_ALLOWED = /^(?:core\.quotepath|color\..+|user\.name|user\.email|advice\..+|init\.defaultbranch)$/i;
 
 function configKeyProblem(keyText) {
   const key = keyText.split('=')[0];
-  if (PUSH_CONFIG_KEY.test(key) || /[$`*?[]/.test(key)) return CONFIG_CLI_REASON;
+  if (/[$`*?[]/.test(key) || !CONFIG_CLI_ALLOWED.test(key)) return CONFIG_CLI_REASON;
   return null;
 }
 
@@ -507,16 +510,23 @@ function commandLineConfigProblem(segments) {
   return null;
 }
 
-// Setting a GIT_* environment variable (GIT_DIR, GIT_SSH_COMMAND, the GIT_CONFIG_* family, ...)
-// can redirect the repo or inject config, so a plain push writes somewhere else. The pipeline
-// sets none. Any word whose dequoted text is a GIT_* assignment is denied, wherever it sits: a
-// leading assignment, a standalone assignment segment, or an argument to export/declare -x/env.
-const GIT_ENV_ASSIGN = /^GIT_[A-Z0-9_]*=/;
+// The environment can point git or gh somewhere else: GIT_* (GIT_DIR, the GIT_CONFIG_* family),
+// GH_* (GH_CONFIG_DIR, GH_REPO), HOME and XDG_CONFIG_* (which config file is read, and so which
+// aliases exist), PATH (which git runs), and the askpass/agent variables. The pipeline sets none
+// of them. Two rules, both forbidden:
+//   - any leading VAR=value on a git or gh segment, whatever the name (`HOME=/tmp/h git sy`);
+//   - any word, anywhere, whose dequoted text assigns one of those variables, so export,
+//     declare -x, env and standalone assignment segments are caught too.
+const REDIRECT_ENV_ASSIGN = /^(?:GIT_[A-Z0-9_]*|GH_[A-Z0-9_]*|HOME|XDG_CONFIG_HOME|XDG_CONFIG_DIRS|PATH|SSH_ASKPASS|GIT_ASKPASS|SSH_AUTH_SOCK)=/;
 
 function gitEnvProblem(segments) {
   for (const seg of segments) {
+    const { assigns, words } = split(seg);
+    if (assigns > 0 && words.length > 0 && (isGit(words[0]) || isGh(words[0]))) {
+      return 'environment assignments before git or gh';
+    }
     for (const w of seg.words) {
-      if (GIT_ENV_ASSIGN.test(w.text)) return 'setting git environment variables';
+      if (REDIRECT_ENV_ASSIGN.test(w.text)) return 'setting environment variables that redirect git or gh';
     }
   }
   return null;

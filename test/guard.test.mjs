@@ -682,7 +682,8 @@ test('denies setting git environment variables', () => {
   }
   assertDenied('export GIT_DIR=/tmp/x && git status', /environment variables/);
   assertAllowed('echo GIT_DIR');
-  assertAllowed('GITHUB_TOKEN=x git status');
+  // round 5: any leading assignment on a git or gh segment is denied, whatever its name
+  assertKind('GITHUB_TOKEN=x git status', 'forbidden');
 });
 
 test('denies git plumbing that pushes', () => {
@@ -735,6 +736,63 @@ test('denies a push whose word is split by quotes or escapes (dequoted catch-all
   // the dequoted check does not deny a benign command that merely contains git and a split word
   assertAllowed('echo pu"sh" && ls');
   assertAllowed('git status');
+});
+
+// --- checkCommand: environment redirection, command-line config allowlist (16a round 5) ---
+
+test('denies environment redirection on git and gh', () => {
+  for (const command of [
+    String.raw`mkdir -p /tmp/h && printf '[alias]\n\tsy = !git send-pack <origin> +HEAD:main\n' > /tmp/h/.gitconfig && HOME=/tmp/h git sy`,
+    'XDG_CONFIG_HOME=/tmp/x git sy',
+    'GH_CONFIG_DIR=/tmp/g gh x 5',
+    'export HOME=/tmp/h && git sy',
+    'env HOME=/tmp/h git sy',
+    'PATH=/tmp/e:$PATH git status',
+    'GH_REPO=o/other gh pr view 5',
+    'declare -x XDG_CONFIG_DIRS=/tmp/x',
+    'SSH_ASKPASS=/tmp/a true',
+    'SSH_AUTH_SOCK=/tmp/s ls',
+    'X=1 gh pr view 5',
+    'LANG=C git log -1',
+    'X=1 /usr/bin/git status',
+  ]) {
+    assertKind(command, 'forbidden');
+  }
+  assertDenied('LANG=C git log -1', /^environment assignments before git or gh$/);
+  assertDenied('export HOME=/tmp/h && git sy', /^setting environment variables that redirect git or gh$/);
+  // a harmless assignment on a segment that isn't git or gh stays allowed
+  assertAllowed('GITHUB_TOKEN_NOTE=x true');
+  assertAllowed('X=1 true && git status');
+  assertAllowed('echo "$HOME"');
+});
+
+test('allows only a short list of keys in command-line git config', () => {
+  for (const command of [
+    "git -c core.pager='sh -c x' log",
+    'git -c core.fsmonitor=/tmp/e status',
+    'git -c sequence.editor=x rebase -i HEAD~1',
+    'git -c diff.external=x diff',
+    'git -c diff.x.textconv=x diff',
+    'git -c core.editor=x commit',
+    'git -c color.$x=never log',
+    'git -c "user.name*=x" log',
+    'git --config-env=core.pager=V log',
+    'git -ccore.pager=x log',
+  ]) {
+    assertKind(command, 'forbidden');
+    assertDenied(command, /^git config on the command line$/);
+  }
+  for (const command of [
+    'git -c core.quotepath=off diff',
+    'git -c color.ui=never log -1',
+    'git -c Color.UI=never log -1',
+    'git -c user.name=A -c user.email=a@b.c status',
+    'git -c advice.detachedHead=false status',
+    'git -c init.defaultBranch=main status',
+    'git -C "$WT" -c core.quotepath=off diff',
+  ]) {
+    assertAllowed(command);
+  }
 });
 
 // Every backticked span in the skill's markdown, as { file, span }.
