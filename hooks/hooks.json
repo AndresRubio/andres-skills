@@ -1,0 +1,13 @@
+{
+  "description": "claude-pipeline run guard: during a /ship run, allow only pushes of the run's claude/* branch, and block PR merges",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.mjs\"", "timeout": 10 }
+        ]
+      }
+    ]
+  }
+}

@@ -28,6 +28,18 @@ Phase 1 ends at an open PR — you merge it yourself.
 
 Q10: the short `/ship` alias is unverified; use `/claude-pipeline:ship`.
 
+## Run guard
+
+The plugin ships a `PreToolUse` hook (`hooks/guard.mjs`) that checks every Bash command while a `/ship` run is in progress.
+
+- It allows a push only as `git push origin "$BRANCH"` or `git push -u origin "$BRANCH"` (or a literal `claude/…` branch), run as its own command after sourcing the run's `vars.sh`. `$BRANCH` has to come from that `vars.sh`, and its last `BRANCH` line has to be a `claude/*` branch.
+- It blocks any other push (other branches, refspecs, remotes, `--force`, `--mirror`, git options before `push`, a push inside `bash -c` or an alias), and anything that merges: `gh pr merge`, the merge API, GraphQL merge and ref mutations, `gh alias`, and writes through the git-refs or contents APIs. A blocked command exits 2 with the reason on stderr, and the skill then follows its stop procedure.
+- `git commit -m "… push …"` is a known false positive: commit messages go through `-F <file>`.
+
+`CLAUDE_PIPELINE_GUARD` controls it: set `1` for runners (always on), `0` to switch it off, or leave it unset for automatic. Automatic means the guard switches on for a session once that session runs a pipeline command (one that mentions `CLAUDE_PIPELINE_HOME`, `<home>/runs/` or `scripts/pipeline.mjs`), which is at Setup, before any issue text is read. It remembers that with a marker file in `<home>/guard/` and deletes markers older than 14 days. Other sessions aren't affected.
+
+It is a seatbelt, not a security boundary: a script written to a file and then run gets past it. Pair it with a token scoped to the repo and with branch protection on the default branch.
+
 ## Develop
 
 ```bash

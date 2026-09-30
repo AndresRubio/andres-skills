@@ -296,6 +296,15 @@ test('every push instruction under skills/ship names the branch explicitly (R2)'
   }
 });
 
+test('hard rule 3 names the run guard hook and the stop procedure (16a)', () => {
+  const rules = read('SKILL.md').split('## Hard rules')[1]?.split('\n## ')[0] ?? '';
+  const rule3 = rules.match(/^3\. \*\*.*$/m)?.[0] ?? '';
+  assert.match(rule3, /run guard/);
+  assert.match(rule3, /plugin hook/);
+  assert.match(rule3, /stop procedure/);
+  assert.match(rule3, /move the text into a file/);
+});
+
 test('hard rule 7 only runs the stop procedure once the lock is taken (R3)', () => {
   const rules = read('SKILL.md').split('## Hard rules')[1]?.split('\n## ')[0] ?? '';
   const rule7 = rules.match(/^7\. \*\*.*$/m)?.[0] ?? '';
