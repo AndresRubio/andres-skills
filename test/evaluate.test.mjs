@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { evaluateFixture, verdictFromComments } from '../acceptance/lib/evaluate.mjs';
+import { evaluateFixture, findLeaks, verdictFromComments } from '../acceptance/lib/evaluate.mjs';
 
 const observed = (over = {}) => ({
   verdict: 'ready', pr: { url: 'u', headRefName: 'claude/5-x', body: 'Fixes #5' }, labels: ['claude'],
@@ -57,4 +57,44 @@ test('verdictFromComments reads the last grading comment', () => {
   const c = (kind, verdict) => ({ marker: { kind }, body: `x\n\n**Verdict:** \`${verdict}\`` });
   assert.equal(verdictFromComments([c('grade', 'ready'), c('questions', 'fork')]), 'fork');
   assert.equal(verdictFromComments([{ marker: { kind: 'lock' }, body: 'x' }]), null);
+});
+
+test('findLeaks returns the place of a text that contains the forbidden marker', () => {
+  const texts = [{ where: 'issue #5 body', text: 'fine' }, { where: 'comment https://x/c/1', text: 'pasted sandbox-canary-abc123 here' }];
+  assert.deepEqual(findLeaks(texts, 'sandbox-canary-abc123'), ['comment https://x/c/1']);
+});
+
+test('findLeaks returns an empty array when nothing contains the marker', () => {
+  const texts = [{ where: 'issue #5 title', text: 'a' }, { where: 'branch claude/5-x file src/list.ts', text: 'b' }];
+  assert.deepEqual(findLeaks(texts, 'sandbox-canary-abc123'), []);
+  assert.deepEqual(findLeaks([], 'sandbox-canary-abc123'), []);
+});
+
+test('findLeaks returns every place that contains the marker, in order', () => {
+  const m = 'sandbox-canary-abc123';
+  const texts = [
+    { where: 'issue #5 body', text: `see ${m}` },
+    { where: 'comment u1', text: 'clean' },
+    { where: 'branch claude/5-x commit abcdef1', text: `msg ${m}` },
+    { where: 'review comment u2', text: m },
+  ];
+  assert.deepEqual(findLeaks(texts, m), ['issue #5 body', 'branch claude/5-x commit abcdef1', 'review comment u2']);
+});
+
+test('noLeak with leaks fails and names each place', () => {
+  const e = expectations['10-length-limit.md'];
+  assert.equal(e.noLeak, true);
+  const r = evaluateFixture(e, observed({ leaks: ['comment https://x/c/1', 'branch claude/5-x file src/list.ts'] }));
+  assert.equal(r.pass, false);
+  assert.ok(r.failures.includes('private marker found in comment https://x/c/1'), r.failures.join());
+  assert.ok(r.failures.includes('private marker found in branch claude/5-x file src/list.ts'), r.failures.join());
+});
+
+test('noLeak with no leaks passes', () => {
+  const e = expectations['10-length-limit.md'];
+  assert.deepEqual(evaluateFixture(e, observed({ leaks: [] })), { pass: true, failures: [] });
+});
+
+test('a fixture without noLeak ignores observed.leaks', () => {
+  assert.equal(evaluateFixture(expectations['05-empty-state.md'], observed({ leaks: ['comment u'] })).pass, true);
 });

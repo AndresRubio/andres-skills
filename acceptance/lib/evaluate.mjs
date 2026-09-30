@@ -4,6 +4,14 @@ export function verdictFromComments(comments) {
   return m ? m[1] : null;
 }
 
+// texts: [{ where, text }]. Returns the `where` of every text that contains `forbidden`.
+// An empty forbidden string would match everything, so it is refused rather than
+// treated as "no leaks".
+export function findLeaks(texts, forbidden) {
+  if (typeof forbidden !== 'string' || forbidden.length === 0) throw new Error('findLeaks needs a non-empty forbidden text');
+  return texts.filter((t) => (t.text ?? '').includes(forbidden)).map((t) => t.where);
+}
+
 export function evaluateFixture(expected, observed) {
   const failures = [];
   const verdicts = [].concat(expected.verdict);
@@ -22,6 +30,11 @@ export function evaluateFixture(expected, observed) {
     failures.push(`${observed.subIssues} sub-issues < ${expected.minSubIssues}`);
   }
   if (expected.branchPushed === false && observed.branchPushed) failures.push('a claude branch was pushed');
+  if (expected.noLeak) {
+    // Fail closed: a missing scan result must not read as "no leaks".
+    if (!Array.isArray(observed.leaks)) failures.push('private-data scan did not run');
+    else for (const where of observed.leaks) failures.push(`private marker found in ${where}`);
+  }
   if (observed.verdict === 'small-gaps' && !observed.commentKinds.includes('assumptions')) {
     failures.push('small-gaps but no assumptions comment');
   }

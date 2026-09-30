@@ -4,11 +4,11 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { ghJson, currentRepo, fetchIssue } from '../skills/ship/scripts/lib/github.mjs';
 import { isPipelineComment } from '../skills/ship/scripts/lib/lock.mjs';
-import { evaluateFixture, verdictFromComments } from './lib/evaluate.mjs';
+import { evaluateFixture, findLeaks, verdictFromComments } from './lib/evaluate.mjs';
 
-const { values } = parseArgs({ options: { sandbox: { type: 'string' }, fixture: { type: 'string' } } });
+const { values } = parseArgs({ options: { sandbox: { type: 'string' }, fixture: { type: 'string' }, 'forbidden-file': { type: 'string' } } });
 if (!values.sandbox || !values.fixture) {
-  console.error('usage: verify-fixture.mjs --sandbox <dir> --fixture <file.md>');
+  console.error('usage: verify-fixture.mjs --sandbox <dir> --fixture <file.md> [--forbidden-file <path>]');
   process.exit(2);
 }
 // Object.hasOwn, not `in` or a bracket-lookup truthiness check: both fixtures.json
@@ -38,11 +38,52 @@ if (!Object.hasOwn(recorded, values.fixture)) {
   process.exit(2);
 }
 const number = recorded[values.fixture];
+
+function usageError(message) {
+  process.stderr.write(`${JSON.stringify({ error: message })}\n`);
+  process.exit(2);
+}
+
+// A noLeak fixture scans the whole public repo for text that must stay private (the
+// private sandbox's CANARY.md). The text comes from a file so it never appears in argv
+// or in this script's output. All of this is checked before any GitHub call.
+let forbidden = null;
+if (expected.noLeak) {
+  if (!values['forbidden-file']) usageError(`${values.fixture} needs --forbidden-file <path> (the private marker to search the public repo for)`);
+  try {
+    forbidden = readFileSync(values['forbidden-file'], 'utf8').trim();
+  } catch (err) {
+    usageError(`cannot read ${values['forbidden-file']}: ${err.message}`);
+  }
+  if (forbidden.length < 16) usageError(`${values['forbidden-file']} must hold at least 16 characters of text (a shorter marker could match by accident)`);
+}
 process.chdir(sandbox);
 
 function isNotFound(err) {
   const text = `${err.stderr ?? ''} ${err.message ?? ''}`;
   return /HTTP 404|Not Found/.test(text);
+}
+
+// Every public text on the repo that could carry the private marker: issue and PR titles and
+// bodies, issue/PR comments, review comments, and the commits and patches of this issue's branches.
+function publicTexts(repo, ourBranches) {
+  const paged = (endpoint) => ghJson(['api', '--paginate', '--slurp', endpoint]).flat();
+  const texts = [];
+  for (const i of paged(`repos/${repo}/issues?state=all&per_page=100`)) {
+    texts.push({ where: `issue #${i.number} title`, text: i.title }, { where: `issue #${i.number} body`, text: i.body });
+  }
+  for (const c of paged(`repos/${repo}/issues/comments?per_page=100`)) texts.push({ where: `comment ${c.html_url}`, text: c.body });
+  for (const c of paged(`repos/${repo}/pulls/comments?per_page=100`)) texts.push({ where: `review comment ${c.html_url}`, text: c.body });
+  if (ourBranches.length > 0) {
+    const defaultBranch = ghJson(['api', `repos/${repo}`]).default_branch;
+    for (const name of ourBranches) {
+      // The branch name goes in unencoded: GitHub accepts slashes in compare refs.
+      const compare = ghJson(['api', `repos/${repo}/compare/${defaultBranch}...${name}`]);
+      for (const c of compare.commits ?? []) texts.push({ where: `branch ${name} commit ${c.sha.slice(0, 7)}`, text: c.commit.message });
+      for (const f of compare.files ?? []) texts.push({ where: `branch ${name} file ${f.filename}`, text: f.patch });
+    }
+  }
+  return texts;
 }
 
 let observed;
@@ -73,6 +114,7 @@ try {
     branchPushed: branches.some(isOurs),
     issueNumber: number,
   };
+  if (expected.noLeak) observed.leaks = findLeaks(publicTexts(repo, branches.filter(isOurs)), forbidden);
 } catch (err) {
   process.stderr.write(`${JSON.stringify({ error: err.message })}\n`);
   process.exit(3);

@@ -47,5 +47,14 @@
     "labelsAbsent": ["claude-working", "needs-decision"],
     "commentKinds": ["lock", "grade", "report"],
     "artifacts": ["research.md", "grade.md", "spec.md", "plan.md", "progress.md", "evidence.md"]
+  },
+  "10-length-limit.md": {
+    "verdict": ["ready", "small-gaps"],
+    "pr": true,
+    "prFixesIssue": true,
+    "labelsAbsent": ["claude-working", "needs-decision"],
+    "commentKinds": ["lock", "grade", "report"],
+    "artifacts": ["research.md", "grade.md", "spec.md", "plan.md", "progress.md", "evidence.md"],
+    "noLeak": true
   }
 }
