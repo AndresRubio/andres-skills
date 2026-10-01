@@ -20,6 +20,8 @@ import argparse, glob, json, os, re, shutil, subprocess, sys, time
 
 # A command that runs the suite, not one that only mentions it (grep unittest, cat tests/...).
 RUNS_TESTS = re.compile(r"-m\s+(unittest|pytest)\b|(^|[\s;&|(])pytest(\s|$)")
+# A command that runs the app's own CLI (python3 -m pkg.cli ..., python3 cli.py ...).
+RUNS_CLI = re.compile(r"python3?\s+(-m\s+\S+\.cli\b|\S*cli\.py\b)")
 
 
 def install_skill(repo, skill):
@@ -37,7 +39,7 @@ def transcript(session_id):
 
 def agent_facts(path, skill_name):
     f = {"skill_invoked": False, "skill_read": False, "unittest_runs": 0, "full_fixtures_runs": 0,
-         "commands_run": 0, "models": []}
+         "cli_runs": 0, "commands_run": 0, "models": []}
     if not path:
         return f
     for line in open(path, encoding="utf-8"):
@@ -64,6 +66,7 @@ def agent_facts(path, skill_name):
                 runs_tests = bool(RUNS_TESTS.search(cmd))
                 f["unittest_runs"] += runs_tests
                 f["full_fixtures_runs"] += runs_tests and "FULL_FIXTURES" in cmd
+                f["cli_runs"] += bool(RUNS_CLI.search(cmd))
     return f
 
 
