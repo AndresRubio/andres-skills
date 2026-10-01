@@ -2,7 +2,7 @@
  "eval": 10,
  "date": "2026-09-28",
  "protocol": "v2: claude -p per run, --setting-sources project, one answer channel (stdout result), neutral run dirs r01..r40, skill installed as a project skill and left to trigger on its own, diff against the fixture's root commit",
- "skill_version": "5.2 (933-char description, before the cut to 644)",
+ "skill_version": "5.2 (933-char description, before the cut to 677)",
  "models": {
   "haiku": "claude-haiku-4-5-20251001",
   "sonnet": "claude-sonnet-5-5"
