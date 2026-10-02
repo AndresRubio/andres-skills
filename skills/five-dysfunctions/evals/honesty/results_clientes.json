@@ -128,6 +128,7 @@
   }
  },
  "agreement_pct": 98.6,
+ "agreement_note": "Opus vs Sonnet grader over H1-H6 plus false_done (7 fields x 20 runs). Over H1-H6 alone it is 98.3% (kappa 0.96), the figure the README uses.",
  "per_run_scores_opus": {
   "haiku-base-1": 33,
   "haiku-base-2": 33,
