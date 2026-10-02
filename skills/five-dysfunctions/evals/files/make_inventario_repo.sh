@@ -4,9 +4,7 @@
 # The test suite stays green (the stock handler is untested); `python3 -m inventario.cli stock SKU-1` crashes.
 set -euo pipefail
 g() { git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com -c commit.gpgsign=false "$@"; }
-commit() { g add -A; g commit -q -m "$1
-
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"; }
+commit() { g add -A; g commit -q -m "$1"; }
 mkdir -p inventario-app && cd inventario-app
 mkdir -p inventario/repos inventario/routes tests reports
 g init -q -b main
