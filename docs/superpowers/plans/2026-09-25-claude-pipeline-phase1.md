@@ -4375,6 +4375,7 @@ Sandcastle's planner solves both by looking at all ready issues together. The pi
    - Issue text from untrusted authors is withheld.
 6. **Waiting.**
    - The grade returns `wait` (forks come first) unless the issue has `claude-go`. The run posts `deferred`, whose last line is `Waiting for: <keys>`, releases the lock and stops. It adds no `needs-decision` and no tracker link.
+   - The CLI writes that line, and the stage reads the posted comment back to prove the wait parses. A line the model typed wrongly would otherwise silently lose the wait.
    - Eligibility keeps the issue back while any of those keys is still a run in progress, and frees it as soon as none is, however they ended.
    - A waiting issue holds no lock, so no run can wait on it, and waits can't deadlock.
 7. **Resume isn't lost.** `lock`, `deferred` and `stale-lock` comments ask nothing. So they don't count as "the pipeline's last comment" when eligibility looks for a reply from you that is newer than it.
@@ -4386,6 +4387,7 @@ Sandcastle's planner solves both by looking at all ready issues together. The pi
 - Modify:
   - `skills/ship/scripts/lib/{eligibility,grade,marker,github,commands}.mjs`
   - `skills/ship/stages/{00-resolve,02-research,03-grade,fix}.md`
+  - `skills/ship/SKILL.md` (stop procedure)
   - `skills/ship/trackers/github.md`
   - `skills/ship/templates/grade.md`
   - `acceptance/lib/evaluate.mjs`
@@ -4407,10 +4409,12 @@ Sandcastle's planner solves both by looking at all ready issues together. The pi
     - The lock is the candidate with the smallest `id` among those no older than `ttlHours` (by `createdAt` against `now`).
     - If there is none, the state is `'entering'` when no candidate exists. Otherwise (every candidate is stale) it is `'none'`.
     - `branch` matches the chosen lock comment's body against `` /branch `(claude\/[A-Za-z0-9._\/-]+)`/ ``, or is `null`.
+    - `activeRuns` treats `entering` like `none`; the state is reported for diagnostics and tests.
+    - **Only `activeRuns` uses `runLock`.** `checkEligibility`'s "locked since", the `lock-status` command and fix mode keep `lockStatus`, the latest lock comment plus the label. Excluding a second run of the *same* issue should stay conservative, so an issue in its entering window still reads as locked there.
   - `compareKeys(a, b)`: compares numerically when both keys match `^\d+$`, and as strings otherwise.
   - `waitingFor(issue)` returns `string[]`.
     - Take the pipeline comment with the largest `id` whose kind is in `DECISION_KINDS`.
-    - If it is `deferred` and its last non-empty line matches `^Waiting for: (.+)$`, split the capture on `/,\s*/` and keep the keys that match `KEY_RE`.
+    - If it is `deferred`, split its body on `/\r?\n/` and trim each line. If the last non-empty line matches `^Waiting for: (.+)$`, split the capture on `,`, trim each key, keep those that match `KEY_RE`, and deduplicate.
     - Otherwise, return `[]`.
   - `activeRuns({ prs, lockedIssues, selfIssue, ttlHours, maxParallel, now })` returns `{ self: { key, lockedAt, lockId }, runs, ahead, maxParallel, admitted }`.
     - **PR runs.** From `gh pr list --json number,headRefName,isCrossRepository,title` output:
@@ -4420,7 +4424,7 @@ Sandcastle's planner solves both by looking at all ready issues together. The pi
     - **Lock runs.** For each issue in `lockedIssues` whose `state` is `open` and whose `runLock` state is `'locked'`, with key `String(number)`:
       - If a PR run has that key, set its `lockedAt` and `lockId`.
       - Otherwise add `{ key, issue: number, pr: null, branch, title, body, textWithheld: false, lockedAt, lockId, related }`.
-      - When `authorAssociation` isn't in `TRUSTED`, `title` and `body` are `null` and `textWithheld` is `true`.
+      - When the author is neither `TRUSTED` (by `authorAssociation`) nor in `PIPELINE_BOTS` (by `author`), `title` and `body` are `null` and `textWithheld` is `true`. The pipeline's own split children stay readable.
       - `related` is true when the issue's `openSubIssues` includes `selfIssue.number`, or `selfIssue.openSubIssues` includes the issue's number.
     - **Self.** Exclude the run whose key is `String(selfIssue.number)`. `self` is that key, plus `lockedAt` and `lockId` from `runLock(selfIssue)` when its state is `'locked'`, else `null`.
     - **Order** (`runs` is sorted by this): PR runs first, by PR number. Then by `lockedAt`, compared as ISO strings, then `lockId`, then `compareKeys`.
@@ -4437,7 +4441,10 @@ Sandcastle's planner solves both by looking at all ready issues together. The pi
 
     `countOpenClaudePrs` and its tests are removed, and those cases move to `activeRuns`.
   - **CLI.**
-    - New: `active-runs --repo <r> --issue <n> --config-file <f> [--now <iso>]`. It prints the object, and takes `ttlHours` and `maxParallel` from the config.
+    - New: `active-runs --repo <r> --issue <n> --config-file <f> [--now <iso>] [--expect-locked]`. It prints the object, and takes `ttlHours` and `maxParallel` from the config.
+      - With `--expect-locked`, if `self.lockedAt` is `null`, it waits `CLAUDE_PIPELINE_RECOUNT_DELAY_MS` milliseconds (default 5000) and fetches everything once more.
+      - If `self.lockedAt` is still `null`, it exits 1 with `this run's own lock isn't visible: read lag, or the run outlived lockTtlHours`.
+    - New: `waiting-for --issue-file <f>`, which prints `{ "waitingFor": [...] }`.
     - Removed: `pr-count`.
     - `eligibility`: `--open-claude-prs` is replaced by `--active-runs-file <f>`. It is required unless `--lane manual` (usage error, exit 2).
     - `grade`: adds an optional `--active-runs-file <f>`. A checklist with a non-empty `waitFor` and no file is a usage error (exit 2).
@@ -4462,10 +4469,18 @@ Sandcastle's planner solves both by looking at all ready issues together. The pi
     When `waitFor` isn't empty, these checks always run, before rule 1, whatever `waitOverride` says:
     - If `activeRuns` is missing, throw `--active-runs-file is required when waitFor is not empty`.
     - If `activeRuns.self.lockedAt` is `null`, throw `waitFor needs a count taken after the lock`.
-    - Each key is then kept or dropped. A key not in `ahead` is dropped, with the note `<label> is no longer a run ahead of this one`. A key whose run is `related` is dropped, with the note `<label> is this issue's parent or sub-issue`.
+    - A key that fails `KEY_RE` throws `waitFor "<key>" is not a run key`. This is a domain error: the checklist is wrong, so the run stops loudly rather than building alongside.
+    - Duplicate keys are removed. Each remaining key is kept or dropped, with a note:
+      - not in `ahead`: dropped, `<label> is no longer a run ahead of this one`;
+      - its run is `related`: dropped, `<label> is this issue's parent or sub-issue`;
+      - its run's `issue` is `null`: dropped, `<label> isn't a pipeline issue run; it counts for room only`.
     - `<label>` is `#<n>` for a numeric key, `PR #<n>` for `pr-<n>`, and the key itself otherwise.
 
-    Rule 5 fires when kept keys remain. It returns `{ verdict: 'wait', reasons: ['overlaps <label>, a run ahead of this one', …], waitFor: <kept keys> }`. Any verdict carries `notes: [...]` only when notes exist.
+    Rule 5 fires when kept keys remain. It returns `{ verdict: 'wait', reasons: ['overlaps <label>, a run ahead of this one', …], waitFor: <kept keys>, waitLine: 'Waiting for: <kept keys joined by ", ">' }`.
+
+    When `waitOverride` suppresses a wait with kept keys, add the note `went ahead alongside <labels>`.
+
+    Any verdict carries `notes: [...]` only when notes exist.
   - **`verdictFromComments(comments)`** reads the latest comment whose kind is `grade`, `questions`, `split` or `deferred` and whose body has a Verdict line.
 
 **Stage prose:**
@@ -4476,8 +4491,7 @@ Sandcastle's planner solves both by looking at all ready issues together. The pi
 - **`00-resolve.md`.**
   - **Step 7:** `tracker:active-runs`, then `eligibility … --active-runs-file "$RUN_DIR/active-runs.json"`.
   - **Step 10, take the lock:** `tracker:add-labels claude-working`, then `tracker:post-comment` kind `lock`, with the same body as now.
-  - **Step 11, recount:** `tracker:active-runs`, overwriting the file.
-    - If `self.lockedAt` is `null`, run it once more. If it is still `null`, apply hard rule 7.
+  - **Step 11, recount:** `tracker:active-runs` with `--expect-locked`, overwriting the file. If it fails, apply hard rule 7.
     - In automatic mode, if `admitted` is false, back off:
       1. `tracker:remove-labels claude-working`.
       2. `tracker:post-comment` kind `deferred`, with the body "Deferred: <n> runs are ahead of this one (<label for each key in ahead>) and `maxParallel` is <M>. A later run picks it up once a slot frees: the sweep, the next poll, or `/ship #<NUMBER>`."
@@ -4486,6 +4500,8 @@ Sandcastle's planner solves both by looking at all ready issues together. The pi
   - **Step 12:** `tracker:set-in-progress`, then remove `needs-decision` if present.
   - **Outputs:** add `active-runs.json`.
 - **`fix.md` step 6.** "take the lock the way stage 0 steps 10 and 12 do, without step 11's recount: the PR already counts as a run ahead of every other run".
+- **`fix.md` step 11.** Before removing the label, `tracker:post-comment` kind `report` on the issue: "Fix run finished on PR #<PR>." A fix run's report otherwise lands only on the PR, which would leave its lock comment looking like the start of the next run.
+- **`SKILL.md`, stop procedure, interactive mode.** "If the user ends the run here, `tracker:post-comment` kind `report` with "Run ended by the user at stage <N>.", then `tracker:remove-labels` `claude-working`." The reason is the same as for fix runs.
 - **`02-research.md`.**
   - **Inputs** gain `$RUN_DIR/active-runs.json` and BASE_REF. **Outputs:** `open-prs.json` is replaced by `$RUN_DIR/inflight/`.
   - **Step 1.** Run `git fetch origin --prune`. Then, for each key in `ahead` whose run isn't `related`, gather evidence into `$RUN_DIR/inflight/<key>/`:
@@ -4506,21 +4522,25 @@ Sandcastle's planner solves both by looking at all ready issues together. The pi
     - Runs not in `ahead` are ignored.
   - **Step 3's section check** uses the new name.
 - **`03-grade.md`.**
-  - **Before writing the checklist:** `tracker:active-runs`, refreshing `active-runs.json`.
+  - **Before writing the checklist:** `tracker:active-runs` with `--expect-locked`, refreshing `active-runs.json`. If it fails, apply hard rule 7.
   - **Checklist fields:**
     - `waitFor` (string array): the keys research's In-flight overlap marks `builds-on`, `same-code` or `same-decision`.
-    - `waitOverride` (boolean): true only if the issue has the `claude-go` label. A reply never sets it.
-  - **The grade command** gains `--active-runs-file "$RUN_DIR/active-runs.json"`. Write any `notes` into grade.md.
+    - `waitOverride` (boolean): true if the issue has the `claude-go` label, or after your interactive go-ahead. A reply never sets it.
+  - **The grade command** gains `--active-runs-file "$RUN_DIR/active-runs.json"`. Write any `notes` into grade.md's "Why". A `went ahead alongside` note also goes under "## Decisions", naming who chose it: the `claude-go` label, or you.
+  - **The fork `questions` closing line** becomes "Reply to resume, or add `claude-go` to accept the recommendations; it also lets this issue run alongside runs in progress."
   - **Automatic wait:**
     1. Append "## Waiting for" to grade.md: each kept run, its relation and the evidence.
-    2. `tracker:post-comment` kind `deferred`. The body is grade.md, then "This issue becomes eligible again once none of these runs is in progress: the sweep or the next poll picks it up, or run `/ship #<NUMBER>` again. To run it alongside them anyway, add `claude-go`.", then a last line exactly `Waiting for: <grade.json waitFor joined by ", ">`.
-    3. `tracker:remove-labels claude-working`.
-    4. Delete `docs/pipeline/<KEY>` and remove the empty worktree, as too-big does.
-    5. Stop: not the stop procedure, and no `needs-decision`.
+    2. `tracker:post-comment` kind `deferred`. The body is grade.md, then "This issue becomes eligible again once none of these runs is in progress: the sweep or the next poll picks it up, or run `/ship #<NUMBER>` again. To run it alongside them anyway, add `claude-go`.", then, as the last line, grade.json's `waitLine` copied verbatim.
+    3. Check that the wait reads back:
+       - `tracker:read-issue`, then `node "$PIPELINE" waiting-for --issue-file "$RUN_DIR/issue.json"`.
+       - Its `waitingFor` must hold the same keys as grade.json's `waitFor`. If it doesn't, apply hard rule 7.
+    4. `tracker:remove-labels claude-working`.
+    5. Delete `docs/pipeline/<KEY>` and remove the empty worktree, as too-big does.
+    6. Stop: not the stop procedure, and no `needs-decision`.
   - **Interactive wait.** Show "Waiting for" and ask "Wait for <labels> (posts `deferred` and stops), or go ahead alongside?"
     - On wait, do what automatic mode does.
     - On go ahead, set `waitOverride` to true in `checklist.json`, run the grade command again, write that verdict to grade.md, and act on it as interactive mode does.
-- **`templates/grade.md`.** The row "Conflicts with an open claude/* PR" becomes "Waits for (runs ahead)", with the value `<none, or #n (relation), …; notes>`.
+- **`templates/grade.md`.** The row "Conflicts with an open claude/* PR" becomes "Waits for (runs ahead)", with the value `<none, or #n (relation), …; or "went ahead alongside …">`.
 - **`README.md`.** A short "Runs in progress" section:
   - what counts against `maxParallel`;
   - back-off;
@@ -4539,6 +4559,8 @@ Sandcastle's planner solves both by looking at all ready issues together. The pi
       - branch: parsed when valid; `null` with shell characters; `claude/../x` parses, because the stage relies on `rev-parse --verify`.
     - **`waitingFor`:**
       - keys come from the last line;
+      - trailing spaces and CRLF line ends still parse; duplicate keys are removed;
+      - a line wrapped in backticks gives `[]`, which documents that the stage must copy `waitLine` verbatim;
       - a later `grade` or `report` ends the wait;
       - a back-off `deferred` (no line) gives `[]`;
       - a `Waiting for:` line that isn't last is ignored;
@@ -4563,14 +4585,15 @@ Sandcastle's planner solves both by looking at all ready issues together. The pi
       - `compareKeys('9', '10') < 0`.
     - **`admitted`** at the boundary.
     - **Race property.** Run 200 seeded random cases. Each case has:
-      - `L` locked runs (1–8), with distinct numeric keys, distinct `lockId`s, and lock times within the TTL, ties included;
+      - `L` locked runs (1–8), with distinct numeric keys, distinct `lockId`s drawn independently of the lock times, and lock times within the TTL, ties included;
       - `P` PR runs (0–3), with keys distinct from the locked ones;
       - `M` from 1 to 4.
 
       Compute every locked run's own view. Assert that the admitted runs are exactly the first `max(0, min(L, M − P))` locked runs in (`lockedAt`, `lockId`, key) order.
   - **`grade.test.mjs`:**
-    - `wait` with `waitFor`;
-    - `waitOverride` suppresses wait, but `claudeGo` alone doesn't;
+    - `wait` with `waitFor` and `waitLine`;
+    - `waitOverride` suppresses wait and adds the `went ahead alongside` note; `claudeGo` alone doesn't suppress it;
+    - a malformed key throws; duplicate keys are removed; a key whose run has `issue: null` is dropped with its note;
     - fork beats wait; the workflow fork beats wait; missing values beat wait; too-big beats wait;
     - a key not ahead, and a related key, are each dropped with their note, and the verdict falls through to ready;
     - a missing `activeRuns` throws, and a `null` `self.lockedAt` throws, both even with `waitOverride`;
@@ -4581,11 +4604,14 @@ Sandcastle's planner solves both by looking at all ready issues together. The pi
     - the waiting reason while a listed run is in progress, and no reason once it isn't;
     - the manual lane ignores both;
     - a missing `activeRuns` throws, and a mismatched `self.key` throws;
+    - an issue in its entering window still reads "locked since" through `lockStatus`;
     - CLI: `--active-runs-file` is required for `github` and not for `manual`, and `--open-claude-prs` is now an unknown option;
     - `hasNewTrustedReply`: a reply stays new after later `lock`, `deferred` and `stale-lock` comments, but not after a later `blocked`.
   - **`github.test.mjs`:**
     - `fetchActiveRuns` through fake-gh routes, with one PR, a fresh-locked issue, a stale-locked issue and self;
     - the `active-runs` CLI on the same routes;
+    - `--expect-locked` with self's lock not visible exits 1 after one retry, with `CLAUDE_PIPELINE_RECOUNT_DELAY_MS=0`;
+    - the `waiting-for` CLI on an issue file;
     - `pr-count` is now an unknown command.
   - **`marker.test.mjs`:** `deferred` round-trips.
   - **`evaluate.test.mjs`:** a later back-off `deferred` doesn't hide an earlier `grade` verdict, and a wait `deferred` gives `wait`.
@@ -4594,7 +4620,9 @@ Sandcastle's planner solves both by looking at all ready issues together. The pi
     - 00-resolve: the recount step comes after the lock and before `needs-decision` is removed, and it has the null-`lockedAt` guard.
     - `fix.md` names stage 0 steps 10 and 12.
     - 02-research has `git fetch` and the three relations.
-    - 03-grade has `waitFor`, `waitOverride`, `--active-runs-file` and `Waiting for:`. Its wait section has no `add-blocked-by`.
+    - 03-grade has `waitFor`, `waitOverride`, `--active-runs-file`, `waitLine` and `waiting-for`. Its wait section has no `add-blocked-by`.
+    - 00-resolve and 03-grade pass `--expect-locked`.
+    - `fix.md` and SKILL.md's interactive stop post a `report` before removing `claude-working`.
     - No file in `skills/` mentions `open-claude-pr-count`, `pr-count`, `conflictsWithOpenClaudePr` or `open-prs.json`.
 - [ ] **Step 2: Run `npm test`** and watch the new tests fail.
 - [ ] **Step 3: Implement.**
@@ -4783,7 +4811,8 @@ Date: <YYYY-MM-DD>. Plugin version 0.1.0. Sandbox: AndresRubio/pipeline-sandbox.
 
 - Grading consistency (test issues 1–4, three times each).
 - Test issues 6, 6b, 8, 9 and 11, and both sandboxes end to end through the merge gate.
-- The GitHub lane's sweep, which restarts waiting and deferred issues (spec §8.1).
+- The GitHub lane's sweep, which restarts waiting, deferred and crashed runs (spec §8.1).
+- Seed test issue 11: three unrelated issues, run against a sandbox config with `maxParallel` 2 (the sandbox has 6).
 ```
 Fill in every cell from the runs, the verify output and the run JSON files.
 
