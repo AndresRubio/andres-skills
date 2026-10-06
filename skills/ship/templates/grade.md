@@ -4,7 +4,7 @@
 
 ## Why
 
-One line per reason from `node "$PIPELINE" grade`, or "No blocking criteria."
+One line per reason and per note from `node "$PIPELINE" grade`, or "No blocking criteria."
 
 ## Checklist
 
@@ -18,7 +18,7 @@ One line per reason from `node "$PIPELINE" grade`, or "No blocking criteria."
 | Changes data model, API, auth or dependencies | <yes/no> |
 | Acceptance criteria derivable | <yes/no> |
 | Needs workflow changes | <yes/no> |
-| Conflicts with an open claude/* PR | <yes/no> |
+| Waits for (runs ahead) | <none, or #n (relation), …; or "went ahead alongside …"> |
 | Missing values | <none, or the list> |
 | claude-go | <yes/no> |
 

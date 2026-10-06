@@ -1,7 +1,9 @@
+const VERDICT_LINE = /\*\*Verdict:\*\* `([a-z-]+)`/;
+
+// A back-off `deferred` has no Verdict line, so it doesn't hide the grade before it.
 export function verdictFromComments(comments) {
-  const graded = comments.filter((c) => c.marker && ['grade', 'questions', 'split'].includes(c.marker.kind));
-  const m = graded.at(-1)?.body.match(/\*\*Verdict:\*\* `([a-z-]+)`/);
-  return m ? m[1] : null;
+  const graded = comments.filter((c) => c.marker && ['grade', 'questions', 'split', 'deferred'].includes(c.marker.kind) && VERDICT_LINE.test(c.body));
+  return graded.at(-1)?.body.match(VERDICT_LINE)[1] ?? null;
 }
 
 // texts: [{ where, text }]. Returns the `where` of every text that contains `forbidden`.

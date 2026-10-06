@@ -4,12 +4,13 @@ Decide whether the issue can be built as it is, needs recorded assumptions, need
 
 ## Inputs
 
-`$RUN_DIR/issue.json`, `docs/pipeline/<KEY>/research.md`, `$RUN_DIR/config.json`, MODE.
+`$RUN_DIR/issue.json`, `docs/pipeline/<KEY>/research.md`, `$RUN_DIR/config.json`, `$RUN_DIR/active-runs.json`, MODE.
 
 ## Steps
 
-1. Read the issue (trusted text only) and research.md. Answers in trusted replies (hard rule 2) count as issue text: a value a reply supplies is not a missing value, and a detail a reply settles is a decision, not an assumption. If the issue has a comment with `pipeline: true` and kind `questions` (the latest one) followed by trusted replies — comments with `trusted: true` and `pipeline: false` — copy each answered question and its answer under "## Decisions" when you write grade.md in step 4.
-2. Write `$RUN_DIR/checklist.json` with exactly these fields:
+1. Read the issue (trusted text only) and research.md. Answers in trusted replies (hard rule 2) count as issue text: a value a reply supplies is not a missing value, and a detail a reply settles is a decision, not an assumption. If the issue has a comment with `pipeline: true` and kind `questions` (the latest one) followed by trusted replies — comments with `trusted: true` and `pipeline: false` — copy each answered question and its answer under "## Decisions" when you write grade.md in step 5.
+2. Refresh the count of runs in progress: `tracker:active-runs` with `--expect-locked`, overwriting `active-runs.json`. If it fails, apply hard rule 7.
+3. Write `$RUN_DIR/checklist.json` with exactly these fields:
    - `estimatedFiles` (integer): files the change will touch, tests included.
    - `estimatedLines` (integer): added plus removed lines, tests included.
    - `estimatedTasks` (integer): plan tasks needed. One task is one test cycle.
@@ -20,11 +21,12 @@ Decide whether the issue can be built as it is, needs recorded assumptions, need
    - `changesDataModelApiAuthOrDeps` (boolean): it changes the data model, a stored format or schema, a public API, or auth or security, or it adds a dependency.
    - `acceptanceCriteriaDerivable` (boolean): testable acceptance criteria can be written from the issue or from existing tests.
    - `needsWorkflowChanges` (boolean): it needs edits under `.github/workflows/`.
-   - `conflictsWithOpenClaudePr` (boolean): research found an open `claude/*` PR touching the same files.
+   - `waitFor` (string array): the keys of the runs that research.md's In-flight overlap marks `builds-on`, `same-code` or `same-decision`. Copy each key exactly as `active-runs.json` writes it, such as `12`.
+   - `waitOverride` (boolean): true if the issue has the `claude-go` label, or after the user chose to go ahead alongside those runs in interactive mode (see "wait" under Interactive mode). A reply never sets it.
    - `claudeGo` (boolean): true if the issue has the `claude-go` label, or a trusted reply (a comment with `trusted: true` and `pipeline: false`) posted after the latest comment with `pipeline: true` and kind `questions` answers every question in it. A partial answer is fine: the regrade forks again with only the unanswered questions.
-3. `node "$PIPELINE" grade --checklist-file "$RUN_DIR/checklist.json" --config-file "$RUN_DIR/config.json" --mode "$MODE" > "$RUN_DIR/grade.json"`
-4. Write `docs/pipeline/<KEY>/grade.md` from `templates/grade.md`. The verdict line must read exactly `**Verdict:** \`<verdict>\``.
-5. Act on the verdict (see the mode sections).
+4. `node "$PIPELINE" grade --checklist-file "$RUN_DIR/checklist.json" --config-file "$RUN_DIR/config.json" --mode "$MODE" --active-runs-file "$RUN_DIR/active-runs.json" > "$RUN_DIR/grade.json"`
+5. Write `docs/pipeline/<KEY>/grade.md` from `templates/grade.md`. The verdict line must read exactly `**Verdict:** \`<verdict>\``. Write any `notes` from grade.json into "Why". A `went ahead alongside` note also goes under "## Decisions", naming who chose it: the `claude-go` label, or the user.
+6. Act on the verdict (see the mode sections).
 
 **Questions (for a fork):** one per fork reason and one per missing value. Number them **Q1.**, **Q2.**, …, each followed by "Recommended: <answer> — <why>". For a missing value, write "Recommended: none — please supply the value."
 
@@ -39,7 +41,7 @@ Decide whether the issue can be built as it is, needs recorded assumptions, need
 - **ready or small-gaps:** `tracker:post-comment` kind `grade` with the contents of grade.md. Continue to stage 4.
 - **fork:**
   1. Append a "## Questions" section to grade.md.
-  2. `tracker:post-comment` kind `questions`, with grade.md plus a closing line: if every question is about a missing value, "Reply with the values to resume." (a `claude-go` can't supply a value) — otherwise "Reply to resume, or add `claude-go` to accept the recommendations."
+  2. `tracker:post-comment` kind `questions`, with grade.md plus a closing line: if every question is about a missing value, "Reply with the values to resume." (a `claude-go` can't supply a value) — otherwise "Reply to resume, or add `claude-go` to accept the recommendations; it also lets this issue run alongside runs in progress."
   3. Delete `docs/pipeline/<KEY>` in WT.
   4. Stop procedure (the worktree may be removed; don't post `blocked`).
 - **too-big:**
@@ -49,9 +51,19 @@ Decide whether the issue can be built as it is, needs recorded assumptions, need
   4. `tracker:post-comment` kind `split` on the parent, with grade.md and the list of created issues.
   5. `tracker:remove-labels` `claude-working`.
   6. Delete `docs/pipeline/<KEY>` in WT and remove the empty worktree with `node "$PIPELINE" worktree-remove-if-empty --repo-root "$REPO_ROOT" --path "$WT" --branch "$BRANCH" --base "$BASE_REF"`. Stop: the parent stays open until its children finish. This isn't the stop procedure, and no `needs-decision` is added.
+- **wait:**
+  1. Append a "## Waiting for" section to grade.md: each run in grade.json's `waitFor`, its relation and the evidence from research.md.
+  2. `tracker:post-comment` kind `deferred`. The body is grade.md, then "This issue becomes eligible again once none of these runs is in progress: the sweep or the next poll picks it up, or run `/ship #<NUMBER>` again. To run it alongside them anyway, add `claude-go`.", then, as the last line, grade.json's `waitLine` copied verbatim: no backticks, no bold, nothing after it.
+  3. Check that the wait reads back: `tracker:read-issue`, then `node "$PIPELINE" waiting-for --issue-file "$RUN_DIR/issue.json"`. Its `waitingFor` must hold the same keys as grade.json's `waitFor`. If it doesn't, apply hard rule 7.
+  4. `tracker:remove-labels` `claude-working`.
+  5. Delete `docs/pipeline/<KEY>` in WT and remove the empty worktree, as too-big does.
+  6. Stop. This isn't the stop procedure: no `needs-decision` is added. Eligibility holds the issue back until none of those runs is in progress.
 
 ## Interactive mode
 
 - **ready or small-gaps:** show grade.md and ask "Proceed with these assumptions?" Write any corrections into grade.md as decisions, then `tracker:post-comment` kind `grade` with grade.md.
 - **fork:** ask the questions one at a time, each with its recommendation. Record the answers under "## Decisions" in grade.md, then `tracker:post-comment` kind `grade` with grade.md, and continue to stage 4.
 - **too-big:** show the proposed split and ask whether to create the sub-issues (then do what automatic mode does, which includes the `split` comment, and stop) or to proceed anyway (`tracker:post-comment` kind `grade` with grade.md, then continue to stage 4).
+- **wait:** append the "## Waiting for" section as automatic mode does, show it, and ask "Wait for <labels> (posts `deferred` and stops), or go ahead alongside?" A label is `#<n>` for each key in grade.json's `waitFor`.
+  - On wait, do what automatic mode does.
+  - On go ahead, set `waitOverride` to true in `checklist.json`, run the grade command (step 4) again, write grade.md again with that verdict, and act on it as this section says.

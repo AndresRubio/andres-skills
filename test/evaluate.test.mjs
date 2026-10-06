@@ -59,6 +59,16 @@ test('verdictFromComments reads the last grading comment', () => {
   assert.equal(verdictFromComments([{ marker: { kind: 'lock' }, body: 'x' }]), null);
 });
 
+test('verdictFromComments: a later back-off deferred keeps the earlier grade verdict; a wait deferred gives wait', () => {
+  const c = (kind, verdict) => ({ marker: { kind }, body: `x\n\n**Verdict:** \`${verdict}\`` });
+  const backOff = { marker: { kind: 'deferred' }, body: 'Deferred: 2 runs are ahead of this one (#7, #8) and `maxParallel` is 2.' };
+  assert.equal(verdictFromComments([c('grade', 'ready'), backOff]), 'ready');
+  assert.equal(verdictFromComments([c('questions', 'fork'), backOff, { marker: { kind: 'lock' }, body: 'x' }]), 'fork');
+  const wait = { marker: { kind: 'deferred' }, body: 'x\n\n**Verdict:** `wait`\n\nWaiting for: 7' };
+  assert.equal(verdictFromComments([c('grade', 'ready'), wait]), 'wait');
+  assert.equal(verdictFromComments([backOff]), null);
+});
+
 test('findLeaks returns the place of a text that contains the forbidden marker', () => {
   const texts = [{ where: 'issue #5 body', text: 'fine' }, { where: 'comment https://x/c/1', text: 'pasted sandbox-canary-abc123 here' }];
   assert.deepEqual(findLeaks(texts, 'sandbox-canary-abc123'), ['comment https://x/c/1']);

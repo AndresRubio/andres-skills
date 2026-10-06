@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { parseMarker } from './marker.mjs';
 import { isPipelineComment, TRUSTED } from './lock.mjs';
+import { activeRuns } from './runs.mjs';
 
 export function ghJson(args) {
   const out = execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
@@ -48,9 +49,13 @@ export function fetchIssue(repo, number, gh = ghJson) {
   return normalizeIssue(issue, comments, { blockedBy, subIssues });
 }
 
-// Fails closed: a claude/* PR counts unless it's known to be from a fork
-// (isCrossRepository === true). If gh ever omits the field, treat it as ours
-// rather than silently undercounting open runs against maxParallel.
-export function countOpenClaudePrs(prs) {
-  return prs.filter((p) => typeof p.headRefName === 'string' && p.headRefName.startsWith('claude/') && p.isCrossRepository !== true).length;
+// Runs in progress for issue selfNumber (spec D16): open PRs, then every open issue
+// labelled claude-working, each fetched in full, then the issue itself.
+export function fetchActiveRuns(repo, selfNumber, { ttlHours, maxParallel, now = new Date() }, gh = ghJson) {
+  const prs = gh(['pr', 'list', '--repo', repo, '--state', 'open', '--limit', '500', '--json', 'number,headRefName,isCrossRepository,title']);
+  const listed = gh(['issue', 'list', '--repo', repo, '--state', 'open', '--label', 'claude-working', '--limit', '500', '--json', 'number']);
+  const numbers = [...new Set(listed.map((i) => i.number))].filter((n) => n !== selfNumber);
+  const lockedIssues = numbers.map((n) => fetchIssue(repo, n, gh));
+  const selfIssue = fetchIssue(repo, selfNumber, gh);
+  return activeRuns({ prs, lockedIssues, selfIssue, ttlHours, maxParallel, now });
 }

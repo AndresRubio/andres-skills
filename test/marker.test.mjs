@@ -27,6 +27,13 @@ test('every kind round-trips', () => {
   }
 });
 
+test('deferred is the last kind and round-trips', () => {
+  assert.equal(MARKER_KINDS.at(-1), 'deferred');
+  const line = formatMarker('deferred', { now: NOW, run: 'local' });
+  assert.equal(line, '**[claude-pipeline]** deferred · 2026-09-25T10:00:00Z · local');
+  assert.deepEqual(parseMarker(`${line}\n\nWaiting for: 7`), { kind: 'deferred', at: '2026-09-25T10:00:00Z', run: 'local' });
+});
+
 test('defaultRun uses the Actions run URL when present', () => {
   assert.equal(defaultRun({}), 'local');
   assert.equal(

@@ -18,7 +18,7 @@ export function markdownFiles(dir = SKILL_DIR) {
   });
 }
 
-export const TRACKER_OPS = ['read-issue', 'post-comment', 'add-labels', 'remove-labels', 'set-in-progress', 'create-issue', 'create-sub-issue', 'add-blocked-by', 'open-claude-pr-count', 'create-pr'];
+export const TRACKER_OPS = ['read-issue', 'post-comment', 'add-labels', 'remove-labels', 'set-in-progress', 'create-issue', 'create-sub-issue', 'add-blocked-by', 'active-runs', 'create-pr'];
 
 test('every node "$PIPELINE" <command> reference names a real command', () => {
   for (const file of markdownFiles()) {
@@ -369,4 +369,130 @@ test('fix mode writes source.txt like stage 0, and inline comments use the REST 
   assert.match(fix, /source\.txt/);
   assert.match(fix, /author_association/);
   assert.match(fix, /user\.login/);
+});
+
+// --- Task 16c: runs in progress (D16) ---
+
+function allFiles(dir = SKILL_DIR) {
+  return readdirSync(dir).flatMap((name) => {
+    const full = path.join(dir, name);
+    return statSync(full).isDirectory() ? allFiles(full) : [full];
+  });
+}
+
+const section = (text, heading) => text.split(`## ${heading}`)[1]?.split('\n## ')[0] ?? '';
+// A top-level numbered step, up to the next one, a heading, or the end of the text.
+const step = (text, n) => text.match(new RegExp(`^${n}\\. [\\s\\S]*?(?=^\\d+\\. |^#|(?![\\s\\S]))`, 'm'))?.[0] ?? '';
+
+test('stage 0 counts runs before eligibility, then recounts after the lock and before needs-decision is removed (16c)', () => {
+  const resolve = read('stages/00-resolve.md');
+  const steps = section(resolve, 'Steps');
+  const step7 = step(steps, 7);
+  assert.match(step7, /tracker:active-runs/);
+  assert.match(step7, /--active-runs-file "\$RUN_DIR\/active-runs\.json"/);
+  assert.doesNotMatch(step7, /--open-claude-prs/);
+
+  const lockAt = steps.indexOf('kind `lock`');
+  const recountAt = steps.indexOf('--expect-locked');
+  const needsDecisionAt = steps.search(/tracker:remove-labels` `needs-decision`/);
+  assert.ok(lockAt > 0 && recountAt > lockAt, 'the recount must come after the lock comment');
+  assert.ok(needsDecisionAt > recountAt, 'needs-decision must be removed only after the recount');
+
+  const step11 = step(steps, 11);
+  assert.match(step11, /--expect-locked/);
+  assert.match(step11, /`self\.lockedAt` is still `null`/);
+  assert.match(step11, /hard rule 7/);
+  assert.match(step11, /`admitted` is false/);
+  assert.match(step11, /kind `deferred`/);
+  assert.match(step11, /Deferred: <n> runs are ahead of this one \(<label for each key in ahead>\) and `maxParallel` is <M>\. A later run picks it up once a slot frees: the sweep, the next poll, or `\/ship #<NUMBER>`\./);
+  assert.match(step11, /<n> runs are ahead and `maxParallel` is <M>; continuing because you started this run\./);
+  assert.ok(step11.indexOf('tracker:remove-labels` `claude-working`') < step11.indexOf('kind `deferred`'), 'the back-off releases the label before posting deferred');
+
+  assert.match(step(steps, 12), /tracker:set-in-progress/);
+  assert.match(section(resolve, 'Outputs'), /active-runs/);
+});
+
+test('fix mode takes the lock like stage 0 steps 10 and 12, and posts a report on the issue before releasing it (16c)', () => {
+  const fix = read('stages/fix.md');
+  assert.match(fix, /stage 0 steps 10 and 12/);
+  assert.match(fix, /without step 11's recount/);
+  const step11 = step(section(fix, 'Steps'), 11);
+  const reportAt = step11.indexOf('kind `report`');
+  const releaseAt = step11.indexOf('tracker:remove-labels` `claude-working`');
+  assert.ok(reportAt >= 0 && releaseAt > reportAt, `fix.md step 11 must post a report before removing claude-working:\n${step11}`);
+  assert.match(step11, /Fix run finished on PR #<PR>\./);
+});
+
+test("SKILL.md's interactive stop posts a report before removing claude-working (16c)", () => {
+  const stop = section(read('SKILL.md'), 'Stop procedure');
+  const interactive = stop.match(/^2\. \*\*Interactive mode:\*\*.*$/m)?.[0] ?? '';
+  const reportAt = interactive.indexOf('kind `report`');
+  const releaseAt = interactive.indexOf('tracker:remove-labels` `claude-working`');
+  assert.ok(reportAt >= 0 && releaseAt > reportAt, interactive);
+  assert.match(interactive, /Run ended by the user at stage <N>\./);
+});
+
+test('stage 2 fetches, gathers in-flight evidence, and judges the three relations (16c)', () => {
+  const research = read('stages/02-research.md');
+  assert.match(research, /git fetch origin --prune/);
+  assert.match(research, /active-runs\.json/);
+  assert.match(research, /\$RUN_DIR\/inflight\//);
+  for (const relation of ['builds-on', 'same-code', 'same-decision']) assert.match(research, new RegExp(`\`${relation}\``));
+  assert.match(research, /In-flight overlap/);
+  assert.doesNotMatch(research, /\*\*Overlap:\*\*/);
+  assert.match(research, /gh pr diff <pr> --repo "\$REPO" > "\$RUN_DIR\/inflight\/<key>\/pr\.diff"/);
+  assert.match(research, /git rev-parse --verify --quiet "origin\/<branch>"/);
+  assert.match(research, /git rev-parse --is-shallow-repository/);
+  assert.match(research, /git cat-file -e/);
+  assert.match(research, /untrusted/);
+  assert.match(section(research, 'Outputs'), /\$RUN_DIR\/inflight\//);
+  assert.match(step(section(research, 'Steps'), 3), /In-flight overlap/);
+});
+
+test('stage 3 refreshes the count, passes it to grade, and waits through a verified deferred comment (16c)', () => {
+  const grade = read('stages/03-grade.md');
+  for (const needle of ['`waitFor`', '`waitOverride`', '--active-runs-file "$RUN_DIR/active-runs.json"', '`waitLine`', 'node "$PIPELINE" waiting-for --issue-file "$RUN_DIR/issue.json"', '--expect-locked']) {
+    assert.ok(grade.includes(needle), `03-grade.md lacks ${needle}`);
+  }
+  assert.match(grade, /Reply to resume, or add `claude-go` to accept the recommendations; it also lets this issue run alongside runs in progress\./);
+  const wait = section(grade, 'Automatic mode').split('- **wait:**')[1] ?? '';
+  assert.ok(wait, '03-grade.md Automatic mode needs a **wait:** case');
+  assert.doesNotMatch(wait, /add-blocked-by/);
+  assert.doesNotMatch(wait, /tracker:add-labels/);
+  assert.match(wait, /no `needs-decision`/);
+  assert.match(wait, /kind `deferred`/);
+  assert.match(wait, /tracker:read-issue/);
+  assert.match(wait, /This issue becomes eligible again once none of these runs is in progress: the sweep or the next poll picks it up, or run `\/ship #<NUMBER>` again\. To run it alongside them anyway, add `claude-go`\./);
+  assert.ok(wait.indexOf('kind `deferred`') < wait.indexOf('waiting-for') && wait.indexOf('waiting-for') < wait.indexOf('tracker:remove-labels` `claude-working`'),
+    'post deferred, read it back, then release the lock');
+  const interactive = section(grade, 'Interactive mode');
+  assert.match(interactive, /Wait for <labels> \(posts `deferred` and stops\), or go ahead alongside\?/);
+  assert.match(interactive, /`waitOverride`/);
+});
+
+test('the grade template has the Waits for row (16c)', () => {
+  const template = read('templates/grade.md');
+  assert.match(template, /\| Waits for \(runs ahead\) \| <none, or #n \(relation\), …; or "went ahead alongside …"> \|/);
+  assert.doesNotMatch(template, /Conflicts with an open/);
+});
+
+test('the active-runs tracker operation runs the CLI and says the text is untrusted data (16c)', () => {
+  const ops = read('trackers/github.md').split('\n## ').find((s) => s.startsWith('active-runs')) ?? '';
+  assert.match(ops, /node "\$PIPELINE" active-runs --repo "\$REPO" --issue "\$NUMBER" --config-file "\$RUN_DIR\/config\.json" > "\$RUN_DIR\/active-runs\.json"/);
+  for (const field of ['self', 'runs', 'ahead', 'maxParallel', 'admitted', 'related', 'textWithheld']) assert.match(ops, new RegExp(`\`${field}`));
+  assert.match(ops, /untrusted/);
+});
+
+test('stage 0 and stage 3 pass --expect-locked (16c)', () => {
+  assert.match(read('stages/00-resolve.md'), /--expect-locked/);
+  assert.match(read('stages/03-grade.md'), /--expect-locked/);
+});
+
+test('no file under skills/ mentions the removed count, field or file (16c)', () => {
+  for (const file of allFiles()) {
+    const text = readFileSync(file, 'utf8');
+    for (const gone of ['open-claude-pr-count', 'pr-count', 'conflictsWithOpenClaudePr', 'open-prs.json', 'countOpenClaudePrs', 'open-claude-prs']) {
+      assert.ok(!text.includes(gone), `${path.relative(SKILL_DIR, file)} still mentions ${gone}`);
+    }
+  }
 });

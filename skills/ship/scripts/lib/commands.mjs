@@ -6,7 +6,8 @@ import { loadConfig } from './config.mjs';
 import { formatMarker, parseMarker, defaultRun } from './marker.mjs';
 import { lockStatus } from './lock.mjs';
 import { checkEligibility, LANES } from './eligibility.mjs';
-import { fetchIssue, currentRepo, countOpenClaudePrs, ghJson } from './github.mjs';
+import { fetchIssue, currentRepo, fetchActiveRuns } from './github.mjs';
+import { waitingFor } from './runs.mjs';
 import { gradeVerdict } from './grade.mjs';
 import { findFreePort, diffSize } from './runtime.mjs';
 import { takeScreenshot } from './chrome.mjs';
@@ -36,6 +37,14 @@ export function required(values, ...names) {
   for (const name of names) {
     if (values[name] === undefined) throw new UsageError(`--${name} is required`);
   }
+}
+
+// How long active-runs --expect-locked waits before its one recount.
+function recountDelayMs(env = process.env) {
+  const raw = env.CLAUDE_PIPELINE_RECOUNT_DELAY_MS;
+  if (raw === undefined || raw === '') return 5000;
+  if (!/^\d+$/.test(raw)) throw new UsageError('CLAUDE_PIPELINE_RECOUNT_DELAY_MS must be an integer >= 0');
+  return Number(raw);
 }
 
 const PLUGIN_JSON = new URL('../../../../.claude-plugin/plugin.json', import.meta.url);
@@ -89,34 +98,65 @@ export const COMMANDS = {
     if (!Number.isInteger(number) || number < 1) throw new UsageError('issue number must be a positive integer');
     return fetchIssue(v.repo ?? currentRepo(), number);
   },
-  'pr-count': (argv) => {
-    const v = parse(argv, { repo: { type: 'string' } });
-    const repo = v.repo ?? currentRepo();
-    return { count: countOpenClaudePrs(ghJson(['pr', 'list', '--repo', repo, '--state', 'open', '--limit', '500', '--json', 'headRefName,isCrossRepository'])) };
+  'active-runs': async (argv) => {
+    const v = parse(argv, {
+      repo: { type: 'string' }, issue: { type: 'string' }, 'config-file': { type: 'string' },
+      now: { type: 'string' }, 'expect-locked': { type: 'boolean' },
+    });
+    required(v, 'repo', 'issue', 'config-file');
+    const number = Number(v.issue);
+    if (!/^\d+$/.test(v.issue) || number < 1) throw new UsageError('--issue must be a positive integer');
+    const delayMs = v['expect-locked'] ? recountDelayMs() : 0;
+    const { lockTtlHours, maxParallel } = readJson(v['config-file']);
+    if (!(typeof lockTtlHours === 'number' && lockTtlHours > 0) || !(Number.isInteger(maxParallel) && maxParallel >= 1)) {
+      throw new Error(`${v['config-file']} has no valid lockTtlHours and maxParallel; write it with the config command`);
+    }
+    const count = () => fetchActiveRuns(v.repo, number, { ttlHours: lockTtlHours, maxParallel, now: v.now ? new Date(v.now) : new Date() });
+    let runs = count();
+    if (v['expect-locked'] && runs.self.lockedAt === null) {
+      await new Promise((resolve) => { setTimeout(resolve, delayMs); });
+      runs = count();
+      if (runs.self.lockedAt === null) throw new Error("this run's own lock isn't visible: read lag, or the run outlived lockTtlHours");
+    }
+    return runs;
+  },
+  'waiting-for': (argv) => {
+    const v = parse(argv, { 'issue-file': { type: 'string' } });
+    required(v, 'issue-file');
+    return { waitingFor: waitingFor(readJson(v['issue-file'])) };
   },
   eligibility: (argv) => {
     const v = parse(argv, {
       'issue-file': { type: 'string' }, 'config-file': { type: 'string' }, lane: { type: 'string' },
-      'open-claude-prs': { type: 'string' }, now: { type: 'string' },
+      'active-runs-file': { type: 'string' }, now: { type: 'string' },
     });
     required(v, 'issue-file', 'config-file', 'lane');
     if (!LANES.includes(v.lane)) throw new UsageError(`--lane must be one of ${LANES.join(', ')}`);
-    if (v['open-claude-prs'] !== undefined && !/^\d+$/.test(v['open-claude-prs'])) {
-      throw new UsageError('--open-claude-prs must be an integer >= 0');
-    }
+    if (v.lane !== 'manual') required(v, 'active-runs-file');
     return checkEligibility({
       issue: readJson(v['issue-file']),
       config: readJson(v['config-file']),
       lane: v.lane,
-      openClaudePrs: v['open-claude-prs'] !== undefined ? Number(v['open-claude-prs']) : 0,
+      activeRuns: v['active-runs-file'] !== undefined ? readJson(v['active-runs-file']) : undefined,
       now: v.now ? new Date(v.now) : new Date(),
     });
   },
   grade: (argv) => {
-    const v = parse(argv, { 'checklist-file': { type: 'string' }, 'config-file': { type: 'string' }, mode: { type: 'string' } });
+    const v = parse(argv, {
+      'checklist-file': { type: 'string' }, 'config-file': { type: 'string' }, mode: { type: 'string' },
+      'active-runs-file': { type: 'string' },
+    });
     required(v, 'checklist-file', 'config-file', 'mode');
     if (!['auto', 'interactive'].includes(v.mode)) throw new UsageError('--mode must be auto or interactive');
-    return gradeVerdict(readJson(v['checklist-file']), { maxPrSize: readJson(v['config-file']).maxPrSize, mode: v.mode });
+    const checklist = readJson(v['checklist-file']);
+    if (Array.isArray(checklist?.waitFor) && checklist.waitFor.length && v['active-runs-file'] === undefined) {
+      throw new UsageError('--active-runs-file is required when waitFor is not empty');
+    }
+    return gradeVerdict(checklist, {
+      maxPrSize: readJson(v['config-file']).maxPrSize,
+      mode: v.mode,
+      activeRuns: v['active-runs-file'] !== undefined ? readJson(v['active-runs-file']) : undefined,
+    });
   },
   'free-port': async (argv) => {
     const v = parse(argv, { start: { type: 'string' } });

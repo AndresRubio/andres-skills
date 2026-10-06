@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { checkEligibility, hasNewTrustedReply } from '../skills/ship/scripts/lib/eligibility.mjs';
+import { runLock } from '../skills/ship/scripts/lib/runs.mjs';
 import { validateConfig } from '../skills/ship/scripts/lib/config.mjs';
 import { runCli } from './helpers/cli.mjs';
 import { tempDir } from './helpers/git.mjs';
@@ -14,7 +15,9 @@ const makeIssue = (over = {}) => ({
   author: 'AndresRubio', authorAssociation: 'OWNER', labels: ['claude'],
   openBlockedBy: [], openSubIssues: [], comments: [], ...over,
 });
-const check = (issue, lane = 'github', extra = {}) => checkEligibility({ issue, config, lane, openClaudePrs: 0, now: NOW, ...extra });
+const counted = (over = {}) => ({ self: { key: '5', lockedAt: null, lockId: null }, runs: [], ahead: [], maxParallel: 2, admitted: true, ...over });
+const run = (key) => ({ key, issue: /^\d+$/.test(key) ? Number(key) : null, pr: null, branch: null, title: null, body: null, textWithheld: false, lockedAt: '2026-09-25T11:00:00Z', lockId: Number(key) || 1, related: false });
+const check = (issue, lane = 'github', extra = {}) => checkEligibility({ issue, config, lane, activeRuns: counted(), now: NOW, ...extra });
 const marked = (kind, createdAt) => ({ author: 'AndresRubio', authorAssociation: 'OWNER', body: '', createdAt, marker: { kind, at: createdAt, run: 'local' } });
 const reply = (createdAt, authorAssociation = 'OWNER') => ({ author: 'x', authorAssociation, body: 'answer', createdAt, marker: null });
 const botMarked = (kind, createdAt) => ({ author: 'claude[bot]', authorAssociation: 'NONE', body: '', createdAt, marker: { kind, at: createdAt, run: 'local' } });
@@ -48,7 +51,14 @@ test('a fresh lock blocks; a stale lock does not', () => {
 test('blocked issues, parents with open sub-issues and a full repo are not eligible', () => {
   assert.match(check(makeIssue({ openBlockedBy: [3] })).reasons.join(), /blocked by #3/);
   assert.match(check(makeIssue({ openSubIssues: [8] })).reasons.join(), /open sub-issues/);
-  assert.match(check(makeIssue(), 'github', { openClaudePrs: 2 }).reasons.join(), /maxParallel reached \(2\/2\)/);
+});
+
+test('the cap reason counts the runs ahead against maxParallel', () => {
+  const full = counted({ runs: [run('7'), run('8')], ahead: ['7', '8'], admitted: false });
+  assert.deepEqual(check(makeIssue(), 'github', { activeRuns: full }).reasons, ['maxParallel reached (2/2)']);
+  const three = counted({ runs: [run('7'), run('8'), run('9')], ahead: ['7', '8', '9'], admitted: false });
+  assert.match(check(makeIssue(), 'github', { activeRuns: three }).reasons.join(), /maxParallel reached \(3\/2\)/);
+  assert.equal(check(makeIssue(), 'github', { activeRuns: counted({ runs: [run('7')], ahead: ['7'] }) }).eligible, true);
 });
 
 test('needs-decision resumes only on a newer trusted reply or claude-go', () => {
@@ -107,22 +117,95 @@ test('CLI eligibility validates the lane and reads files', () => {
   const dir = tempDir();
   const issueFile = path.join(dir, 'issue.json');
   const configFile = path.join(dir, 'config.json');
+  const runsFile = path.join(dir, 'active-runs.json');
   writeFileSync(issueFile, JSON.stringify(makeIssue()));
   writeFileSync(configFile, JSON.stringify(config));
-  const ok = runCli(['eligibility', '--issue-file', issueFile, '--config-file', configFile, '--lane', 'github', '--open-claude-prs', '0']);
+  writeFileSync(runsFile, JSON.stringify(counted()));
+  const ok = runCli(['eligibility', '--issue-file', issueFile, '--config-file', configFile, '--lane', 'github', '--active-runs-file', runsFile]);
   assert.equal(ok.json().eligible, true, ok.stderr);
-  assert.equal(runCli(['eligibility', '--issue-file', issueFile, '--config-file', configFile, '--lane', 'moon']).code, 2);
+  assert.equal(runCli(['eligibility', '--issue-file', issueFile, '--config-file', configFile, '--lane', 'moon', '--active-runs-file', runsFile]).code, 2);
+  const full = path.join(dir, 'full.json');
+  writeFileSync(full, JSON.stringify(counted({ runs: [run('7'), run('8')], ahead: ['7', '8'], admitted: false })));
+  const capped = runCli(['eligibility', '--issue-file', issueFile, '--config-file', configFile, '--lane', 'github', '--active-runs-file', full]);
+  assert.deepEqual(capped.json().reasons, ['maxParallel reached (2/2)'], capped.stderr);
 });
 
-test('CLI eligibility rejects a non-integer --open-claude-prs', () => {
+test('CLI eligibility needs --active-runs-file on automatic lanes but not on the manual lane; --open-claude-prs is gone', () => {
   const dir = tempDir();
   const issueFile = path.join(dir, 'issue.json');
   const configFile = path.join(dir, 'config.json');
   writeFileSync(issueFile, JSON.stringify(makeIssue()));
   writeFileSync(configFile, JSON.stringify(config));
-  const bad = runCli(['eligibility', '--issue-file', issueFile, '--config-file', configFile, '--lane', 'github', '--open-claude-prs', 'abc']);
-  assert.equal(bad.code, 2);
-  assert.match(bad.stderr, /--open-claude-prs must be an integer/);
-  const emptyString = runCli(['eligibility', '--issue-file', issueFile, '--config-file', configFile, '--lane', 'github', '--open-claude-prs', '']);
-  assert.equal(emptyString.code, 2);
+  for (const lane of ['github', 'linear', 'local']) {
+    const missing = runCli(['eligibility', '--issue-file', issueFile, '--config-file', configFile, '--lane', lane]);
+    assert.equal(missing.code, 2, `${lane}: ${missing.stderr}`);
+    assert.match(missing.stderr, /--active-runs-file is required/);
+  }
+  const manual = runCli(['eligibility', '--issue-file', issueFile, '--config-file', configFile, '--lane', 'manual']);
+  assert.equal(manual.code, 0, manual.stderr);
+  assert.equal(manual.json().eligible, true);
+  const old = runCli(['eligibility', '--issue-file', issueFile, '--config-file', configFile, '--lane', 'manual', '--open-claude-prs', '0']);
+  assert.equal(old.code, 2);
+  assert.match(old.stderr, /open-claude-prs/);
+});
+
+// --- D16: runs in progress ---
+
+const deferredWait = (createdAt, line, id = 50) => ({
+  id, author: 'AndresRubio', authorAssociation: 'OWNER', createdAt,
+  body: `**[claude-pipeline]** deferred · ${createdAt} · local\n\n**Verdict:** \`wait\`\n\n${line}`,
+  marker: { kind: 'deferred', at: createdAt, run: 'local' },
+});
+
+test('a waiting issue is held back while a listed run is in progress, and freed once none is', () => {
+  const waiting = makeIssue({ comments: [deferredWait('2026-09-25T10:00:00Z', 'Waiting for: 7, 9')] });
+  const busy = counted({ runs: [run('7'), run('8')], ahead: ['7', '8'] });
+  assert.deepEqual(check(waiting, 'github', { activeRuns: busy }).reasons, ['waiting for 7 (still in progress)']);
+  const both = counted({ runs: [run('9'), run('7')], ahead: ['9', '7'], maxParallel: 3 });
+  assert.deepEqual(check(waiting, 'github', { activeRuns: both }).reasons, ['waiting for 7, 9 (still in progress)']);
+  const done = counted({ runs: [run('8')], ahead: ['8'] });
+  assert.deepEqual(check(waiting, 'github', { activeRuns: done }).reasons, []);
+  assert.equal(check(waiting, 'github', { activeRuns: done }).eligible, true);
+});
+
+test('the manual lane ignores both the cap and the wait, and needs no activeRuns', () => {
+  const waiting = makeIssue({ comments: [deferredWait('2026-09-25T10:00:00Z', 'Waiting for: 7')] });
+  const full = counted({ runs: [run('7'), run('8')], ahead: ['7', '8'], admitted: false });
+  assert.deepEqual(check(waiting, 'manual', { activeRuns: full }).reasons, []);
+  assert.deepEqual(checkEligibility({ issue: waiting, config, lane: 'manual', now: NOW }).reasons, []);
+});
+
+test('automatic lanes throw without activeRuns, or with a count taken for another issue', () => {
+  for (const lane of ['github', 'linear', 'local']) {
+    assert.throws(() => checkEligibility({ issue: makeIssue(), config, lane, now: NOW }), /^Error: activeRuns is required for automatic lanes$/);
+  }
+  const other = counted({ self: { key: '6', lockedAt: null, lockId: null } });
+  assert.throws(() => check(makeIssue(), 'github', { activeRuns: other }), /^Error: active runs were counted for #6, not #5$/);
+});
+
+test('an issue in its entering window still reads "locked since" through lockStatus', () => {
+  const entering = makeIssue({
+    labels: ['claude', 'claude-working'],
+    comments: [
+      { ...marked('lock', '2026-09-25T10:00:00Z'), id: 1 },
+      { ...marked('report', '2026-09-25T10:30:00Z'), id: 2 },
+    ],
+  });
+  assert.equal(runLock(entering, { ttlHours: config.lockTtlHours, now: NOW }).state, 'entering');
+  assert.match(check(entering).reasons.join(), /locked since 2026-09-25T10:00:00Z/);
+  assert.match(check(entering, 'manual').reasons.join(), /locked since 2026-09-25T10:00:00Z/);
+});
+
+test('hasNewTrustedReply: a reply stays new after later lock, deferred and stale-lock comments, but not after a later blocked', () => {
+  const comments = [
+    marked('questions', '2026-09-25T10:00:00Z'),
+    reply('2026-09-25T10:30:00Z'),
+    marked('lock', '2026-09-25T10:40:00Z'),
+    marked('deferred', '2026-09-25T10:45:00Z'),
+    botMarked('stale-lock', '2026-09-25T10:50:00Z'),
+  ];
+  assert.equal(hasNewTrustedReply(makeIssue({ comments })), true);
+  assert.equal(hasNewTrustedReply(makeIssue({ comments: [...comments, marked('blocked', '2026-09-25T11:00:00Z')] })), false);
+  const waiting = makeIssue({ labels: ['claude', 'needs-decision'], comments });
+  assert.equal(check(waiting).eligible, true);
 });

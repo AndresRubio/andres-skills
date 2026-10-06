@@ -28,6 +28,14 @@ Phase 1 ends at an open PR — you merge it yourself.
 
 Q10: the short `/ship` alias is unverified; use `/claude-pipeline:ship`.
 
+## Runs in progress
+
+A run in progress is an open `claude/*` PR from this repo, or an open issue whose `claude-working` lock is fresh (newer than `lockTtlHours`). A PR and its issue's lock are one run. A run counts from its first `lock` comment after the issue's latest `report`, `blocked`, `questions`, `split`, `deferred` or `stale-lock` comment. Runs with an open PR are ahead of runs without one; otherwise the earlier lock is ahead.
+
+- **The cap.** Before taking the lock, a run counts every run in progress against `maxParallel`. After taking it, stage 0 counts again, and only the runs ahead count. If `maxParallel` or more are ahead, an automatic run backs off: it releases the lock, posts `deferred` and stops. A later run picks the issue up (in Phase 1, run `/ship` again). An interactive run only reports the count. The cap is soft: GitHub's read lag can, rarely, let two runs that lock at almost the same moment both back off or both go ahead.
+- **The wait.** Research checks each run ahead for work this issue builds on, changes to the same code, or a decision both depend on. A parent or sub-issue never counts. If one of them overlaps, the grade is `wait`: the run posts `deferred`, ending with a `Waiting for: <keys>` line, releases the lock and stops. Eligibility holds the issue back while any of those runs is still in progress, and frees it as soon as none is, however they ended. Nothing links the issues, so there is nothing to clean up, and a waiting issue holds no lock, so waits can't deadlock. Phase 1 has no sweep or poll to restart it: run `/ship` again.
+- **Overriding it.** Add `claude-go` to the issue to let it run alongside the runs it would wait for. In interactive mode, the grade asks whether to wait or go ahead alongside. Either way, grade.md records who chose to go ahead.
+
 ## Run guard
 
 The plugin ships a `PreToolUse` hook (`hooks/guard.mjs`) that checks every Bash command while a `/ship` run is in progress.
