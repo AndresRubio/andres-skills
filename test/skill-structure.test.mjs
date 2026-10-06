@@ -488,7 +488,8 @@ test('interactive fork and too-big ask the wait question first, before the fork 
   assert.match(question, /Wait for <labels> \(posts `deferred` and stops\), or go ahead alongside\?/);
   const onWait = question.split('\n').find((l) => l.startsWith('- **On wait:**')) ?? '';
   assert.match(onWait, /\*\*Verdict:\*\* \\`wait\\`|\*\*Verdict:\*\* `wait`/, onWait);
-  assert.match(onWait, /Also found: <the fork or too-big reasons>\. These are asked when the issue can start\./);
+  assert.match(onWait, /Also found: <the fork or too-big reasons>\. They are graded again when the issue can start\./);
+  assert.doesNotMatch(onWait, /are asked when/);
   assert.match(onWait, /automatic \*\*wait\*\* steps with grade\.json's `waitFor` and `waitLine`/);
   assert.match(onWait, /no fork question/i);
   assert.ok(onWait.indexOf('Verdict') < onWait.indexOf('automatic **wait** steps'), 'grade.md is rewritten before the wait steps post it');
@@ -558,14 +559,15 @@ import { checkCommand } from '../skills/ship/scripts/lib/guard.mjs';
 
 test("research's evidence fetches are non-fatal and pass the run guard (16c round 2)", () => {
   const step1 = step(section(read('stages/02-research.md'), 'Steps'), 1);
-  const spans = [...step1.matchAll(/`([^`\n]*(?:2>>|\[ -s)[^`\n]*)`/g)].map((m) => m[1]);
+  const spans = [...step1.matchAll(/`([^`\n]*(?:2>>|^find |find "\$RUN_DIR)[^`\n]*)`/g)].map((m) => m[1]);
   const fetches = spans.filter((c) => c.includes('2>>'));
   for (const tool of ['gh pr diff', 'git diff', 'gh api', 'git show']) {
     const c = fetches.find((f) => f.startsWith(tool));
     assert.ok(c, `02-research step 1 has no non-fatal ${tool}`);
     assert.match(c, / 2>> "\$RUN_DIR\/inflight\/<key>\/error\.txt" \|\| true$/, c);
   }
-  assert.ok(spans.includes('[ -s "$RUN_DIR/inflight/<key>/error.txt" ] || rm -f "$RUN_DIR/inflight/<key>/error.txt"'), spans.join('\n'));
+  assert.ok(spans.includes('find "$RUN_DIR/inflight/<key>" -type f -empty -delete'), spans.join('\n'));
+  assert.doesNotMatch(step1, /\[ -s /);
   assert.match(step1, /an `error\.txt` means/i);
   assert.match(step1, /empty folder/);
   const fill = (c) => c.replace(/<pr>/g, '40').replace(/<key>/g, '8').replace(/<base branch>/g, 'main')
@@ -574,4 +576,11 @@ test("research's evidence fetches are non-fatal and pass the run guard (16c roun
     const command = `. '/tmp/run-x/vars.sh' && cd "$WT" && ${fill(c)}`;
     assert.deepEqual(checkCommand(command, { home: '/tmp/no-pipeline-home', readFile: () => '' }), { allow: true }, command);
   }
+});
+
+test('README says the interactive wait question comes before the fork questions and the split choice (16c round 3)', () => {
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const override = readme.split('\n').find((l) => l.startsWith('- **Overriding it.**')) ?? '';
+  assert.match(override, /before/);
+  assert.doesNotMatch(override, /after fork questions are answered|told to proceed/);
 });

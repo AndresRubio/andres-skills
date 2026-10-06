@@ -66,7 +66,9 @@ export function gradeVerdict(checklist, { maxPrSize, mode, activeRuns }) {
   const notes = [];
   const kept = keptWaits(c.waitFor, activeRuns, notes);
   // A pending wait rides on every verdict, so an interactive fork or too-big can still ask about it.
+  // An override is recorded on every verdict too, so grade.md always says the run went ahead alongside.
   const pending = kept.length && !c.waitOverride ? { waitFor: kept, waitLine: `Waiting for: ${kept.join(', ')}` } : {};
+  if (kept.length && c.waitOverride) notes.push(`went ahead alongside ${kept.map(runLabel).join(', ')}`);
   const result = (verdict, reasons) => ({ verdict, reasons, ...pending, ...(notes.length ? { notes } : {}) });
 
   if (mode === 'auto' && c.needsWorkflowChanges) {
@@ -88,7 +90,6 @@ export function gradeVerdict(checklist, { maxPrSize, mode, activeRuns }) {
     if (fork.length) return result('fork', fork);
   }
   if (kept.length && !c.waitOverride) return result('wait', kept.map((key) => `overlaps ${runLabel(key)}, a run ahead of this one`));
-  if (kept.length) notes.push(`went ahead alongside ${kept.map(runLabel).join(', ')}`);
   if (c.assumptions.length) return result('small-gaps', [`${c.assumptions.length} assumption(s) to record`]);
   return result('ready', []);
 }

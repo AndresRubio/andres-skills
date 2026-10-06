@@ -156,11 +156,11 @@ test('wait: a key no longer ahead and a related key are dropped with their notes
   });
 });
 
-test('wait: notes ride on any verdict, and the went-ahead note only appears when the run goes ahead', () => {
+test('wait: notes ride on any verdict, the drop notes first', () => {
   assert.deepEqual(grade({ waitFor: ['12', '7'], waitOverride: true, changesDataModelApiAuthOrDeps: true }, WAIT), {
     verdict: 'fork',
     reasons: ['changes the data model, a public API, auth or security, or adds a dependency'],
-    notes: ['#12 is no longer a run ahead of this one'],
+    notes: ['#12 is no longer a run ahead of this one', 'went ahead alongside #7'],
   });
   assert.deepEqual(grade({ waitFor: ['12', '7'] }, WAIT), {
     verdict: 'wait',
@@ -268,4 +268,20 @@ test('with waitOverride, fork and too-big carry no waitFor or waitLine; ready an
     assert.ok(['ready', 'small-gaps'].includes(r.verdict), JSON.stringify(r));
     assert.equal('waitFor' in r || 'waitLine' in r, false, JSON.stringify(r));
   }
+});
+
+test('the went-ahead note goes with every verdict whenever waitOverride suppresses kept keys (F15)', () => {
+  assert.deepEqual(grade({ waitFor: ['7', '8'], waitOverride: true, changesDataModelApiAuthOrDeps: true }, WAIT), {
+    verdict: 'fork',
+    reasons: ['changes the data model, a public API, auth or security, or adds a dependency'],
+    notes: ['went ahead alongside #7, #8'],
+  });
+  assert.deepEqual(grade({ waitFor: ['7'], waitOverride: true, estimatedFiles: 7 }, WAIT), {
+    verdict: 'too-big', reasons: ['estimated 7 files > limit 6'], notes: ['went ahead alongside #7'],
+  });
+  assert.deepEqual(grade({ waitFor: ['7'], waitOverride: true, claudeGo: true, missingValues: ['the price'] }, WAIT), {
+    verdict: 'fork', reasons: ['missing value: the price'], notes: ['went ahead alongside #7'],
+  });
+  assert.equal('notes' in grade({ waitFor: ['7'], changesDataModelApiAuthOrDeps: true }, WAIT), false, 'no note without the override');
+  assert.equal('notes' in grade({ waitOverride: true, estimatedFiles: 7 }, WAIT), false, 'no note without kept keys');
 });
