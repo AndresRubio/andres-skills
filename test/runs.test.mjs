@@ -36,8 +36,8 @@ const pr = (number, headRefName, over = {}) => ({ number, headRefName, isCrossRe
 test('the kind lists and the key pattern are the ones D16 names', () => {
   assert.deepEqual([...RELEASING_KINDS], ['report', 'blocked', 'questions', 'split', 'deferred', 'stale-lock']);
   assert.deepEqual([...DECISION_KINDS], ['grade', 'questions', 'split', 'report', 'blocked', 'deferred']);
-  for (const key of ['5', '123', 'lin-42', 'abc1-7', 'pr-12']) assert.match(key, KEY_RE);
-  for (const key of ['#5', 'PR-12', 'pr12', 'abc', '5 ', '-5', 'Lin-4', '$(x)']) assert.doesNotMatch(key, KEY_RE);
+  for (const key of ['5', '123', 'lin-42', 'abc1-7', 'pr-12', 'PR-12']) assert.match(key, KEY_RE);
+  for (const key of ['#5', 'PR12', 'Pr-12', 'PR-x', 'pr12', 'abc', '5 ', '-5', 'Lin-4', '$(x)']) assert.doesNotMatch(key, KEY_RE);
 });
 
 // --- runLock ---
@@ -148,7 +148,7 @@ test('waitingFor: a Waiting for line that is not the last line is ignored', () =
 });
 
 test('waitingFor: invalid keys are dropped', () => {
-  assert.deepEqual(waitOf([deferred(minutesAgo(10), 1, 'Waiting for: 7, #9, abc, PR-3, pr-12, lin-4, $(x), ')]), ['7', 'pr-12', 'lin-4']);
+  assert.deepEqual(waitOf([deferred(minutesAgo(10), 1, 'Waiting for: 7, #9, abc, PR-3, Pr-4, pr-12, lin-4, $(x), ')]), ['7', 'PR-3', 'pr-12', 'lin-4']);
 });
 
 test('waitingFor: a later lock does not end the wait', () => {
@@ -182,9 +182,37 @@ test('PR runs: claude PRs count; fork PRs and non-claude PRs do not; a missing i
   });
 });
 
-test('PR runs: claude/x counts as pr-<n> with issue null; a Linear-keyed branch has issue null', () => {
+test('PR runs: claude/x counts as PR-<n> with issue null; a Linear-keyed branch has issue null', () => {
   const r = view({ prs: [pr(24, 'claude/x'), pr(26, 'claude/lin-4-y')] });
-  assert.deepEqual(r.runs.map((x) => [x.key, x.issue, x.pr]), [['pr-24', null, 24], ['lin-4', null, 26]]);
+  assert.deepEqual(r.runs.map((x) => [x.key, x.issue, x.pr]), [['PR-24', null, 24], ['lin-4', null, 26]]);
+});
+
+test('PR runs: claude/pr-12-x and an unparseable branch on PR #12 make two runs', () => {
+  const r = view({ prs: [pr(12, 'claude/x'), pr(30, 'claude/pr-12-x')], maxParallel: 5 });
+  assert.deepEqual(r.runs.map((x) => [x.key, x.pr]), [['PR-12', 12], ['pr-12', 30]]);
+  assert.deepEqual(r.ahead, ['PR-12', 'pr-12']);
+});
+
+test('PR runs: only numeric keys collapse; each later PR with the same non-numeric key counts under PR-<n>', () => {
+  const r = view({
+    prs: [
+      pr(52, 'claude/issue-123-20261006-0930'),
+      pr(50, 'claude/issue-123-20261006-0900'),
+      pr(51, 'claude/issue-123-20261006-0915'),
+      pr(61, 'claude/7-b'),
+      pr(60, 'claude/7-a'),
+    ],
+    maxParallel: 9,
+  });
+  assert.deepEqual(r.runs.map((x) => [x.key, x.pr, x.issue]), [
+    ['issue-123', 50, null], ['PR-51', 51, null], ['PR-52', 52, null], ['7', 60, 7],
+  ]);
+  assert.equal(new Set(r.runs.map((x) => x.key)).size, r.runs.length);
+});
+
+test('PR runs: a branch that only contains claude/ further in does not count', () => {
+  const r = view({ prs: [pr(20, 'feature/claude/5-x'), pr(21, 'xclaude/6-y'), pr(22, 'Claude/7-z')] });
+  assert.deepEqual(r.runs, []);
 });
 
 test('PR runs: two PRs with the same key make one run, with the lowest number', () => {
@@ -274,6 +302,20 @@ test('self is excluded, whether it comes as a PR or as a locked issue', () => {
   assert.deepEqual(r.self, { key: '5', lockedAt: minutesAgo(10), lockId: 50 });
 });
 
+test('self with two fresh locks after its last release is placed at the first lock', () => {
+  const self = makeIssue(5, {
+    comments: [
+      lock(minutesAgo(170), 40, 'claude/5-old'),
+      comment('report', minutesAgo(160), 41),
+      lock(minutesAgo(60), 50, 'claude/5-first'),
+      lock(minutesAgo(10), 70, 'claude/5-second'),
+    ],
+  });
+  const r = view({ selfIssue: self, lockedIssues: [locked(8, minutesAgo(30), 60)], maxParallel: 1 });
+  assert.deepEqual(r.self, { key: '5', lockedAt: minutesAgo(60), lockId: 50 });
+  assert.deepEqual([r.ahead, r.admitted], [[], true]);
+});
+
 test('self is unlocked (null lockedAt and lockId) when entering, stale or unlabelled', () => {
   const entering = makeIssue(5);
   assert.deepEqual(view({ selfIssue: entering }).self, { key: '5', lockedAt: null, lockId: null });
@@ -307,8 +349,14 @@ test('ordering: a PR run is always ahead, and PR runs come first by PR number', 
     selfIssue: locked(5, minutesAgo(60), 50),
     maxParallel: 5,
   });
-  assert.deepEqual(r.runs.map((x) => x.key), ['pr-40', '9', '7']);
-  assert.deepEqual(r.ahead, ['pr-40', '9']);
+  assert.deepEqual(r.runs.map((x) => x.key), ['PR-40', '9', '7']);
+  assert.deepEqual(r.ahead, ['PR-40', '9']);
+});
+
+test('ordering: two locks with equal lockedAt and lockId are ordered by compareKeys', () => {
+  const at = minutesAgo(30);
+  const r = view({ lockedIssues: [locked(12, at, 400), locked(3, at, 400), locked(10, at, 400)], selfIssue: makeIssue(5), maxParallel: 5 });
+  assert.deepEqual(r.runs.map((x) => x.key), ['3', '10', '12']);
 });
 
 test('ordering: when this run is unlocked, every run is ahead', () => {
@@ -374,13 +422,15 @@ test('race property: of runs locking together, exactly the first max(0, min(L, M
     const runsIn = keys.slice(0, L).map((key, i) => ({
       key: String(key),
       lockId: lockIds[i],
-      lockedAt: minutesAgo(int(0, 3) * 7),
+      lockedAt: minutesAgo(int(1, 4) * 7),
       history: int(0, 2),
+      againAt: minutesAgo(int(0, 6)),
     }));
     const lockedIssues = runsIn.map((r) => {
       const comments = [lock(r.lockedAt, r.lockId, `claude/${r.key}-x`)];
       if (r.history === 1) comments.unshift(lock(minutesAgo(170), r.lockId - 2, `claude/${r.key}-old`), comment('report', minutesAgo(160), r.lockId - 1));
-      if (r.history === 2) comments.push(lock(r.lockedAt, r.lockId + 1, `claude/${r.key}-again`));
+      // A second fresh lock, later than every run's first lock, so other runs sit between the two.
+      if (r.history === 2) comments.push(lock(r.againAt, r.lockId + 5001, `claude/${r.key}-again`));
       return makeIssue(Number(r.key), { comments });
     });
     const prs = keys.slice(L).map((key, j) => pr(700 + j, `claude/${key}-pr`));

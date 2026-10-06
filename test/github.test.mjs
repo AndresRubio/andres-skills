@@ -184,6 +184,55 @@ test('CLI active-runs --expect-locked does not retry when its own lock is visibl
   assert.deepEqual(before.json().ahead, ['7', '8']);
 });
 
+test('CLI active-runs rejects an invalid --now as a usage error', () => {
+  const dir = fakeGh(runsRoutes());
+  const r = runCli(['active-runs', '--repo', REPO, '--issue', '5', '--config-file', configFile(), '--now', 'yesterday'], { env: { PATH: `${dir}:${process.env.PATH}` } });
+  assert.equal(r.code, 2);
+  assert.match(JSON.parse(r.stderr).error, /--now/);
+});
+
+const waitRoutes = (line) => {
+  const at = '2026-10-06T11:05:00Z';
+  const wait = { id: 990, user: { login: 'claude[bot]' }, author_association: 'NONE', created_at: at, body: `**[claude-pipeline]** deferred · ${at} · local\n\n**Verdict:** \`wait\`\n\n${line}` };
+  return issueRoutes(5, [apiLock(951, '2026-10-06T11:00:00Z', 'claude/5-self'), wait]);
+};
+
+test('CLI waiting-for --repo --issue --expect prints the wait when the posted keys read back', () => {
+  const { dir, calls } = loggingGh(waitRoutes('Waiting for: 8, 7'));
+  const r = runCli(['waiting-for', '--repo', REPO, '--issue', '5', '--expect', '7,8'], { env: { PATH: `${dir}:${process.env.PATH}`, CLAUDE_PIPELINE_RECOUNT_DELAY_MS: '0' } });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(r.json(), { waitingFor: ['8', '7'] });
+  assert.equal(calls().filter((c) => c === `api repos/${REPO}/issues/5`).length, 1);
+});
+
+test('CLI waiting-for --expect exits 1 after one retry when the posted wait does not read back', () => {
+  const { dir, calls } = loggingGh(waitRoutes('`Waiting for: 7`'));
+  const r = runCli(['waiting-for', '--repo', REPO, '--issue', '5', '--expect', '7'], { env: { PATH: `${dir}:${process.env.PATH}`, CLAUDE_PIPELINE_RECOUNT_DELAY_MS: '0' } });
+  assert.equal(r.code, 1);
+  assert.deepEqual(JSON.parse(r.stderr), { error: "the posted wait doesn't read back: expected 7, got none" });
+  assert.equal(calls().filter((c) => c === `api repos/${REPO}/issues/5`).length, 2);
+  const partial = loggingGh(waitRoutes('Waiting for: 7'));
+  const p = runCli(['waiting-for', '--repo', REPO, '--issue', '5', '--expect', '7,8'], { env: { PATH: `${partial.dir}:${process.env.PATH}`, CLAUDE_PIPELINE_RECOUNT_DELAY_MS: '0' } });
+  assert.equal(p.code, 1);
+  assert.deepEqual(JSON.parse(p.stderr), { error: "the posted wait doesn't read back: expected 7, 8, got 7" });
+});
+
+test('CLI waiting-for: mixing the file mode and the fetch mode, or a partial fetch mode, is a usage error', () => {
+  const file = path.join(tempDir(), 'issue.json');
+  writeFileSync(file, JSON.stringify(normalizeIssue(apiIssue(5), [])));
+  for (const args of [
+    ['--issue-file', file, '--repo', REPO, '--issue', '5', '--expect', '7'],
+    ['--issue-file', file, '--expect', '7'],
+    ['--repo', REPO, '--issue', '5'],
+    ['--repo', REPO, '--expect', '7'],
+    ['--repo', REPO, '--issue', '5', '--expect', '#7'],
+    ['--repo', REPO, '--issue', 'five', '--expect', '7'],
+  ]) {
+    const r = runCli(['waiting-for', ...args]);
+    assert.equal(r.code, 2, `${args.join(' ')}: ${r.stderr}`);
+  }
+});
+
 test('CLI waiting-for reads the wait from an issue file', () => {
   const file = path.join(tempDir(), 'issue.json');
   const at = '2026-10-06T11:00:00Z';

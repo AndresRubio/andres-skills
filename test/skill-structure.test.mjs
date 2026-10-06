@@ -406,7 +406,9 @@ test('stage 0 counts runs before eligibility, then recounts after the lock and b
   assert.match(step11, /kind `deferred`/);
   assert.match(step11, /Deferred: <n> runs are ahead of this one \(<label for each key in ahead>\) and `maxParallel` is <M>\. A later run picks it up once a slot frees: the sweep, the next poll, or `\/ship #<NUMBER>`\./);
   assert.match(step11, /<n> runs are ahead and `maxParallel` is <M>; continuing because you started this run\./);
-  assert.ok(step11.indexOf('tracker:remove-labels` `claude-working`') < step11.indexOf('kind `deferred`'), 'the back-off releases the label before posting deferred');
+  assert.ok(step11.indexOf('kind `deferred`') < step11.indexOf('tracker:remove-labels` `claude-working`'), 'the back-off posts deferred before releasing the label');
+  assert.ok(step11.indexOf('tracker:remove-labels` `claude-working`') < step11.indexOf('rm -rf "$RUN_DIR"'), 'the back-off removes RUN_DIR last, as stage 10 does');
+  assert.match(step11, /PR #<n>` for `PR-<n>`/);
 
   assert.match(step(steps, 12), /tracker:set-in-progress/);
   assert.match(section(resolve, 'Outputs'), /active-runs/);
@@ -451,7 +453,7 @@ test('stage 2 fetches, gathers in-flight evidence, and judges the three relation
 
 test('stage 3 refreshes the count, passes it to grade, and waits through a verified deferred comment (16c)', () => {
   const grade = read('stages/03-grade.md');
-  for (const needle of ['`waitFor`', '`waitOverride`', '--active-runs-file "$RUN_DIR/active-runs.json"', '`waitLine`', 'node "$PIPELINE" waiting-for --issue-file "$RUN_DIR/issue.json"', '--expect-locked']) {
+  for (const needle of ['`waitFor`', '`waitOverride`', '--active-runs-file "$RUN_DIR/active-runs.json"', '`waitLine`', 'node "$PIPELINE" waiting-for --repo "$REPO" --issue "$NUMBER" --expect', '--expect-locked']) {
     assert.ok(grade.includes(needle), `03-grade.md lacks ${needle}`);
   }
   assert.match(grade, /Reply to resume, or add `claude-go` to accept the recommendations; it also lets this issue run alongside runs in progress\./);
@@ -461,13 +463,47 @@ test('stage 3 refreshes the count, passes it to grade, and waits through a verif
   assert.doesNotMatch(wait, /tracker:add-labels/);
   assert.match(wait, /no `needs-decision`/);
   assert.match(wait, /kind `deferred`/);
-  assert.match(wait, /tracker:read-issue/);
+  assert.ok(wait.indexOf('tracker:remove-labels` `claude-working`') < wait.indexOf('rm -rf "$RUN_DIR"'), 'the wait removes RUN_DIR last, as stage 10 does');
+  assert.match(grade, /as research\.md names it, which is the key `active-runs\.json` used at stage 0/);
   assert.match(wait, /This issue becomes eligible again once none of these runs is in progress: the sweep or the next poll picks it up, or run `\/ship #<NUMBER>` again\. To run it alongside them anyway, add `claude-go`\./);
   assert.ok(wait.indexOf('kind `deferred`') < wait.indexOf('waiting-for') && wait.indexOf('waiting-for') < wait.indexOf('tracker:remove-labels` `claude-working`'),
     'post deferred, read it back, then release the lock');
   const interactive = section(grade, 'Interactive mode');
   assert.match(interactive, /Wait for <labels> \(posts `deferred` and stops\), or go ahead alongside\?/);
   assert.match(interactive, /`waitOverride`/);
+});
+
+test('the interactive fork and too-big paths ask the wait question when grade.json has waitFor (16c round 1)', () => {
+  const interactive = section(read('stages/03-grade.md'), 'Interactive mode');
+  for (const verdict of ['fork', 'too-big']) {
+    const line = interactive.split('\n').find((l) => l.startsWith(`- **${verdict}:**`)) ?? '';
+    assert.match(line, /`waitFor`/, `${verdict}: ${line}`);
+    assert.match(line, /wait question/, `${verdict}: ${line}`);
+    assert.match(line, /Went ahead alongside <labels>: you/, `${verdict}: ${line}`);
+    assert.ok(line.indexOf('wait question') < line.lastIndexOf('kind `grade`'), `${verdict}: ask before posting grade`);
+  }
+});
+
+test('research skips runs that can never be waited on and survives a failed fetch (16c round 1)', () => {
+  const research = read('stages/02-research.md');
+  const step1 = step(section(research, 'Steps'), 1);
+  assert.match(step1, /`issue` is `null`/);
+  assert.match(step1, /\$RUN_DIR\/inflight\/<key>\/error\.txt/);
+  assert.match(research, /for a PR run, its title; the diff is its evidence/);
+  const overlap = research.split('**In-flight overlap:**')[1]?.split('\n   - ')[0] ?? '';
+  assert.match(overlap, /for each run in `ahead` whose `issue` isn't `null`/);
+});
+
+test("SKILL.md rebuilds active-runs.json without --expect-locked, and warns before a user-ended report ends a wait (16c round 1)", () => {
+  const skill = read('SKILL.md');
+  const rebuild = skill.match(/rebuild RUN_DIR's inputs[^\n]*/)?.[0] ?? '';
+  assert.match(rebuild, /`tracker:active-runs` \(without `--expect-locked`/);
+  assert.doesNotMatch(rebuild.replace('without `--expect-locked`', ''), /--expect-locked/);
+  const stop = section(skill, 'Stop procedure');
+  const interactive = stop.match(/^2\. \*\*Interactive mode:\*\*.*$/m)?.[0] ?? '';
+  const warnAt = interactive.indexOf('waiting-for');
+  assert.ok(warnAt >= 0 && warnAt < interactive.indexOf('kind `report`'), interactive);
+  assert.match(interactive, /ends that wait/);
 });
 
 test('the grade template has the Waits for row (16c)', () => {

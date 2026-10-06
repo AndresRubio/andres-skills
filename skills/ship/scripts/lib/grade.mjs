@@ -39,7 +39,7 @@ export function validateChecklist(c) {
 // How a run key reads in a reason or note: #12, PR #41, or the key itself.
 function runLabel(key) {
   if (/^\d+$/.test(key)) return `#${key}`;
-  if (/^pr-\d+$/.test(key)) return `PR #${key.slice(3)}`;
+  if (/^PR-\d+$/.test(key)) return `PR #${key.slice(3)}`;
   return key;
 }
 
@@ -65,7 +65,9 @@ export function gradeVerdict(checklist, { maxPrSize, mode, activeRuns }) {
   const c = validateChecklist(checklist);
   const notes = [];
   const kept = keptWaits(c.waitFor, activeRuns, notes);
-  const result = (verdict, reasons, extra = {}) => ({ verdict, reasons, ...extra, ...(notes.length ? { notes } : {}) });
+  // A pending wait rides on every verdict, so an interactive fork or too-big can still ask about it.
+  const pending = kept.length && !c.waitOverride ? { waitFor: kept, waitLine: `Waiting for: ${kept.join(', ')}` } : {};
+  const result = (verdict, reasons) => ({ verdict, reasons, ...pending, ...(notes.length ? { notes } : {}) });
 
   if (mode === 'auto' && c.needsWorkflowChanges) {
     return result('fork', ['needs .github/workflows changes, which automatic lanes may not make']);
@@ -85,12 +87,7 @@ export function gradeVerdict(checklist, { maxPrSize, mode, activeRuns }) {
     if (!c.acceptanceCriteriaDerivable) fork.push('no acceptance criteria can be stated or derived');
     if (fork.length) return result('fork', fork);
   }
-  if (kept.length && !c.waitOverride) {
-    return result('wait', kept.map((key) => `overlaps ${runLabel(key)}, a run ahead of this one`), {
-      waitFor: kept,
-      waitLine: `Waiting for: ${kept.join(', ')}`,
-    });
-  }
+  if (kept.length && !c.waitOverride) return result('wait', kept.map((key) => `overlaps ${runLabel(key)}, a run ahead of this one`));
   if (kept.length) notes.push(`went ahead alongside ${kept.map(runLabel).join(', ')}`);
   if (c.assumptions.length) return result('small-gaps', [`${c.assumptions.length} assumption(s) to record`]);
   return result('ready', []);

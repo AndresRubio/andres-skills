@@ -59,6 +59,8 @@ test('the cap reason counts the runs ahead against maxParallel', () => {
   const three = counted({ runs: [run('7'), run('8'), run('9')], ahead: ['7', '8', '9'], admitted: false });
   assert.match(check(makeIssue(), 'github', { activeRuns: three }).reasons.join(), /maxParallel reached \(3\/2\)/);
   assert.equal(check(makeIssue(), 'github', { activeRuns: counted({ runs: [run('7')], ahead: ['7'] }) }).eligible, true);
+  const behind = counted({ runs: [run('7'), run('8'), run('9')], ahead: ['7', '8'], admitted: false });
+  assert.deepEqual(check(makeIssue(), 'github', { activeRuns: behind }).reasons, ['maxParallel reached (2/2)']);
 });
 
 test('needs-decision resumes only on a newer trusted reply or claude-go', () => {
@@ -168,6 +170,21 @@ test('a waiting issue is held back while a listed run is in progress, and freed 
   assert.equal(check(waiting, 'github', { activeRuns: done }).eligible, true);
 });
 
+test('claude-go lifts a wait: a waiting issue with the label is eligible while its run is still in progress', () => {
+  const comments = [deferredWait('2026-09-25T10:00:00Z', 'Waiting for: 7')];
+  const busy = counted({ runs: [run('7')], ahead: ['7'] });
+  assert.deepEqual(check(makeIssue({ labels: ['claude', 'claude-go'], comments }), 'github', { activeRuns: busy }).reasons, []);
+  assert.deepEqual(check(makeIssue({ labels: ['claude'], comments }), 'github', { activeRuns: busy }).reasons, ['waiting for 7 (still in progress)']);
+  const full = counted({ runs: [run('7'), run('8')], ahead: ['7', '8'], admitted: false });
+  assert.deepEqual(check(makeIssue({ labels: ['claude', 'claude-go'], comments }), 'github', { activeRuns: full }).reasons, ['maxParallel reached (2/2)']);
+});
+
+test('the wait is held by any run in progress, not only by the runs ahead', () => {
+  const waiting = makeIssue({ comments: [deferredWait('2026-09-25T10:00:00Z', 'Waiting for: 8')] });
+  const behind = counted({ runs: [run('7'), run('8')], ahead: ['7'] });
+  assert.deepEqual(check(waiting, 'github', { activeRuns: behind }).reasons, ['waiting for 8 (still in progress)']);
+});
+
 test('the manual lane ignores both the cap and the wait, and needs no activeRuns', () => {
   const waiting = makeIssue({ comments: [deferredWait('2026-09-25T10:00:00Z', 'Waiting for: 7')] });
   const full = counted({ runs: [run('7'), run('8')], ahead: ['7', '8'], admitted: false });
@@ -208,4 +225,15 @@ test('hasNewTrustedReply: a reply stays new after later lock, deferred and stale
   assert.equal(hasNewTrustedReply(makeIssue({ comments: [...comments, marked('blocked', '2026-09-25T11:00:00Z')] })), false);
   const waiting = makeIssue({ labels: ['claude', 'needs-decision'], comments });
   assert.equal(check(waiting).eligible, true);
+});
+
+test('hasNewTrustedReply: a reminder asks nothing new, so a reply before it stays new', () => {
+  const comments = [marked('questions', '2026-09-25T10:00:00Z'), reply('2026-09-25T10:30:00Z'), botMarked('reminder', '2026-09-25T11:00:00Z')];
+  assert.equal(hasNewTrustedReply(makeIssue({ comments })), true);
+});
+
+test('hasNewTrustedReply: a reply in the same second as the last marked comment is not new', () => {
+  const comments = [marked('questions', '2026-09-25T10:00:00Z'), reply('2026-09-25T10:00:00Z')];
+  assert.equal(hasNewTrustedReply(makeIssue({ comments })), false);
+  assert.equal(hasNewTrustedReply(makeIssue({ comments: [...comments, reply('2026-09-25T10:00:01Z')] })), true);
 });

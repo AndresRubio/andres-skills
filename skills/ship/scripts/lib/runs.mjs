@@ -7,7 +7,9 @@ import { keyFromBranch } from './naming.mjs';
 export const RELEASING_KINDS = Object.freeze(['report', 'blocked', 'questions', 'split', 'deferred', 'stale-lock']);
 // The latest comment of one of these kinds is the issue's current decision.
 export const DECISION_KINDS = Object.freeze(['grade', 'questions', 'split', 'report', 'blocked', 'deferred']);
-export const KEY_RE = /^(\d+|[a-z][a-z0-9]*-\d+|pr-\d+)$/;
+// PR-<n> (uppercase) is the key of a claude/* PR whose branch names no key; keyFromBranch
+// can't produce it, so it never collides with a Linear-style key such as pr-12.
+export const KEY_RE = /^(\d+|[a-z][a-z0-9]*-\d+|PR-\d+)$/;
 
 const BRANCH_RE = /branch `(claude\/[A-Za-z0-9._\/-]+)`/;
 const WAIT_LINE_RE = /^Waiting for: (.+)$/;
@@ -63,18 +65,26 @@ function prKey(pr) {
   try {
     return keyFromBranch(pr.headRefName);
   } catch {
-    return `pr-${pr.number}`;
+    return `PR-${pr.number}`;
   }
 }
 
 export function activeRuns({ prs, lockedIssues, selfIssue, ttlHours, maxParallel, now = new Date() }) {
   const byKey = new Map();
 
-  // Fails closed: a claude/* PR counts unless it's known to be from a fork.
-  for (const pr of prs) {
-    if (typeof pr.headRefName !== 'string' || !pr.headRefName.startsWith('claude/') || pr.isCrossRepository === true) continue;
-    const key = prKey(pr);
-    if (byKey.has(key) && byKey.get(key).pr <= pr.number) continue;
+  // Fails closed: a claude/* PR counts unless it's known to be from a fork. PRs sharing a
+  // numeric key are one run (the lowest number). PRs sharing a non-numeric key, such as
+  // claude-code-action's claude/issue-123-<time> branches, each count: the first by PR
+  // number keeps the key and each later one is keyed PR-<n>.
+  const ours = prs
+    .filter((pr) => typeof pr.headRefName === 'string' && pr.headRefName.startsWith('claude/') && pr.isCrossRepository !== true)
+    .sort((a, b) => a.number - b.number);
+  for (const pr of ours) {
+    let key = prKey(pr);
+    if (byKey.has(key)) {
+      if (/^\d+$/.test(key)) continue;
+      key = `PR-${pr.number}`;
+    }
     const issue = /^\d+$/.test(key) ? Number(key) : null;
     byKey.set(key, {
       key, issue, pr: pr.number, branch: pr.headRefName, title: pr.title, body: null, textWithheld: false,

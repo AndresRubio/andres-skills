@@ -88,13 +88,14 @@ const RUNS = Object.freeze({
   self: { key: '5', lockedAt: '2026-10-06T11:00:00Z', lockId: 900 },
   runs: [
     lockRun('8', { pr: 30, branch: 'claude/8-x' }),
-    { ...lockRun('pr-41'), issue: null, pr: 41, branch: 'claude/x', lockedAt: null, lockId: null },
+    { ...lockRun('PR-41'), issue: null, pr: 41, branch: 'claude/x', lockedAt: null, lockId: null },
     { ...lockRun('lin-4'), issue: null, pr: 42, branch: 'claude/lin-4-y', lockedAt: null, lockId: null },
+    { ...lockRun('pr-12'), issue: null, pr: 43, branch: 'claude/pr-12-z', lockedAt: null, lockId: null },
     lockRun('7'),
     lockRun('3', { related: true }),
     lockRun('12', { lockedAt: '2026-10-06T11:30:00Z' }),
   ],
-  ahead: ['8', 'pr-41', 'lin-4', '7', '3'],
+  ahead: ['8', 'PR-41', 'lin-4', 'pr-12', '7', '3'],
   maxParallel: 9,
   admitted: true,
 });
@@ -128,10 +129,14 @@ test('wait: a malformed key throws, duplicates are removed, and a run with issue
   assert.deepEqual(grade({ waitFor: ['7', '7'] }, WAIT), {
     verdict: 'wait', reasons: ['overlaps #7, a run ahead of this one'], waitFor: ['7'], waitLine: 'Waiting for: 7',
   });
-  assert.deepEqual(grade({ waitFor: ['pr-41', 'lin-4'] }, WAIT), {
+  assert.deepEqual(grade({ waitFor: ['PR-41', 'lin-4', 'pr-12'] }, WAIT), {
     verdict: 'ready',
     reasons: [],
-    notes: ["PR #41 isn't a pipeline issue run; it counts for room only", "lin-4 isn't a pipeline issue run; it counts for room only"],
+    notes: [
+      "PR #41 isn't a pipeline issue run; it counts for room only",
+      "lin-4 isn't a pipeline issue run; it counts for room only",
+      "pr-12 isn't a pipeline issue run; it counts for room only",
+    ],
   });
 });
 
@@ -171,6 +176,8 @@ test('wait: a missing activeRuns and a null self.lockedAt both throw, even with 
     assert.throws(() => grade({ waitFor: ['7'], waitOverride }, LIMITS), /^Error: --active-runs-file is required when waitFor is not empty$/);
     const before = { ...RUNS, self: { key: '5', lockedAt: null, lockId: null } };
     assert.throws(() => grade({ waitFor: ['7'], waitOverride }, { ...LIMITS, activeRuns: before }), /^Error: waitFor needs a count taken after the lock$/);
+    const { self, ...noSelf } = RUNS;
+    assert.throws(() => grade({ waitFor: ['7'], waitOverride }, { ...LIMITS, activeRuns: noSelf }), /^Error: waitFor needs a count taken after the lock$/);
   }
 });
 
@@ -217,7 +224,7 @@ test('wait: the waitLine, posted last in a deferred comment the way stage 3 post
     runs: [...RUNS.runs, lockRun('10'), lockRun('100')],
     ahead: [...RUNS.ahead, '10', '100'],
   };
-  const verdict = grade({ waitFor: ['100', '7', '10', '7', 'pr-41'] }, { ...LIMITS, activeRuns: runs });
+  const verdict = grade({ waitFor: ['100', '7', '10', '7', 'PR-41'] }, { ...LIMITS, activeRuns: runs });
   assert.deepEqual(verdict.waitFor, ['100', '7', '10']);
   const at = '2026-10-06T11:05:00Z';
   const body = [
@@ -228,4 +235,37 @@ test('wait: the waitLine, posted last in a deferred comment the way stage 3 post
   ].join('\n');
   const issue = { labels: ['claude'], comments: [{ id: 9, author: 'claude[bot]', authorAssociation: 'NONE', createdAt: at, body, marker: { kind: 'deferred', at, run: 'local' } }] };
   assert.deepEqual(waitingFor(issue), verdict.waitFor);
+});
+
+test('wait beats small-gaps: one kept key plus assumptions, without an override, is wait', () => {
+  assert.deepEqual(grade({ waitFor: ['7'], assumptions: ['Assume A'] }, WAIT), {
+    verdict: 'wait', reasons: ['overlaps #7, a run ahead of this one'], waitFor: ['7'], waitLine: 'Waiting for: 7',
+  });
+});
+
+test('fork and too-big carry waitFor and waitLine when kept keys remain, so the interactive paths can ask the wait question', () => {
+  const kept = { waitFor: ['7', '8'], waitLine: 'Waiting for: 7, 8' };
+  assert.deepEqual(grade({ waitFor: ['7', '8'], changesDataModelApiAuthOrDeps: true }, WAIT), {
+    verdict: 'fork', reasons: ['changes the data model, a public API, auth or security, or adds a dependency'], ...kept,
+  });
+  assert.deepEqual(grade({ waitFor: ['7', '8'], missingValues: ['the price'] }, WAIT), {
+    verdict: 'fork', reasons: ['missing value: the price'], ...kept,
+  });
+  assert.deepEqual(grade({ waitFor: ['7', '8'], needsWorkflowChanges: true }, WAIT), {
+    verdict: 'fork', reasons: ['needs .github/workflows changes, which automatic lanes may not make'], ...kept,
+  });
+  assert.deepEqual(grade({ waitFor: ['7', '12', '8'], estimatedFiles: 7 }, WAIT), {
+    verdict: 'too-big', reasons: ['estimated 7 files > limit 6'], ...kept, notes: ['#12 is no longer a run ahead of this one'],
+  });
+});
+
+test('with waitOverride, fork and too-big carry no waitFor or waitLine; ready and small-gaps never do', () => {
+  for (const over of [{ changesDataModelApiAuthOrDeps: true }, { estimatedFiles: 7 }]) {
+    const r = grade({ waitFor: ['7'], waitOverride: true, ...over }, WAIT);
+    assert.equal('waitFor' in r || 'waitLine' in r, false, JSON.stringify(r));
+  }
+  for (const r of [grade({}, WAIT), grade({ waitFor: ['12'] }, WAIT), grade({ assumptions: ['Assume A'], waitFor: ['3'] }, WAIT)]) {
+    assert.ok(['ready', 'small-gaps'].includes(r.verdict), JSON.stringify(r));
+    assert.equal('waitFor' in r || 'waitLine' in r, false, JSON.stringify(r));
+  }
 });

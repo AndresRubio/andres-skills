@@ -31,9 +31,10 @@ Work out what the source is, load the repo's pipeline config, check the issue ma
    - `tracker:post-comment` kind `lock`, with the body "Run started — lane <LANE>, mode <MODE>, branch `<BRANCH>`."
 11. Count again, now that this run holds the lock: `tracker:active-runs` with `--expect-locked`, overwriting `active-runs.json`. Only the runs in `ahead` count now. The command fails if `self.lockedAt` is still `null` after its one retry: this run's own lock isn't visible. If it fails, apply hard rule 7.
    - In automatic mode, if `admitted` is false, back off:
-     1. `tracker:remove-labels` `claude-working`.
-     2. `tracker:post-comment` kind `deferred`, with the body "Deferred: <n> runs are ahead of this one (<label for each key in ahead>) and `maxParallel` is <M>. A later run picks it up once a slot frees: the sweep, the next poll, or `/ship #<NUMBER>`." A label is `#<n>` for a numeric key, `PR #<n>` for `pr-<n>`, and the key itself otherwise.
-     3. Stop here. This is not the stop procedure: `needs-decision` and `claude-go` stay as they are.
+     1. `tracker:post-comment` kind `deferred`, with the body "Deferred: <n> runs are ahead of this one (<label for each key in ahead>) and `maxParallel` is <M>. A later run picks it up once a slot frees: the sweep, the next poll, or `/ship #<NUMBER>`." A label is `#<n>` for a numeric key, `PR #<n>` for `PR-<n>`, and the key itself otherwise.
+     2. `tracker:remove-labels` `claude-working`. The `deferred` comment goes first, so a crash between the two can't leave this lock looking like the start of the next run.
+     3. `rm -rf "$RUN_DIR"`, as stage 10 does.
+     4. Stop here. This is not the stop procedure: `needs-decision` and `claude-go` stay as they are.
    - In interactive mode, if `admitted` is false, tell the user "<n> runs are ahead and `maxParallel` is <M>; continuing because you started this run."
 12. `tracker:set-in-progress`. If the issue has `needs-decision`, `tracker:remove-labels` `needs-decision`: this run is the resume.
 

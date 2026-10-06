@@ -21,7 +21,7 @@ Decide whether the issue can be built as it is, needs recorded assumptions, need
    - `changesDataModelApiAuthOrDeps` (boolean): it changes the data model, a stored format or schema, a public API, or auth or security, or it adds a dependency.
    - `acceptanceCriteriaDerivable` (boolean): testable acceptance criteria can be written from the issue or from existing tests.
    - `needsWorkflowChanges` (boolean): it needs edits under `.github/workflows/`.
-   - `waitFor` (string array): the keys of the runs that research.md's In-flight overlap marks `builds-on`, `same-code` or `same-decision`. Copy each key exactly as `active-runs.json` writes it, such as `12`.
+   - `waitFor` (string array): the keys of the runs that research.md's In-flight overlap marks `builds-on`, `same-code` or `same-decision`. Copy each key as research.md names it, which is the key `active-runs.json` used at stage 0, such as `12` (never `#12`).
    - `waitOverride` (boolean): true if the issue has the `claude-go` label, or after the user chose to go ahead alongside those runs in interactive mode (see "wait" under Interactive mode). A reply never sets it.
    - `claudeGo` (boolean): true if the issue has the `claude-go` label, or a trusted reply (a comment with `trusted: true` and `pipeline: false`) posted after the latest comment with `pipeline: true` and kind `questions` answers every question in it. A partial answer is fine: the regrade forks again with only the unanswered questions.
 4. `node "$PIPELINE" grade --checklist-file "$RUN_DIR/checklist.json" --config-file "$RUN_DIR/config.json" --mode "$MODE" --active-runs-file "$RUN_DIR/active-runs.json" > "$RUN_DIR/grade.json"`
@@ -54,16 +54,17 @@ Decide whether the issue can be built as it is, needs recorded assumptions, need
 - **wait:**
   1. Append a "## Waiting for" section to grade.md: each run in grade.json's `waitFor`, its relation and the evidence from research.md.
   2. `tracker:post-comment` kind `deferred`. The body is grade.md, then "This issue becomes eligible again once none of these runs is in progress: the sweep or the next poll picks it up, or run `/ship #<NUMBER>` again. To run it alongside them anyway, add `claude-go`.", then, as the last line, grade.json's `waitLine` copied verbatim: no backticks, no bold, nothing after it.
-  3. Check that the wait reads back: `tracker:read-issue`, then `node "$PIPELINE" waiting-for --issue-file "$RUN_DIR/issue.json"`. Its `waitingFor` must hold the same keys as grade.json's `waitFor`. If it doesn't, apply hard rule 7.
+  3. Check that the wait reads back: `node "$PIPELINE" waiting-for --repo "$REPO" --issue "$NUMBER" --expect "<keys>"`, where `<keys>` is grade.json's `waitFor` joined by commas, such as `7,12`. It fetches the issue, and retries once if the keys differ. If it fails, apply hard rule 7.
   4. `tracker:remove-labels` `claude-working`.
   5. Delete `docs/pipeline/<KEY>` in WT and remove the empty worktree, as too-big does.
-  6. Stop. This isn't the stop procedure: no `needs-decision` is added. Eligibility holds the issue back until none of those runs is in progress.
+  6. `rm -rf "$RUN_DIR"`, as stage 10 does.
+  7. Stop. This isn't the stop procedure: no `needs-decision` is added. Eligibility holds the issue back until none of those runs is in progress.
 
 ## Interactive mode
 
 - **ready or small-gaps:** show grade.md and ask "Proceed with these assumptions?" Write any corrections into grade.md as decisions, then `tracker:post-comment` kind `grade` with grade.md.
-- **fork:** ask the questions one at a time, each with its recommendation. Record the answers under "## Decisions" in grade.md, then `tracker:post-comment` kind `grade` with grade.md, and continue to stage 4.
-- **too-big:** show the proposed split and ask whether to create the sub-issues (then do what automatic mode does, which includes the `split` comment, and stop) or to proceed anyway (`tracker:post-comment` kind `grade` with grade.md, then continue to stage 4).
-- **wait:** append the "## Waiting for" section as automatic mode does, show it, and ask "Wait for <labels> (posts `deferred` and stops), or go ahead alongside?" A label is `#<n>` for each key in grade.json's `waitFor`.
+- **fork:** ask the questions one at a time, each with its recommendation. Record the answers under "## Decisions" in grade.md. If grade.json has `waitFor`, ask the wait question now, as **wait** below does: on wait, follow the automatic **wait** steps with grade.json's `waitFor` and `waitLine`, and stop; on go ahead, record "Went ahead alongside <labels>: you" under "## Decisions" (grade.md speaks to the owner). Then `tracker:post-comment` kind `grade` with grade.md, and continue to stage 4.
+- **too-big:** show the proposed split and ask whether to create the sub-issues (then do what automatic mode does, which includes the `split` comment, and stop) or to proceed anyway. To proceed: if grade.json has `waitFor`, ask the wait question first, as **wait** below does: on wait, follow the automatic **wait** steps with grade.json's `waitFor` and `waitLine`, and stop; on go ahead, record "Went ahead alongside <labels>: you" under "## Decisions". Then `tracker:post-comment` kind `grade` with grade.md, and continue to stage 4.
+- **wait:** append the "## Waiting for" section as automatic mode does, show it, and ask the wait question: "Wait for <labels> (posts `deferred` and stops), or go ahead alongside?" A label is `#<n>` for each key in grade.json's `waitFor`.
   - On wait, do what automatic mode does.
   - On go ahead, set `waitOverride` to true in `checklist.json`, run the grade command (step 4) again, write grade.md again with that verdict, and act on it as this section says.

@@ -5,8 +5,8 @@ export { TRUSTED };
 
 export const LANES = Object.freeze(['manual', 'github', 'linear', 'local']);
 
-// These pipeline comments ask nothing, so a reply older than them is still new.
-const ASKS_NOTHING = new Set(['lock', 'deferred', 'stale-lock']);
+// These pipeline comments ask nothing new, so a reply older than them is still new.
+const ASKS_NOTHING = new Set(['lock', 'deferred', 'stale-lock', 'reminder']);
 
 export function hasNewTrustedReply(issue) {
   const lastMarked = issue.comments
@@ -43,7 +43,8 @@ export function checkEligibility({ issue, config, lane, activeRuns, now = new Da
   if (issue.openSubIssues.length) reasons.push('parent with open sub-issues');
   if (!activeRuns.admitted) reasons.push(`maxParallel reached (${activeRuns.ahead.length}/${activeRuns.maxParallel})`);
   const inProgress = new Set(activeRuns.runs.map((r) => r.key));
-  const waiting = waitingFor(issue).filter((key) => inProgress.has(key));
+  // claude-go lifts a wait: the grade then goes ahead alongside those runs (waitOverride).
+  const waiting = labels.has('claude-go') ? [] : waitingFor(issue).filter((key) => inProgress.has(key));
   if (waiting.length) reasons.push(`waiting for ${waiting.join(', ')} (still in progress)`);
   if (labels.has('needs-decision') && !labels.has('claude-go') && !hasNewTrustedReply(issue)) {
     reasons.push('needs-decision with no new reply');

@@ -7,7 +7,7 @@ import { formatMarker, parseMarker, defaultRun } from './marker.mjs';
 import { lockStatus } from './lock.mjs';
 import { checkEligibility, LANES } from './eligibility.mjs';
 import { fetchIssue, currentRepo, fetchActiveRuns } from './github.mjs';
-import { waitingFor } from './runs.mjs';
+import { waitingFor, KEY_RE } from './runs.mjs';
 import { gradeVerdict } from './grade.mjs';
 import { findFreePort, diffSize } from './runtime.mjs';
 import { takeScreenshot } from './chrome.mjs';
@@ -39,12 +39,19 @@ export function required(values, ...names) {
   }
 }
 
-// How long active-runs --expect-locked waits before its one recount.
+// How long active-runs --expect-locked and waiting-for --expect wait before their one retry.
 function recountDelayMs(env = process.env) {
   const raw = env.CLAUDE_PIPELINE_RECOUNT_DELAY_MS;
   if (raw === undefined || raw === '') return 5000;
   if (!/^\d+$/.test(raw)) throw new UsageError('CLAUDE_PIPELINE_RECOUNT_DELAY_MS must be an integer >= 0');
   return Number(raw);
+}
+
+const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+
+function issueNumber(value) {
+  if (!/^\d+$/.test(value) || Number(value) < 1) throw new UsageError('--issue must be a positive integer');
+  return Number(value);
 }
 
 const PLUGIN_JSON = new URL('../../../../.claude-plugin/plugin.json', import.meta.url);
@@ -104,8 +111,8 @@ export const COMMANDS = {
       now: { type: 'string' }, 'expect-locked': { type: 'boolean' },
     });
     required(v, 'repo', 'issue', 'config-file');
-    const number = Number(v.issue);
-    if (!/^\d+$/.test(v.issue) || number < 1) throw new UsageError('--issue must be a positive integer');
+    const number = issueNumber(v.issue);
+    if (v.now !== undefined && Number.isNaN(new Date(v.now).getTime())) throw new UsageError('--now must be an ISO date');
     const delayMs = v['expect-locked'] ? recountDelayMs() : 0;
     const { lockTtlHours, maxParallel } = readJson(v['config-file']);
     if (!(typeof lockTtlHours === 'number' && lockTtlHours > 0) || !(Number.isInteger(maxParallel) && maxParallel >= 1)) {
@@ -114,16 +121,38 @@ export const COMMANDS = {
     const count = () => fetchActiveRuns(v.repo, number, { ttlHours: lockTtlHours, maxParallel, now: v.now ? new Date(v.now) : new Date() });
     let runs = count();
     if (v['expect-locked'] && runs.self.lockedAt === null) {
-      await new Promise((resolve) => { setTimeout(resolve, delayMs); });
+      await sleep(delayMs);
       runs = count();
       if (runs.self.lockedAt === null) throw new Error("this run's own lock isn't visible: read lag, or the run outlived lockTtlHours");
     }
     return runs;
   },
-  'waiting-for': (argv) => {
-    const v = parse(argv, { 'issue-file': { type: 'string' } });
-    required(v, 'issue-file');
-    return { waitingFor: waitingFor(readJson(v['issue-file'])) };
+  // Two modes: --issue-file reads a saved issue; --repo --issue --expect fetches the issue and
+  // checks that the wait just posted reads back as the expected keys, retrying once for read lag.
+  'waiting-for': async (argv) => {
+    const v = parse(argv, {
+      'issue-file': { type: 'string' }, repo: { type: 'string' }, issue: { type: 'string' }, expect: { type: 'string' },
+    });
+    const fetchMode = ['repo', 'issue', 'expect'].filter((name) => v[name] !== undefined);
+    if (v['issue-file'] !== undefined) {
+      if (fetchMode.length) throw new UsageError('use either --issue-file, or --repo with --issue and --expect');
+      return { waitingFor: waitingFor(readJson(v['issue-file'])) };
+    }
+    required(v, 'repo', 'issue', 'expect');
+    const number = issueNumber(v.issue);
+    const expected = v.expect.split(',').map((key) => key.trim());
+    if (!expected.every((key) => KEY_RE.test(key))) throw new UsageError('--expect must be run keys joined by ","');
+    const delayMs = recountDelayMs();
+    const same = (keys) => keys.length === new Set(expected).size && keys.every((key) => expected.includes(key));
+    let keys = waitingFor(fetchIssue(v.repo, number));
+    if (!same(keys)) {
+      await sleep(delayMs);
+      keys = waitingFor(fetchIssue(v.repo, number));
+      if (!same(keys)) {
+        throw new Error(`the posted wait doesn't read back: expected ${expected.join(', ')}, got ${keys.length ? keys.join(', ') : 'none'}`);
+      }
+    }
+    return { waitingFor: keys };
   },
   eligibility: (argv) => {
     const v = parse(argv, {
