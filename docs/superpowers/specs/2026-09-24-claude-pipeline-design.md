@@ -221,7 +221,7 @@ Every stage reads its inputs from files and writes its outputs to files under `d
 - **small gaps** if there are 1 to 3 assumptions and none of them triggers a fork.
 - **ready** otherwise.
 
-Missing values always fork first, before the size check: a change that isn't defined can't be sized or split. Otherwise too-big wins over every fork and over wait, because each child issue is graded again. Forks win over wait: the questions are asked first, and the regrade after your reply may then wait.
+Missing values always fork first, before the size check: a change that isn't defined can't be sized or split. Otherwise too-big wins over every other fork and over wait, because each child issue is graded again. The automatic-mode workflow fork is the exception: it comes first. Forks win over wait: the questions are asked first, and the regrade after your reply may then wait.
 
 **On wait:**
 - Post a `deferred` comment that names each run it waits for and the relation found. It ends with the line `Waiting for: <key>, <key>`.
@@ -442,7 +442,7 @@ It is a seatbelt, not a boundary. Commands written to a file and then run get pa
 - **Private data (the lethal trifecta):** a run reads public issue text, holds a GitHub token and can post comments. So every automatic run gets a token that reaches only the repo it works on: a fine-grained token, or an App installation token (Q2, Q12). The Phase 1 acceptance runs use one scoped to the two sandboxes. Test issue 10 checks that private data never reaches a public comment.
 - **Who counts as the pipeline:** a marked comment from an OWNER, MEMBER or COLLABORATOR, or from `claude[bot]`.
   - In an org-owned repo, MEMBER includes read-only members, and `claude[bot]` includes `@claude` sessions outside the pipeline.
-  - Such a comment can at most delay runs (§8.1); it can't start one.
+  - Such a comment can reorder runs, hide a running run from the count, or hold an issue back (§8.1). It can't start a run or change what a run builds.
   - Branch names read from lock comments are limited to `claude/` plus safe characters.
 - **Plugin supply chain:** consumers pin `claude-pipeline` and its dependencies to tags or commits, never HEAD.
 - **Local runner:** sandboxed (§6.2). It never runs in your main checkout.
@@ -549,13 +549,17 @@ Sandcastle's planner answers both questions by looking at all ready issues toget
 - **Restart.**
   - The local and Linear lanes poll, so a waiting or deferred issue starts on a later poll.
   - **The GitHub lane (Phase 2) gains a sweep.** It runs every 30 minutes, and `pipeline-merge` dispatches it after each merge. This is Sandcastle's "plan again after each merge round".
-  - **What the sweep starts.** Up to the free slots, it starts the oldest `claude` issues whose latest decision comment is `deferred`, or that have no pipeline comment yet.
+  - **What the sweep starts.** Up to the free slots, it starts the oldest issues that are eligible (§6.1) and match one of these:
+    - the latest decision comment is `deferred`;
+    - the issue has no pipeline comment yet;
+    - the issue holds a stale `claude-working` lock, from a crashed run.
   - **What it never starts.** An issue with an open `claude/*` PR. And an issue whose `claude/*` PR was closed unmerged since its last `report`, because that means you rejected the work.
   - The sweep also fixes an older gap: an issue skipped because the cap was full had no event left to start it again.
   - Phase 1 has no sweep: run `/ship` again.
 - **Limits.**
   - A run that outlives `lockTtlHours` drops out of the count, by the same rule that makes its lock stale.
   - Two runs of the *same* issue in different lanes are still prevented only by §8, point 1. The recount could catch them later.
+  - A `claude/*` PR from outside the pipeline, such as a claude-code-action branch `claude/issue-123-…`, counts for room. It is never waited on, because only runs keyed by a GitHub issue number can be. Linear-keyed runs get the same treatment until Phase 3 revisits it.
 
 What isn't adopted from Sandcastle:
 - **An AI agent merging the branches itself.** `pipeline-merge` stays deterministic (§7.1).
