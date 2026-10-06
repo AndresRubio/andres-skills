@@ -473,15 +473,36 @@ test('stage 3 refreshes the count, passes it to grade, and waits through a verif
   assert.match(interactive, /`waitOverride`/);
 });
 
-test('the interactive fork and too-big paths ask the wait question when grade.json has waitFor (16c round 1)', () => {
+test('interactive fork and too-big ask the wait question first, before the fork questions or the split choice (16c round 2)', () => {
   const interactive = section(read('stages/03-grade.md'), 'Interactive mode');
-  for (const verdict of ['fork', 'too-big']) {
-    const line = interactive.split('\n').find((l) => l.startsWith(`- **${verdict}:**`)) ?? '';
-    assert.match(line, /`waitFor`/, `${verdict}: ${line}`);
-    assert.match(line, /wait question/, `${verdict}: ${line}`);
-    assert.match(line, /Went ahead alongside <labels>: you/, `${verdict}: ${line}`);
-    assert.ok(line.indexOf('wait question') < line.lastIndexOf('kind `grade`'), `${verdict}: ask before posting grade`);
-  }
+  const line = (verdict) => interactive.split('\n').find((l) => l.startsWith(`- **${verdict}:**`)) ?? '';
+  const fork = line('fork');
+  assert.match(fork, /`waitFor`/, fork);
+  assert.ok(fork.indexOf('wait question') >= 0 && fork.indexOf('wait question') < fork.indexOf('ask the questions one at a time'), fork);
+  const big = line('too-big');
+  assert.match(big, /`waitFor`/, big);
+  assert.ok(big.indexOf('wait question') >= 0 && big.indexOf('wait question') < big.indexOf('show the proposed split'), big);
+  for (const l of [fork, big]) assert.doesNotMatch(l, /Went ahead alongside/, 'the go-ahead is recorded once, in the wait question');
+
+  const question = interactive.split('**The wait question.**')[1] ?? '';
+  assert.match(question, /Wait for <labels> \(posts `deferred` and stops\), or go ahead alongside\?/);
+  const onWait = question.split('\n').find((l) => l.startsWith('- **On wait:**')) ?? '';
+  assert.match(onWait, /\*\*Verdict:\*\* \\`wait\\`|\*\*Verdict:\*\* `wait`/, onWait);
+  assert.match(onWait, /Also found: <the fork or too-big reasons>\. These are asked when the issue can start\./);
+  assert.match(onWait, /automatic \*\*wait\*\* steps with grade\.json's `waitFor` and `waitLine`/);
+  assert.match(onWait, /no fork question/i);
+  assert.ok(onWait.indexOf('Verdict') < onWait.indexOf('automatic **wait** steps'), 'grade.md is rewritten before the wait steps post it');
+  const onGo = question.split('\n').find((l) => l.startsWith('- **On go ahead:**')) ?? '';
+  assert.match(onGo, /`waitOverride`/);
+  assert.match(onGo, /Went ahead alongside <labels>: you/);
+  assert.match(onGo, /fork questions or the split choice/);
+});
+
+test('"## Waiting for" is appended once, by the automatic wait steps; the interactive paths only refer to them (16c round 2)', () => {
+  const grade = read('stages/03-grade.md');
+  assert.equal(grade.match(/[Aa]ppend[^\n]*"## Waiting for"/g)?.length, 1);
+  assert.match(section(grade, 'Automatic mode').split('- **wait:**')[1] ?? '', /^\s*1\. Append a "## Waiting for" section/);
+  assert.doesNotMatch(section(grade, 'Interactive mode'), /[Aa]ppend[^\n]*"## Waiting for"/);
 });
 
 test('research skips runs that can never be waited on and survives a failed fetch (16c round 1)', () => {
@@ -530,5 +551,27 @@ test('no file under skills/ mentions the removed count, field or file (16c)', ()
     for (const gone of ['open-claude-pr-count', 'pr-count', 'conflictsWithOpenClaudePr', 'open-prs.json', 'countOpenClaudePrs', 'open-claude-prs']) {
       assert.ok(!text.includes(gone), `${path.relative(SKILL_DIR, file)} still mentions ${gone}`);
     }
+  }
+});
+
+import { checkCommand } from '../skills/ship/scripts/lib/guard.mjs';
+
+test("research's evidence fetches are non-fatal and pass the run guard (16c round 2)", () => {
+  const step1 = step(section(read('stages/02-research.md'), 'Steps'), 1);
+  const spans = [...step1.matchAll(/`([^`\n]*(?:2>>|\[ -s)[^`\n]*)`/g)].map((m) => m[1]);
+  const fetches = spans.filter((c) => c.includes('2>>'));
+  for (const tool of ['gh pr diff', 'git diff', 'gh api', 'git show']) {
+    const c = fetches.find((f) => f.startsWith(tool));
+    assert.ok(c, `02-research step 1 has no non-fatal ${tool}`);
+    assert.match(c, / 2>> "\$RUN_DIR\/inflight\/<key>\/error\.txt" \|\| true$/, c);
+  }
+  assert.ok(spans.includes('[ -s "$RUN_DIR/inflight/<key>/error.txt" ] || rm -f "$RUN_DIR/inflight/<key>/error.txt"'), spans.join('\n'));
+  assert.match(step1, /an `error\.txt` means/i);
+  assert.match(step1, /empty folder/);
+  const fill = (c) => c.replace(/<pr>/g, '40').replace(/<key>/g, '8').replace(/<base branch>/g, 'main')
+    .replace(/<branch>/g, 'claude/8-x').replace(/<file>/g, 'spec.md');
+  for (const c of spans) {
+    const command = `. '/tmp/run-x/vars.sh' && cd "$WT" && ${fill(c)}`;
+    assert.deepEqual(checkCommand(command, { home: '/tmp/no-pipeline-home', readFile: () => '' }), { allow: true }, command);
   }
 });

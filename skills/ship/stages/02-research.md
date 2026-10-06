@@ -9,12 +9,12 @@ WT, REPO, NUMBER, KEY, BASE_REF, `$RUN_DIR/issue.json`, `$RUN_DIR/active-runs.js
 ## Steps
 
 1. Gather what the runs ahead of this one are changing. Run `git fetch origin --prune`. Then, for each key in `active-runs.json`'s `ahead` whose run isn't `related`, `mkdir -p "$RUN_DIR/inflight/<key>"` and gather its evidence there. Skip runs whose `issue` is `null`: they count for room only and are never waited on.
-   - **A PR run** (`pr` is set): `gh pr diff <pr> --repo "$REPO" > "$RUN_DIR/inflight/<key>/pr.diff"`.
+   - **A PR run** (`pr` is set): `gh pr diff <pr> --repo "$REPO" > "$RUN_DIR/inflight/<key>/pr.diff" 2>> "$RUN_DIR/inflight/<key>/error.txt" || true`
    - **A run without a PR**, whose `branch` is set and `git rev-parse --verify --quiet "origin/<branch>"` succeeds:
-     - The diff goes to `$RUN_DIR/inflight/<key>/branch.diff`. When `git rev-parse --is-shallow-repository` prints `false`, use `git diff "$BASE_REF...origin/<branch>"`. Otherwise use `gh api "repos/$REPO/compare/<base branch>...<branch>" --jq '.files[] | "--- \(.filename)\n\(.patch // "")"'`, where the base branch is BASE_REF without its `origin/` prefix.
-     - `spec.md` and `plan.md` come from `git show "origin/<branch>:docs/pipeline/<key>/<file>" > "$RUN_DIR/inflight/<key>/<file>"`, each only when `git cat-file -e "origin/<branch>:docs/pipeline/<key>/<file>"` succeeds.
+     - The diff: when `git rev-parse --is-shallow-repository` prints `false`, `git diff "$BASE_REF...origin/<branch>" > "$RUN_DIR/inflight/<key>/branch.diff" 2>> "$RUN_DIR/inflight/<key>/error.txt" || true`. Otherwise `gh api "repos/$REPO/compare/<base branch>...<branch>" --jq '.files[] | "--- \(.filename)\n\(.patch // "")"' > "$RUN_DIR/inflight/<key>/branch.diff" 2>> "$RUN_DIR/inflight/<key>/error.txt" || true`, where the base branch is BASE_REF without its `origin/` prefix.
+     - `spec.md` and `plan.md`, each only when `git cat-file -e "origin/<branch>:docs/pipeline/<key>/<file>"` succeeds: `git show "origin/<branch>:docs/pipeline/<key>/<file>" > "$RUN_DIR/inflight/<key>/<file>" 2>> "$RUN_DIR/inflight/<key>/error.txt" || true`
    - Any other run has only its issue text.
-   - If `gh pr diff`, `git diff`, `gh api` or `git show` fails for one run, write its error to `$RUN_DIR/inflight/<key>/error.txt` and go on to the next run. That run is judged on the evidence that remains, its text included. This isn't a failure under hard rule 7.
+   - These fetches never fail the step: each appends its error to `error.txt` and succeeds anyway, so a failed fetch isn't a hard rule 7 stop. After a run's fetches, `[ -s "$RUN_DIR/inflight/<key>/error.txt" ] || rm -f "$RUN_DIR/inflight/<key>/error.txt"` removes an empty error file. An `error.txt` means that evidence is missing: that run is judged on what remains, its text included. An empty folder means there was nothing to fetch, and the run is judged on its text.
 2. Dispatch a foreground subagent on model sonnet that follows mattpocock-skills:research's method, and wait for it before stage 3. Give it:
    - The question: "What in this repository does issue #<NUMBER> touch, and what would a change satisfying it involve?" Ask for these sections:
      - **Relevant code:** modules, files and functions, with `path:line` citations.
