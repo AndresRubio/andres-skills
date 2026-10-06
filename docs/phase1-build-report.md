@@ -92,6 +92,33 @@ A review of current practice in agentic code review added two Phase 1 tasks. It 
 
 The final review found no clean single-command push or merge. The remaining gaps can't be closed by a hook that reads command text: files written and then run, and commands assembled inside an interpreter. The README documents them. The leak test's review found that a marker committed and later deleted would pass. The scan now reads every commit, every binary file and every branch, and fails closed when GitHub truncates.
 
+## 7. Runs in progress, after comparing Sandcastle (2026-10-06)
+
+Comparing Sandcastle's planner against four orchestration questions surfaced two gaps:
+- which tickets are ready;
+- what to do when tests fail;
+- two branches that conflict;
+- when to review and when to stop.
+
+The first gap: `maxParallel` counted only open PRs, so issues labelled together all started. The second: a run checked for overlap only against open PRs, so two runs building the same code met only at merge. Task 16c closes both (spec D16, §8.1).
+
+| Problem | Fix |
+|---|---|
+| Ten issues labelled at once all passed `maxParallel`, because none had a PR yet | A run counts every run in progress, meaning open `claude/*` PRs plus issues holding a fresh lock. After taking its lock it counts again, against only the runs ahead of it, and backs off with a `deferred` comment when the cap is full |
+| Two runs changing the same code found out only at merge; overlap with an open PR forked and asked you | Research checks each run ahead for Sandcastle's three blocking relations: builds on, same code, same decision. The grade then waits instead of asking. The wait is a `deferred` comment whose last line the CLI writes. The stage reads it back, and eligibility holds the issue until none of those runs is in progress |
+| The first design linked a waiting issue as blocked by the earlier issue. The design review showed those links could form a cycle, deadlock a sub-issue against its own parent, and hold issues behind blockers that had stopped | The redesign waits on the earlier *run*, not its issue. A waiting issue holds no lock, so nothing can wait on it. The wait ends however the other run ends: merged, stopped, split or abandoned |
+| An old lock comment made a restarted run look older than it was, so two runs could each see the other as ahead | A run's start is its first fresh lock comment after its latest releasing comment. Ordering uses comment ids, not times |
+| `claude-go` didn't lift a wait, though the `deferred` comment told you to add it | Eligibility skips the wait when the issue has `claude-go` |
+| In interactive mode, a fork answered in place skipped the wait question, and an earlier fix then lost your answers if you chose to wait | Interactive mode asks the wait question first. Choosing to wait asks nothing else |
+
+**How it was checked.**
+- **The design** had an adversarial opus review before any code: 3 Critical and 8 Important findings, which led to the redesign. A re-review then found 2 Important findings, both fixed before implementation.
+- **The code** had an opus review and an adversarial fable review, plus three fix rounds, each re-reviewed by both.
+- **Mutations.** Fable's mutation testing showed 7 of 13 mutations surviving the first tests. All 13 are caught now, plus 7 more on the fix rounds' code.
+- **Final state:** 343 tests, both validations pass, and both reviewers approve.
+
+**Task 18 change.** Each acceptance run's PR is closed after its check, so the next fixture starts with no runs in progress. Waiting and the cap are tested on purpose in Phase 2 (test issues 9 and 11).
+
 ## Waiting on the owner
 
 1. Log in the CLI (`claude auth login`).
@@ -113,3 +140,12 @@ The final review found no clean single-command push or merge. The remaining gaps
 - Run guard: extend it to other remote ref writes (`gh pr edit --base`, `gh release create --target`, `gh workflow run`) if its scope widens beyond pushes to the base branch and merges.
 - Verification hardening (spec D15, §7.4): the `diff-risk` report enforced by `human-gate`, a second reviewer of a different kind, the revert check, intent in the PR body, and pass^3 acceptance.
 - Cua (trycua/cua) as optional VM isolation for the local runner and for visual checks of desktop apps. Avoid its AGPL parts.
+- The GitHub lane's sweep (spec §8.1). It restarts waiting, deferred and crashed runs, and never restarts an issue with an open or rejected PR.
+- Test issue 11 (the cap). Seed it with three unrelated issues, run against a sandbox config with `maxParallel` 2.
+- Runs in progress, left as documented limits:
+  - `maxParallel` is a soft cap under GitHub's read lag;
+  - two runs of the same issue in different lanes;
+  - runs that outlive `lockTtlHours`;
+  - non-pipeline `claude/*` PRs count for room only;
+  - with two open PRs for one issue, research diffs the lower-numbered one.
+- Sandcastle (mattpocock/sandcastle) as a Docker runner for the Phase 3 local lane.

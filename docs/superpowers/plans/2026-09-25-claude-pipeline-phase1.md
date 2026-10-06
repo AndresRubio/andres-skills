@@ -4629,6 +4629,36 @@ Sandcastle's planner solves both by looking at all ready issues together. The pi
 - [ ] **Step 4: Verify.** `npm test` passes with clean output, and both validate commands pass. Don't run anything against GitHub.
 - [ ] **Step 5: Commit** only the files listed above, as `feat(ship): count runs in progress against maxParallel, wait for overlapping runs (D16)`, with the trailer.
 
+**Amended after review (2026-10-06).** See `task-16c-fix-1.md` to `task-16c-fix-3.md`. The spec was updated alongside, in commits 1e1c83a and dff5492.
+- **`claude-go` lifts a wait.** Eligibility skips the waiting reason when the issue has the label.
+- **The interactive wait question comes first.** When a fork or too-big grade also has kept keys, interactive mode asks the wait question before the fork questions or the split choice.
+  - Choosing to wait posts a `wait` grade with an "Also found:" line. No answers have been given yet, so none are lost.
+  - `waitFor` and `waitLine` are returned on any verdict that has kept keys and no override.
+  - The `went ahead alongside` note goes on every verdict whose override suppressed kept keys.
+- **The wait read-back retries.** `waiting-for --repo --issue --expect` compares the keys, waits for the recount delay, and reads once more.
+- **Back-off order.** The back-off posts `deferred` before it removes the label, as the wait does.
+- **`reminder` asks nothing new.** It joins `lock`, `deferred` and `stale-lock` among the comments `hasNewTrustedReply` ignores.
+- **Keys.**
+  - The fallback key is `PR-<n>`, which `keyFromBranch` can't produce, and `KEY_RE` accepts it.
+  - Only numeric keys are deduplicated.
+  - An invalid `--now` is a usage error in `active-runs`.
+- **Research.**
+  - Runs with `issue: null` are skipped.
+  - A failed evidence fetch is not fatal: errors go to `error.txt`, and empty files are removed with `find … -type f -empty -delete`.
+  - A PR run's evidence is its title and diff.
+- **Interactive stop.** It warns when the user-ended `report` will end a pending wait.
+- **Mutation-killing tests,** among them:
+  - self is placed at its first fresh lock;
+  - `runs` and `ahead` differ;
+  - same-second replies;
+  - wait beats small-gaps;
+  - the key tie-break.
+- **Deferred:**
+  - a `self.key` check in `gradeVerdict`;
+  - withholding PR titles;
+  - parent detection for PR runs;
+  - choosing between two open PRs for one issue.
+
 ---
 
 ### Task 17: Create the two sandbox repos on GitHub
