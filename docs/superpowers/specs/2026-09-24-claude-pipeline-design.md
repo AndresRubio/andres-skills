@@ -289,9 +289,9 @@ An issue is eligible when all of these hold:
 - It has no fresh `claude-working` lock (younger than `lockTtlHours`).
 - The lane matches: cloud lanes skip `needs-local`; the local lane takes only `needs-local`.
 - Fewer than `maxParallel` runs are ahead of it (§8.1).
-- It isn't waiting. That means its latest decision comment isn't a `deferred` wait whose runs are still in progress (§8.1).
+- It isn't waiting. That means its latest decision comment isn't a `deferred` wait whose runs are still in progress (§8.1). `claude-go` lifts a wait.
 
-**Resume:** a `needs-decision` issue becomes eligible again when there is an unmarked comment from you that is newer than the pipeline's last marked comment, or when you add `claude-go`. `lock`, `deferred` and `stale-lock` comments don't count as the last marked comment. They ask nothing, and a run that backs off or crashes must not hide your reply. Comments from anyone else are never read in automatic lanes.
+**Resume:** a `needs-decision` issue becomes eligible again when there is an unmarked comment from you that is newer than the pipeline's last marked comment, or when you add `claude-go`. `lock`, `deferred`, `stale-lock` and `reminder` comments don't count as the last marked comment. They ask nothing new, and a run that backs off or crashes must not hide your reply. Comments from anyone else are never read in automatic lanes.
 
 ### 6.2 Lane specifics
 
@@ -526,7 +526,7 @@ Sandcastle's planner answers both questions by looking at all ready issues toget
 - **Order.** A run with an open PR is ahead of every run without one. Otherwise the earlier lock comment is ahead: by time, then by comment id, then by key. A run counts only the runs ahead of it.
 - **Room.**
   - Before taking the lock, a run counts every run in progress.
-  - Stage 0 then takes the lock and counts again. If `maxParallel` or more runs are ahead, an automatic run releases the lock, posts `deferred` and stops.
+  - Stage 0 then takes the lock and counts again. If `maxParallel` or more runs are ahead, an automatic run posts `deferred`, then releases the lock, and stops. Every path posts its releasing comment before it removes the label, so a crash in between can't leave an old lock looking like the start of the next run.
   - Interactive mode only reports the count: you chose to run it.
   - Normally, of two runs that start together, only the later one backs off. GitHub's reads can lag its writes, though, so two runs whose lock comments land very close together can occasionally both back off or both go ahead. `maxParallel` is a soft cap.
 - **Collision.** Research checks each run ahead for three relations, taken from Sandcastle's planner:
@@ -541,7 +541,8 @@ Sandcastle's planner answers both questions by looking at all ready issues toget
   A parent or sub-issue of this issue is never an overlap, because the split already orders them.
 - **Waiting.**
   - Any one relation makes the grade `wait` (§5.2), unless the issue has `claude-go`.
-  - The run posts `deferred` with a `Waiting for:` line listing the runs' keys, releases the lock and stops.
+  - The run posts `deferred` with a `Waiting for:` line listing the runs' keys, reads it back, releases the lock and stops.
+  - In interactive mode, the wait question is also asked after fork questions are answered in place, and after a too-big issue is told to proceed. Answering questions never skips it.
   - Eligibility (§6.1) holds the issue back while any listed run is still in progress. As soon as none is, the issue is free, however those runs ended: merged, stopped for a decision, split, backed off or abandoned.
   - Nothing links the issues in the tracker, so nothing needs cleaning up.
   - A waiting issue holds no lock, so no run can wait on it. Two runs can't wait on each other for longer than one restart.
