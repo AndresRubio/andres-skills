@@ -542,7 +542,7 @@ Sandcastle's planner answers both questions by looking at all ready issues toget
 - **Waiting.**
   - Any one relation makes the grade `wait` (§5.2), unless the issue has `claude-go`.
   - The run posts `deferred` with a `Waiting for:` line listing the runs' keys, reads it back, releases the lock and stops.
-  - In interactive mode, the wait question is also asked after fork questions are answered in place, and after a too-big issue is told to proceed. Answering questions never skips it.
+  - In interactive mode, a fork or too-big grade that also overlaps a run ahead asks the wait question first. Choosing to wait asks nothing else, so no answer is given and then lost; going ahead continues to the questions or the split choice. Answering questions never skips the wait.
   - Eligibility (§6.1) holds the issue back while any listed run is still in progress. As soon as none is, the issue is free, however those runs ended: merged, stopped for a decision, split, backed off or abandoned.
   - Nothing links the issues in the tracker, so nothing needs cleaning up.
   - A waiting issue holds no lock, so no run can wait on it. Two runs can't wait on each other for longer than one restart.
