@@ -15,6 +15,7 @@ import { takeScreenshot } from './chrome.mjs';
 import { startPreview, stopPreview } from './preview.mjs';
 import { createWorktree, isolateInPlace, removeWorktreeIfEmpty } from './worktree.mjs';
 import { diffRisk } from './diff-risk.mjs';
+import { revertCheck } from './revert-check.mjs';
 
 export class UsageError extends Error {}
 
@@ -252,6 +253,13 @@ export const COMMANDS = {
     const v = parse(argv, { base: { type: 'string' }, cwd: { type: 'string' } });
     required(v, 'base');
     return diffRisk(v.cwd ?? process.cwd(), v.base);
+  },
+  'revert-check': (argv) => {
+    const v = parse(argv, { base: { type: 'string' }, command: { type: 'string' }, cwd: { type: 'string' }, 'timeout-ms': { type: 'string' } });
+    required(v, 'base', 'command');
+    const timeoutMs = v['timeout-ms'] === undefined ? undefined : Number(v['timeout-ms']);
+    if (timeoutMs !== undefined && !(Number.isInteger(timeoutMs) && timeoutMs > 0)) throw new UsageError('--timeout-ms must be a positive integer');
+    return revertCheck(v.cwd ?? process.cwd(), v.base, { command: v.command, timeoutMs });
   },
   screenshot: async (argv) => {
     const v = parse(argv, { url: { type: 'string' }, out: { type: 'string' }, width: { type: 'string' }, height: { type: 'string' } });
