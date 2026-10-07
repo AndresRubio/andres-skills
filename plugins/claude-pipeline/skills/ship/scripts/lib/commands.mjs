@@ -6,7 +6,8 @@ import { loadConfig } from './config.mjs';
 import { formatMarker, parseMarker, defaultRun } from './marker.mjs';
 import { lockStatus } from './lock.mjs';
 import { checkEligibility, LANES } from './eligibility.mjs';
-import { fetchIssue, currentRepo, fetchActiveRuns } from './github.mjs';
+import { fetchIssue, currentRepo, fetchActiveRuns, fetchPrComments, postPrComment } from './github.mjs';
+import { computeVerdict, formatVerdictBody, latestVerdict } from './verdict.mjs';
 import { waitingFor, KEY_RE } from './runs.mjs';
 import { gradeVerdict } from './grade.mjs';
 import { findFreePort, diffSize } from './runtime.mjs';
@@ -15,6 +16,14 @@ import { startPreview, stopPreview } from './preview.mjs';
 import { createWorktree, isolateInPlace, removeWorktreeIfEmpty } from './worktree.mjs';
 
 export class UsageError extends Error {}
+
+// Carries a result object that the CLI prints on stdout before exiting 1 (verdict-status).
+export class ExitError extends Error {
+  constructor(result) {
+    super('exit');
+    this.result = result;
+  }
+}
 
 export function readJson(file) {
   return JSON.parse(readFileSync(file, 'utf8'));
@@ -54,9 +63,51 @@ function issueNumber(value) {
   return Number(value);
 }
 
+const SHA_RE = /^[0-9a-f]{40}$/;
+function headSha(value) {
+  if (!SHA_RE.test(value ?? '')) throw new UsageError('--head must be a 40-character SHA');
+  return value;
+}
+function prNumber(value) {
+  if (!/^\d+$/.test(value ?? '') || Number(value) < 1) throw new UsageError('--pr must be a positive integer');
+  return Number(value);
+}
+
 const PLUGIN_JSON = new URL('../../../../.claude-plugin/plugin.json', import.meta.url);
 
 export const COMMANDS = {
+  verdict: (argv) => {
+    const v = parse(argv, { head: { type: 'string' }, 'findings-file': { type: 'string' }, 'diff-risk-file': { type: 'string' }, model: { type: 'string' }, reason: { type: 'string' }, run: { type: 'string' }, now: { type: 'string' } });
+    required(v, 'head', 'findings-file');
+    const head = headSha(v.head);
+    const findings = readJson(v['findings-file']);
+    const diffRisk = v['diff-risk-file'] ? (readJson(v['diff-risk-file']).hits ?? []) : [];
+    const verdict = v.reason ? 'human-decision-needed' : computeVerdict(findings);
+    const marker = formatMarker('verdict', { run: v.run ?? defaultRun(), now: v.now ? new Date(v.now) : new Date() });
+    return { verdict, body: formatVerdictBody({ verdict, head, findings, diffRisk, model: v.model ?? null, reason: v.reason ?? null, marker }) };
+  },
+  'verdict-latest': (argv) => {
+    const v = parse(argv, { repo: { type: 'string' }, pr: { type: 'string' }, head: { type: 'string' } });
+    required(v, 'repo', 'pr', 'head');
+    return latestVerdict(fetchPrComments(v.repo, prNumber(v.pr)), headSha(v.head)) ?? { verdict: null };
+  },
+  'verdict-status': (argv) => {
+    const v = parse(argv, { repo: { type: 'string' }, pr: { type: 'string' }, head: { type: 'string' }, 'post-missing': { type: 'boolean' } });
+    required(v, 'repo', 'pr', 'head');
+    const head = headSha(v.head);
+    const found = latestVerdict(fetchPrComments(v.repo, prNumber(v.pr)), head);
+    if (found) {
+      const result = { verdict: found.verdict, source: 'comment' };
+      if (found.verdict !== 'accepted') throw new ExitError(result);
+      return result;
+    }
+    if (v['post-missing']) {
+      const marker = formatMarker('verdict');
+      postPrComment(v.repo, prNumber(v.pr), formatVerdictBody({ verdict: 'human-decision-needed', head, findings: [], diffRisk: [], reason: 'review did not complete', marker }));
+      throw new ExitError({ verdict: 'human-decision-needed', source: 'posted' });
+    }
+    throw new ExitError({ verdict: 'human-decision-needed', source: 'missing' });
+  },
   version: (argv) => {
     parse(argv);
     return { version: readJson(PLUGIN_JSON).version };

@@ -1,4 +1,7 @@
 import { execFileSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { tmpdir } from 'node:os';
 import { parseMarker } from './marker.mjs';
 import { isPipelineComment, TRUSTED } from './lock.mjs';
 import { activeRuns } from './runs.mjs';
@@ -10,6 +13,43 @@ export function ghJson(args) {
 
 export function currentRepo(gh = ghJson) {
   return gh(['repo', 'view', '--json', 'nameWithOwner']).nameWithOwner;
+}
+
+// gh commands whose output isn't JSON (pr edit, pr comment, issue edit…). Returns trimmed stdout.
+export function ghText(args) {
+  return execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024 }).trim();
+}
+
+export function normalizeComments(apiComments) {
+  return apiComments.map((c) => {
+    const comment = { id: c.id, author: c.user?.login ?? null, authorAssociation: c.author_association, body: c.body ?? '', createdAt: c.created_at, marker: parseMarker(c.body) };
+    return { ...comment, pipeline: isPipelineComment(comment), trusted: TRUSTED.has(comment.authorAssociation) };
+  });
+}
+
+export function fetchPrComments(repo, number, gh = ghJson) {
+  return normalizeComments(gh(['api', '--paginate', '--slurp', `repos/${repo}/issues/${number}/comments`]).flat());
+}
+
+export const PR_FIELDS = 'number,url,title,body,headRefName,headRefOid,baseRefName,isDraft,isCrossRepository,labels,mergeable,mergeStateStatus,statusCheckRollup,author';
+
+export function fetchPr(repo, number, gh = ghJson) {
+  const pr = gh(['pr', 'view', String(number), '--repo', repo, '--json', PR_FIELDS]);
+  return { ...pr, labels: (pr.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name)) };
+}
+
+// Posts a comment body through a file (free text never goes on a command line). Tests set
+// CLAUDE_PIPELINE_BODY_FILE so the fake gh sees a stable path.
+export function postPrComment(repo, number, body, gh = ghText, env = process.env) {
+  const file = env.CLAUDE_PIPELINE_BODY_FILE || path.join(mkdtempSync(path.join(tmpdir(), 'cp-body-')), 'body.md');
+  writeFileSync(file, body);
+  return gh(['pr', 'comment', String(number), '--repo', repo, '--body-file', file]);
+}
+
+export function postIssueComment(repo, number, body, gh = ghText, env = process.env) {
+  const file = env.CLAUDE_PIPELINE_BODY_FILE || path.join(mkdtempSync(path.join(tmpdir(), 'cp-body-')), 'body.md');
+  writeFileSync(file, body);
+  return gh(['issue', 'comment', String(number), '--repo', repo, '--body-file', file]);
 }
 
 export function normalizeIssue(apiIssue, apiComments, { blockedBy = [], subIssues = [] } = {}) {
@@ -27,17 +67,7 @@ export function normalizeIssue(apiIssue, apiComments, { blockedBy = [], subIssue
     labels: (apiIssue.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name)),
     openBlockedBy: blockedBy.filter((i) => i.state === 'open').map((i) => i.number),
     openSubIssues: subIssues.filter((i) => i.state === 'open').map((i) => i.number),
-    comments: apiComments.map((c) => {
-      const comment = {
-        id: c.id,
-        author: c.user?.login ?? null,
-        authorAssociation: c.author_association,
-        body: c.body ?? '',
-        createdAt: c.created_at,
-        marker: parseMarker(c.body),
-      };
-      return { ...comment, pipeline: isPipelineComment(comment), trusted: TRUSTED.has(comment.authorAssociation) };
-    }),
+    comments: normalizeComments(apiComments),
   };
 }
 
