@@ -6,7 +6,7 @@ import { loadConfig, validateConfig } from './config.mjs';
 import { formatMarker, parseMarker, defaultRun } from './marker.mjs';
 import { lockStatus } from './lock.mjs';
 import { checkEligibility, LANES } from './eligibility.mjs';
-import { fetchIssue, currentRepo, fetchActiveRuns, fetchPrComments, postPrComment } from './github.mjs';
+import { ghJson, fetchIssue, currentRepo, fetchActiveRuns, fetchPrComments, postPrComment } from './github.mjs';
 import { computeVerdict, formatVerdictBody, latestVerdict } from './verdict.mjs';
 import { waitingFor, KEY_RE } from './runs.mjs';
 import { gradeVerdict } from './grade.mjs';
@@ -17,6 +17,7 @@ import { createWorktree, isolateInPlace, removeWorktreeIfEmpty } from './worktre
 import { diffRisk } from './diff-risk.mjs';
 import { revertCheck } from './revert-check.mjs';
 import { runReady } from './ready-run.mjs';
+import { laneTarget } from './lane.mjs';
 
 export class UsageError extends Error {}
 
@@ -269,6 +270,15 @@ export const COMMANDS = {
     const result = await runReady({ repo: v.repo, config: validateConfig(readJson(v['config-file'])), now: v.now ? new Date(v.now) : new Date(), dryRun: Boolean(v['dry-run']) });
     if (result.actions.some((a) => a.action === 'error')) throw new ExitError(result);
     return result;
+  },
+  'lane-target': (argv) => {
+    const v = parse(argv, { 'event-file': { type: 'string' }, 'event-name': { type: 'string' }, repo: { type: 'string' } });
+    required(v, 'event-file', 'event-name', 'repo');
+    const payload = readJson(v['event-file']);
+    const openPrs = v['event-name'] === 'issue_comment'
+      ? ghJson(['pr', 'list', '--repo', v.repo, '--state', 'open', '--limit', '500', '--json', 'number,headRefName,isCrossRepository,labels'])
+      : [];
+    return laneTarget({ name: v['event-name'], payload }, { openPrs });
   },
   screenshot: async (argv) => {
     const v = parse(argv, { url: { type: 'string' }, out: { type: 'string' }, width: { type: 'string' }, height: { type: 'string' } });
