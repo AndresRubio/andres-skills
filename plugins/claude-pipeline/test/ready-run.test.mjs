@@ -1,6 +1,4 @@
 import { test } from 'node:test';
-import { writeFileSync } from 'node:fs';
-import path from 'node:path';
 import assert from 'node:assert/strict';
 import { runReady } from '../skills/ship/scripts/lib/ready-run.mjs';
 import { formatVerdictBody } from '../skills/ship/scripts/lib/verdict.mjs';
@@ -8,6 +6,7 @@ import { validateConfig } from '../skills/ship/scripts/lib/config.mjs';
 import { normalizeComments, PR_FIELDS } from '../skills/ship/scripts/lib/github.mjs';
 import { runCli } from './helpers/cli.mjs';
 import { fakeGh } from './helpers/fake-gh.mjs';
+import { makeRepoWithOrigin } from './helpers/git.mjs';
 
 const REPO = 'o/r';
 const HEAD = 'a'.repeat(40);
@@ -166,12 +165,26 @@ test('the CLI prints the result and exits 1 when any PR errored', () => {
     [`pr list --repo ${REPO} --state open --limit 500 --json number,headRefName,isCrossRepository,isDraft`]: [{ number: 7, headRefName: 'claude/5-x', isCrossRepository: false, isDraft: false }],
     [`pr view 7 --repo ${REPO} --json ${PR_FIELDS}`]: { __ghError: 'boom' },
   });
-  const cfg = path.join(dir, 'config.json');
-  writeFileSync(cfg, JSON.stringify({ tracker: { type: 'github' } }));
-  const r = runCli(['ready', '--repo', REPO, '--config-file', cfg, '--dry-run'], { env: { PATH: `${dir}:${process.env.PATH}` } });
+  const { root } = makeRepoWithOrigin({ '.claude/pipeline.json': JSON.stringify({ tracker: { type: 'github' } }) });
+  const r = runCli(['ready', '--repo', REPO, '--repo-root', root, '--dry-run'], { env: { PATH: `${dir}:${process.env.PATH}` } });
   assert.equal(r.code, 1, r.stderr);
   const out = r.json();
   assert.deepEqual(out.actions.map((a) => [a.pr, a.action]), [[7, 'error']]);
+});
+
+test('the CLI loads pipeline.json from the default branch of --repo-root (the workflow\'s exact call)', () => {
+  const dir = fakeGh({
+    [`pr list --repo ${REPO} --state open --limit 500 --json number,headRefName,isCrossRepository,isDraft`]: [],
+  });
+  const { root } = makeRepoWithOrigin({ '.claude/pipeline.json': JSON.stringify({ tracker: { type: 'github' }, ciChecks: ['test'] }) });
+  const r = runCli(['ready', '--repo-root', root, '--repo', REPO], { env: { PATH: `${dir}:${process.env.PATH}` } });
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  assert.deepEqual(r.json(), { actions: [] });
+});
+
+test('the CLI no longer takes --config-file and requires --repo-root', () => {
+  assert.equal(runCli(['ready', '--repo', REPO]).code, 2);
+  assert.equal(runCli(['ready', '--repo', REPO, '--config-file', 'x.json']).code, 2);
 });
 
 test('a stale ready label is removed when the head is no longer green', async () => {

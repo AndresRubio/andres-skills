@@ -29,7 +29,8 @@ test('pipeline-ready: deterministic, no AI, right triggers and permissions, conc
   assert.match(t, /contents: write\n\s+pull-requests: write\n\s+issues: write/);
   assert.doesNotMatch(t, /claude-code-action/);
   assert.doesNotMatch(t, /CLAUDE_CODE_OAUTH_TOKEN/);
-  assert.match(t, /pipeline\.mjs ready --repo \$\{\{ github\.repository \}\} --config-file/);
+  assert.match(t, /pipeline\.mjs ready --repo-root \. --repo \$\{\{ github\.repository \}\}$/m);
+  assert.doesNotMatch(t, /--config-file|pipeline\.mjs config/);
   assert.match(t, /git remote set-head origin --auto/);
   assert.match(t, /GH_TOKEN: \$\{\{ secrets\.PIPELINE_TOKEN \|\| github\.token \}\}/);
 });

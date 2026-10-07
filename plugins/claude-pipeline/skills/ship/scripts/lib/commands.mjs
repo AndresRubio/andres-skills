@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { parseSource } from './source.mjs';
 import { branchName, keyFromBranch, worktreePath } from './naming.mjs';
-import { loadConfig, validateConfig } from './config.mjs';
+import { loadConfig } from './config.mjs';
 import { formatMarker, parseMarker, defaultRun } from './marker.mjs';
 import { lockStatus } from './lock.mjs';
 import { checkEligibility, LANES } from './eligibility.mjs';
@@ -274,10 +274,11 @@ export const COMMANDS = {
     return revertCheck(v.cwd ?? process.cwd(), v.base, { command: v.command, timeoutMs });
   },
   ready: async (argv) => {
-    const v = parse(argv, { repo: { type: 'string' }, 'config-file': { type: 'string' }, 'dry-run': { type: 'boolean' }, now: { type: 'string' } });
-    required(v, 'repo', 'config-file');
+    const v = parse(argv, { repo: { type: 'string' }, 'repo-root': { type: 'string' }, 'dry-run': { type: 'boolean' }, now: { type: 'string' } });
+    required(v, 'repo', 'repo-root');
     if (v.now !== undefined && Number.isNaN(new Date(v.now).getTime())) throw new UsageError('--now must be an ISO date');
-    const result = await runReady({ repo: v.repo, config: validateConfig(readJson(v['config-file'])), now: v.now ? new Date(v.now) : new Date(), dryRun: Boolean(v['dry-run']) });
+    // Reads .claude/pipeline.json from the default branch (origin/HEAD), never from the PR's head.
+    const result = await runReady({ repo: v.repo, config: loadConfig(v['repo-root']), now: v.now ? new Date(v.now) : new Date(), dryRun: Boolean(v['dry-run']) });
     if (result.actions.some((a) => a.action === 'error')) throw new ExitError(result);
     return result;
   },

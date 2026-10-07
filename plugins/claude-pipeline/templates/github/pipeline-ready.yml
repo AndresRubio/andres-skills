@@ -42,5 +42,4 @@ jobs:
           GH_TOKEN: ${{ secrets.PIPELINE_TOKEN || github.token }}
         run: |
           git remote set-head origin --auto
-          node .claude-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs config --repo-root . > "$RUNNER_TEMP/config.json"
-          node .claude-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs ready --repo ${{ github.repository }} --config-file "$RUNNER_TEMP/config.json"
+          node .claude-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs ready --repo-root . --repo ${{ github.repository }}
