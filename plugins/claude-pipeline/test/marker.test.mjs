@@ -28,7 +28,7 @@ test('every kind round-trips', () => {
 });
 
 test('deferred is the last kind and round-trips', () => {
-  assert.equal(MARKER_KINDS.at(-1), 'deferred');
+  assert.ok(MARKER_KINDS.includes('deferred'));
   const line = formatMarker('deferred', { now: NOW, run: 'local' });
   assert.equal(line, '**[claude-pipeline]** deferred · 2026-09-25T10:00:00Z · local');
   assert.deepEqual(parseMarker(`${line}\n\nWaiting for: 7`), { kind: 'deferred', at: '2026-09-25T10:00:00Z', run: 'local' });
@@ -48,4 +48,13 @@ test('CLI marker prints the line; parse-marker reads stdin', () => {
   assert.equal(r.stdout, '**[claude-pipeline]** report · 2026-09-25T10:00:00Z · local\n');
   const p = runCli(['parse-marker'], { input: r.stdout });
   assert.deepEqual(p.json(), { kind: 'report', at: '2026-09-25T10:00:00Z', run: 'local' });
+});
+
+test('verdict and ready are marker kinds and round-trip', () => {
+  assert.ok(MARKER_KINDS.includes('verdict'));
+  assert.ok(MARKER_KINDS.includes('ready'));
+  for (const kind of ['verdict', 'ready']) {
+    const line = formatMarker(kind, { now: NOW, run: 'local' });
+    assert.deepEqual(parseMarker(`${line}\n\n**Verdict:** \`accepted\``), { kind, at: '2026-09-25T10:00:00Z', run: 'local' });
+  }
 });

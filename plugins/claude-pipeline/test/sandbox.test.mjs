@@ -53,13 +53,19 @@ test('fixtures 01-07 (including 06b) and 10 carry the claude label; 09a and 09b 
 });
 
 test('every label used on a seeded issue is a known sandbox label', () => {
-  const known = new Set(['claude', 'claude-go', 'needs-local', 'needs-decision', 'claude-working', 'ship-it', 'claude-fix', 'bug', 'enhancement']);
+  const known = new Set(['claude', 'claude-go', 'needs-local', 'needs-decision', 'claude-working', 'ready', 'claude-fix', 'bug', 'enhancement']);
   const files = readdirSync(dir('issues')).filter((f) => f.endsWith('.md'));
   for (const f of files) {
     const labelsLine = readFileSync(dir(`issues/${f}`), 'utf8').split('\n')[1];
     const labels = labelsLine.replace(/^labels: /, '').split(',');
     for (const label of labels) assert.ok(known.has(label), `${f}: unknown label "${label}"`);
   }
+});
+
+test('setup-sandbox.sh creates the ready label and no ship-it label', () => {
+  const src = readFileSync(dir('setup-sandbox.sh'), 'utf8');
+  assert.match(src, /^label ready\s+\w{6} /m);
+  assert.doesNotMatch(src, /^label ship-it/m);
 });
 
 test('both sandbox scripts are syntactically valid bash', () => {

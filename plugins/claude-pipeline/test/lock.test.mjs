@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lockStatus } from '../skills/ship/scripts/lib/lock.mjs';
+import { lockStatus, isPipelineComment } from '../skills/ship/scripts/lib/lock.mjs';
 import { runCli } from './helpers/cli.mjs';
 import { tempDir } from './helpers/git.mjs';
 import { writeFileSync } from 'node:fs';
@@ -66,4 +66,10 @@ test('CLI lock-status reads an issue file', () => {
   writeFileSync(file, JSON.stringify({ labels: ['claude-working'], comments: [lockComment('2026-09-25T11:00:00Z')] }));
   const r = runCli(['lock-status', '--issue-file', file, '--ttl-hours', '3', '--now', '2026-09-25T12:00:00Z']);
   assert.deepEqual(r.json(), { locked: true, stale: false, since: '2026-09-25T11:00:00Z' });
+});
+
+test('github-actions[bot] marked comments count as the pipeline (pipeline-ready posts with GITHUB_TOKEN)', () => {
+  const marker = { kind: 'ready', at: '2026-10-07T10:00:00Z', run: 'local' };
+  assert.equal(isPipelineComment({ marker, author: 'github-actions[bot]', authorAssociation: 'NONE' }), true);
+  assert.equal(isPipelineComment({ marker, author: 'dependabot[bot]', authorAssociation: 'NONE' }), false);
 });

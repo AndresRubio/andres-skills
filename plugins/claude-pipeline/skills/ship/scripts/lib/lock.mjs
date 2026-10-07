@@ -1,5 +1,5 @@
 export const TRUSTED = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
-export const PIPELINE_BOTS = new Set(['claude[bot]']);
+export const PIPELINE_BOTS = new Set(['claude[bot]', 'github-actions[bot]']);
 
 export function isPipelineComment(c) {
   return Boolean(c.marker) && (TRUSTED.has(c.authorAssociation) || PIPELINE_BOTS.has(c.author));

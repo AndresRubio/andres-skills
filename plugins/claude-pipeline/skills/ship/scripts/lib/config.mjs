@@ -14,6 +14,8 @@ export const DEFAULTS = Object.freeze({
   maxPrSize: { files: 25, lines: 800 },
   lockTtlHours: 3,
   preview: null,
+  hydrateHosts: ['github.com'],
+  autoMerge: false,
 });
 
 const KNOWN = new Set(['tracker', ...Object.keys(DEFAULTS)]);
@@ -47,6 +49,8 @@ export function validateConfig(raw) {
     && !(raw.preview && typeof raw.preview.command === 'string' && raw.preview.command.includes('{port}'))) {
     problems.push('"preview.command" must be a string containing {port}');
   }
+  if ('hydrateHosts' in raw && !isStringArray(raw.hydrateHosts)) problems.push('"hydrateHosts" must be an array of non-empty strings');
+  if ('autoMerge' in raw && typeof raw.autoMerge !== 'boolean') problems.push('"autoMerge" must be a boolean');
   if (problems.length) throw new ConfigError(`invalid pipeline.json: ${problems.join('; ')}`);
   const config = { ...DEFAULTS, ...raw };
   return { ...config, protectedPathsEffective: [...ALWAYS_PROTECTED, ...config.protectedPaths] };

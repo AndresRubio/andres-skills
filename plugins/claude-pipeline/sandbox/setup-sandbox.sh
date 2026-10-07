@@ -39,7 +39,7 @@ label claude-go      0e8a16 "Treat as ready: accept the pipeline's assumptions"
 label needs-local    fbca04 "Needs files that exist only on the owner's Mac"
 label needs-decision d93f0b "Pipeline stopped, waiting for the owner"
 label claude-working 1d76db "Locked by a pipeline run"
-label ship-it        0e8a16 "Owner approval for the merge gate"
+label ready          0e8a16 "Green CI, accepted review verdict, branch up to date: yours to merge"
 label claude-fix     b60205 "Pipeline fix run requested"
 
 map='{}'

@@ -5,7 +5,7 @@ import { runCli } from './helpers/cli.mjs';
 test('version prints the plugin version as JSON', () => {
   const r = runCli(['version']);
   assert.equal(r.code, 0, r.stderr);
-  assert.deepEqual(r.json(), { version: '0.1.0' });
+  assert.deepEqual(r.json(), { version: '0.2.0' });
 });
 
 test('an unknown command exits 2 with a JSON error on stderr', () => {

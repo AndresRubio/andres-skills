@@ -1,4 +1,4 @@
-export const MARKER_KINDS = Object.freeze(['lock', 'grade', 'questions', 'assumptions', 'split', 'report', 'blocked', 'reminder', 'stale-lock', 'deferred']);
+export const MARKER_KINDS = Object.freeze(['lock', 'grade', 'questions', 'assumptions', 'split', 'report', 'blocked', 'reminder', 'stale-lock', 'deferred', 'verdict', 'ready']);
 
 const PREFIX = '**[claude-pipeline]**';
 const LINE = /^\*\*\[claude-pipeline\]\*\* ([a-z-]+) · (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z) · (\S+)\s*$/;

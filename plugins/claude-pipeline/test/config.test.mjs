@@ -71,3 +71,14 @@ test('CLI config prints the loaded config', () => {
   assert.equal(missing.code, 1);
   assert.match(missing.stderr, /no \.claude\/pipeline\.json/);
 });
+
+test('hydrateHosts and autoMerge have defaults and are validated', () => {
+  const c = validateConfig({ tracker: { type: 'github' } });
+  assert.deepEqual(c.hydrateHosts, ['github.com']);
+  assert.equal(c.autoMerge, false);
+  const custom = validateConfig({ tracker: { type: 'github' }, hydrateHosts: ['github.com', 'docs.example.com'], autoMerge: true });
+  assert.deepEqual(custom.hydrateHosts, ['github.com', 'docs.example.com']);
+  assert.equal(custom.autoMerge, true);
+  assert.throws(() => validateConfig({ tracker: { type: 'github' }, hydrateHosts: 'github.com' }), /hydrateHosts/);
+  assert.throws(() => validateConfig({ tracker: { type: 'github' }, autoMerge: 'yes' }), /autoMerge/);
+});
