@@ -338,6 +338,28 @@ test('denies merging and writing refs through gh and the API', () => {
   assertDenied('gh api -X PUT repos/o/r/contents/README.md -f message=x', /contents/);
 });
 
+test('denies approving or reviewing a pull request through gh, the reviews API and GraphQL (final review I5)', () => {
+  for (const command of [
+    'gh pr review 5 --approve',
+    'gh pr review 5 --request-changes -b x',
+    'cd x && gh pr review 5 --approve',
+    'env gh pr review 5 --approve',
+    'gh pr -R o/r review 5 --approve',
+    'gh pr "review" 5 --approve',
+  ]) assertDenied(command, /review/i);
+  for (const command of [
+    'gh api -X POST repos/o/r/pulls/5/reviews -f event=APPROVE',
+    'gh api "repos/$REPO/pulls/5/reviews" -f event=REQUEST_CHANGES',
+    'gh api -X POST repos/o/r/pulls/5/reviews/77/events -f event=APPROVE',
+  ]) assertDenied(command, /review/i);
+  for (const mutation of ['addPullRequestReview', 'submitPullRequestReview', 'approvePullRequest']) {
+    assertDenied(`gh api graphql -f query='mutation { ${mutation}(input:{pullRequestId:"x", event:APPROVE}) { clientMutationId } }'`, /review/i);
+  }
+  assertAllowed('gh pr view 5');
+  assertAllowed('gh pr view 5 --json reviews,comments');
+  assertAllowed('gh api "repos/$REPO/pulls/5/comments"');
+});
+
 // --- checkCommand: a command that pushes may contain nothing else (16a fix round 1) ---
 
 test('denies a command that rewrites vars.sh (by glob or by cp) before sourcing it and pushing', () => {

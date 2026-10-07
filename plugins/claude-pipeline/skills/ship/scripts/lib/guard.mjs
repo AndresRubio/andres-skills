@@ -36,8 +36,12 @@ const MERGE_RULES = [
   [/\bgh\s+alias\b/, 'gh aliases'],
   [/repos\/[^\s'"]+\/(pulls\/[^\s/'"]+\/merge|merges)\b/, 'the merge API'],
   [/repos\/[^\s'"]+\/git\/(refs|commits|trees|tags)\b/, 'git objects or refs through the API'],
+  // Nothing in the pipeline approves or requests changes (an App approval may count toward required reviews).
+  [/\bpr\s+review\b/, 'reviewing (approving or requesting changes on) a pull request'],
+  [/\/pulls\/[^/\s'"]+\/reviews\b/, 'the pull request reviews API'],
 ];
 const GRAPHQL_MERGE = /\b(mergePullRequest|enablePullRequestAutoMerge|mergeBranch|createCommitOnBranch|updateRefs?)\b/;
+const GRAPHQL_REVIEW = /\b(addPullRequestReview|submitPullRequestReview|approvePullRequest)\b/;
 
 const WRITE_FLAGS = [
   /(?:^|[\s'"])(?:-X|--method)[\s=]*['"]?(?:PUT|POST|PATCH|DELETE)\b/i,
@@ -51,6 +55,9 @@ function mergeProblem(command) {
   }
   if (/graphql/i.test(command) && GRAPHQL_MERGE.test(command)) {
     return 'a GraphQL mutation that merges or moves a branch';
+  }
+  if (/graphql/i.test(command) && GRAPHQL_REVIEW.test(command)) {
+    return 'a GraphQL mutation that reviews (approves or requests changes on) a pull request';
   }
   if (/repos\/[^\s'"]+\/contents\//.test(command) && WRITE_FLAGS.some((flag) => flag.test(command))) {
     return 'writing files through the contents API';
@@ -368,7 +375,7 @@ function inspectPush(seg, parts) {
 
 // --- merges by another spelling, remotes and push-related config ---
 
-// `gh pr merge` with the words split up or quoted: gh, then pr, then merge.
+// `gh pr merge` or `gh pr review` with the words split up or quoted: gh, then pr, then merge or review.
 function ghMergeProblem(segments) {
   for (const seg of segments) {
     const { words } = split(seg);
@@ -376,6 +383,7 @@ function ghMergeProblem(segments) {
     const texts = words.slice(1).map((w) => w.text.toLowerCase());
     const pr = texts.indexOf('pr');
     if (pr >= 0 && texts.indexOf('merge', pr + 1) > pr) return 'merging a pull request';
+    if (pr >= 0 && texts.indexOf('review', pr + 1) > pr) return 'reviewing (approving or requesting changes on) a pull request';
   }
   return null;
 }
