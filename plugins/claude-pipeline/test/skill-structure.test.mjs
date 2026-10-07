@@ -590,12 +590,14 @@ test('README says the interactive wait question comes before the fork questions 
 test('Phase 2a: evidence template has the revert-check and diff-risk sections', () => {
   const h = headings(read('templates/evidence.md'));
   for (const s of ['Revert check', 'Diff risk']) assert.ok(h.includes(s), `templates/evidence.md lacks ## ${s}`);
+  assert.match(read('templates/evidence.md'), /could not run/);
 });
 
 test('Phase 2a: stage 7 runs the revert check and records it', () => {
   const verify = read('stages/07-verify.md');
   assert.match(verify, /node "\$PIPELINE" revert-check --base "\$BASE_SHA" --command/);
   assert.match(verify, /Revert check/);
+  assert.match(verify, /could not run/);
 });
 
 test('Phase 2a: stage 8 runs diff-risk and classifies skip markers as Critical confessions', () => {
@@ -621,10 +623,11 @@ test('Phase 2a: fix mode removes claude-fix first, reads the verdict, then the o
   const steps = fix.split('## Steps')[1].split('\n## ')[0];
   const removeAt = steps.indexOf('`tracker:remove-pr-labels` `claude-fix`');
   const verdictAt = steps.indexOf('node "$PIPELINE" verdict-latest');
-  const replyAt = steps.indexOf("owner's reply");
+  const replyAt = steps.indexOf("**The owner's reply.**");
   const commentsAt = steps.indexOf('Review comments');
   assert.ok(removeAt > 0 && verdictAt > removeAt && replyAt > verdictAt && commentsAt > replyAt, 'order: remove label, verdict, reply, comments');
   assert.match(fix, /human-decision-needed/);
+  assert.match(steps, /Work out what to fix[\s\S]*fix-plan\.md/);
 });
 
 test('Phase 2a: the GitHub adapter defines remove-pr-labels', () => {
