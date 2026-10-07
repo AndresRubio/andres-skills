@@ -1,0 +1,12 @@
+{
+  "name": "andres-skills",
+  "owner": { "name": "AndresRubio", "url": "https://github.com/AndresRubio" },
+  "metadata": { "description": "AndresRubio's Claude Code plugins" },
+  "plugins": [
+    {
+      "name": "claude-pipeline",
+      "source": "./plugins/claude-pipeline",
+      "description": "Issue-to-PR pipeline: ship, review, pipeline-setup."
+    }
+  ]
+}

@@ -12,7 +12,7 @@ Personal [Claude Code skills](https://code.claude.com/docs/en/skills).
 |---|---|
 | [`claude-pipeline`](plugins/claude-pipeline/README.md) (SDLC-Forward) | Issue-to-PR pipeline for Claude Code: `/claude-pipeline:ship` takes a GitHub issue or a free-text idea through research, grade, spec, plan, build, verify, self-review and pull request, with a run guard hook that blocks pushes to the base branch and PR merges. Design in [`docs/superpowers/specs/`](plugins/claude-pipeline/docs/superpowers/specs/2026-09-24-claude-pipeline-design.md), status in [`docs/phase1-build-report.md`](plugins/claude-pipeline/docs/phase1-build-report.md). |
 
-Plugins are loaded with `claude --plugin-dir plugins/<name>`; see each plugin's README.
+Install from the marketplace: `claude plugin marketplace add https://github.com/AndresRubio/andres-skills.git` then `claude plugin install claude-pipeline@andres-skills`. For development, `claude --plugin-dir plugins/<name>` still works.
 
 ## Install
 
