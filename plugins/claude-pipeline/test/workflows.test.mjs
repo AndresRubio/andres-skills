@@ -62,3 +62,11 @@ test('no workflow edits .github/workflows or merges', () => {
     assert.doesNotMatch(t, /update-branch.*--force/, name);
   }
 });
+
+test('ship and review jobs set origin/HEAD right after the target-repo checkout (config reads the default branch)', () => {
+  const ship = rendered('claude-ship.yml');
+  const shipJob = ship.slice(ship.indexOf('\n  ship:\n'));
+  assert.match(shipJob, /steps:\n      - uses: actions\/checkout@v4\n        with:\n          fetch-depth: 0\n      - run: git remote set-head origin --auto\n/);
+  const review = rendered('claude-review.yml');
+  assert.match(review, /steps:\n      - uses: actions\/checkout@v4\n        with:\n          fetch-depth: 0\n          ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}\n      - run: git remote set-head origin --auto\n/);
+});

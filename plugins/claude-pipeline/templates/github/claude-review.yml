@@ -25,6 +25,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
+      - run: git remote set-head origin --auto
       - uses: actions/checkout@v4
         with:
           repository: {{PLUGIN_REPO_SLUG}}

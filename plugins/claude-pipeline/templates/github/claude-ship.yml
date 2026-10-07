@@ -55,6 +55,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - run: git remote set-head origin --auto
       - uses: actions/checkout@v4
         with:
           repository: {{PLUGIN_REPO_SLUG}}
