@@ -33,6 +33,17 @@ test('a trusted reply on a needs-decision issue resumes: a fix run when a pipeli
   assert.equal(laneTarget({ name: 'issue_comment', payload: commented('**[claude-pipeline]** blocked · 2026-10-07T10:00:00Z · local\n\nx') }, { openPrs: [] }).run, false, 'pipeline comment');
   const fork = laneTarget({ name: 'issue_comment', payload: commented('x') }, { openPrs: [{ number: 7, headRefName: 'claude/5-a', isCrossRepository: true, labels: [] }] });
   assert.equal(fork.prompt, '/claude-pipeline:ship #5 --mode auto', 'a fork PR is not a pipeline PR');
+  assert.match(laneTarget({ name: 'issue_comment', payload: commented('x') }, { openPrs: [{ number: 7, headRefName: 'claude/5-a', isCrossRepository: false, labels: [{ name: 'needs-local' }] }] }).reason, /needs-local/, 'needs-local PR is not fixed on cloud');
+  assert.match(laneTarget({ name: 'issue_comment', payload: commented('x', issue({ labels: [{ name: 'claude' }, { name: 'needs-decision' }, { name: 'needs-local' }] })) }, { openPrs: [] }).reason, /needs-local/, 'needs-local issue does not run');
+});
+
+test('intake labels on a needs-local issue are ignored', () => {
+  assert.match(laneTarget({ name: 'issues', payload: labeled('claude', issue({ labels: [{ name: 'claude' }, { name: 'needs-local' }] })) }, { openPrs: [] }).reason, /needs-local/);
+});
+
+test('missing sender in issues.labeled blocks the run', () => {
+  const payloadNoSender = { action: 'labeled', label: { name: 'claude' }, issue: issue(), sender: undefined };
+  assert.match(laneTarget({ name: 'issues', payload: payloadNoSender }, { openPrs: [] }).reason, /sender/);
 });
 
 test('claude-fix on a same-repo pipeline PR starts a fix run; needs-local and forks are left alone', () => {
