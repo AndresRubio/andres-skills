@@ -6,6 +6,14 @@ Personal [Claude Code skills](https://code.claude.com/docs/en/skills).
 |---|---|
 | [`five-dysfunctions`](skills/five-dysfunctions/SKILL.md) | Lencioni's *The Five Dysfunctions of a Team* applied to Claude Code sessions and agent teams: live working norms, session audits (with a transcript condenser and signal scan), and multi-agent team design. Bilingual (EN/ES). |
 
+## Plugins
+
+| Plugin | What it does |
+|---|---|
+| [`claude-pipeline`](plugins/claude-pipeline/README.md) (SDLC-Forward) | Issue-to-PR pipeline for Claude Code: `/claude-pipeline:ship` takes a GitHub issue or a free-text idea through research, grade, spec, plan, build, verify, self-review and pull request, with a run guard hook that blocks pushes to the base branch and PR merges. Design in [`docs/superpowers/specs/`](plugins/claude-pipeline/docs/superpowers/specs/2026-09-24-claude-pipeline-design.md), status in [`docs/phase1-build-report.md`](plugins/claude-pipeline/docs/phase1-build-report.md). |
+
+Plugins are loaded with `claude --plugin-dir plugins/<name>`; see each plugin's README.
+
 ## Install
 
 ```bash
