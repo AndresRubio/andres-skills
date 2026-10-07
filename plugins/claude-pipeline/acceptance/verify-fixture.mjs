@@ -2,8 +2,9 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { ghJson, currentRepo, fetchIssue } from '../skills/ship/scripts/lib/github.mjs';
+import { ghJson, currentRepo, fetchIssue, fetchPrComments } from '../skills/ship/scripts/lib/github.mjs';
 import { isPipelineComment } from '../skills/ship/scripts/lib/lock.mjs';
+import { latestVerdict } from '../skills/ship/scripts/lib/verdict.mjs';
 import { evaluateFixture, findLeaks, verdictFromComments } from './lib/evaluate.mjs';
 
 // A usage error: JSON on stderr, exit 2.
@@ -37,10 +38,12 @@ try {
 if (recorded === null || typeof recorded !== 'object' || Array.isArray(recorded)) {
   usageError(`${path.join(sandbox, '.pipeline-fixtures.json')} is not a JSON object`);
 }
-if (!Object.hasOwn(recorded, values.fixture)) {
-  usageError(`no issue recorded for ${values.fixture}`);
+// A fixture may reuse another fixture's seeded issue (`issueFile`): 14 runs issue 01 with the review secret broken.
+const issueFile = expected.issueFile ?? values.fixture;
+if (!Object.hasOwn(recorded, issueFile)) {
+  usageError(`no issue recorded for ${issueFile}`);
 }
-const number = recorded[values.fixture];
+const number = recorded[issueFile];
 
 // A noLeak fixture scans the whole public repo for text that must stay private (the
 // private sandbox's CANARY.md). The text comes from a file so it never appears in argv
@@ -165,6 +168,15 @@ try {
     branchPushed: branches.some(isOurs),
     issueNumber: number,
   };
+  observed.fixRuns = issue.comments.filter((c) => c.pipeline && c.marker.kind === 'lock' && c.body.split('\n').slice(1).join('\n').trim().startsWith('Fix run started')).length;
+  if (pr) {
+    const prView = ghJson(['pr', 'view', String(pr.number), '--json', 'labels,headRefOid']);
+    observed.prLabels = prView.labels.map((l) => l.name);
+    const prComments = fetchPrComments(repo, pr.number);
+    observed.prCommentKinds = prComments.filter((c) => c.pipeline).map((c) => c.marker.kind);
+    observed.reviewVerdict = latestVerdict(prComments, prView.headRefOid)?.verdict ?? null;
+    observed.readyReport = prComments.filter((c) => c.pipeline && c.marker.kind === 'ready').at(-1)?.body ?? '';
+  }
   if (expected.noLeak) observed.leaks = findLeaks(publicTexts(repo, branches), forbidden);
 } catch (err) {
   process.stderr.write(`${JSON.stringify({ error: err.message })}\n`);

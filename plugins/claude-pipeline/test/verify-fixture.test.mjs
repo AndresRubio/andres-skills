@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fakeGh } from './helpers/fake-gh.mjs';
 import { tempDir } from './helpers/git.mjs';
+import { formatVerdictBody } from '../skills/ship/scripts/lib/verdict.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../acceptance/verify-fixture.mjs', import.meta.url));
 const fixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8'));
@@ -21,6 +22,14 @@ function makeSandbox(recorded) {
   return sandbox;
 }
 
+const HEAD = 'a'.repeat(40);
+const prComment = (id, body) => ({ id, user: { login: 'AndresRubio' }, author_association: 'OWNER', body, created_at: '2026-10-07T00:00:00Z' });
+// The default PR is a reviewed, accepted one: a verdict for its head, then a ready comment.
+const acceptedComments = [[
+  prComment(21, formatVerdictBody({ verdict: 'accepted', head: HEAD, marker: '**[claude-pipeline]** verdict · 2026-10-07T00:00:00Z · local' })),
+  prComment(22, '**[claude-pipeline]** ready · 2026-10-07T00:00:01Z · local\n\nReady for review.'),
+]];
+
 const baseRoutes = (extra = {}) => ({
   'repo view --json nameWithOwner': { nameWithOwner: 'o/r' },
   'api repos/o/r/issues/5': fixture('gh-issue.json'),
@@ -30,6 +39,8 @@ const baseRoutes = (extra = {}) => ({
   'pr list --repo o/r --state all --limit 500 --json number,url,headRefName,body': [
     { number: 9, url: 'https://github.com/o/r/pull/9', headRefName: 'claude/5-x', body: 'Fixes #5' },
   ],
+  'pr view 9 --json labels,headRefOid': { labels: [{ name: 'ready' }], headRefOid: HEAD },
+  'api --paginate --slurp repos/o/r/issues/9/comments': acceptedComments,
   'api --paginate --slurp repos/o/r/branches': [[{ name: 'claude/5-x' }]],
   ...extra,
 });
@@ -391,4 +402,32 @@ test('a fixture without noLeak makes no leak-scan calls and ignores --forbidden-
   assert.notEqual(r.code, 2, r.stderr);
   assert.notEqual(r.code, 3, r.stderr);
   assert.equal('leaks' in JSON.parse(r.stdout).observed, false);
+});
+
+test('observes the PR labels, comment kinds, review verdict at the current head and the fix-run count', () => {
+  const sandbox = makeSandbox({ '01-wrong-month.md': 5 });
+  const lockFix = { id: 13, user: { login: 'AndresRubio' }, author_association: 'OWNER', body: '**[claude-pipeline]** lock · 2026-10-07T01:00:00Z · local\n\nFix run started for PR 9.', created_at: '2026-10-07T01:00:00Z' };
+  const staleVerdict = prComment(30, formatVerdictBody({ verdict: 'revision-needed', head: 'b'.repeat(40), marker: '**[claude-pipeline]** verdict · 2026-10-07T00:30:00Z · local' }));
+  const dir = fakeGh(baseRoutes({
+    'api --paginate --slurp repos/o/r/issues/5/comments': [[...fixture('gh-comments.json')[0], lockFix]],
+    'api --paginate --slurp repos/o/r/issues/9/comments': [[...acceptedComments[0], staleVerdict]],
+    'api repos/o/r/contents/docs/pipeline/5?ref=claude%2F5-x': [],
+    'api repos/o/r/contents/docs/pipeline/5/screenshots?ref=claude%2F5-x': [],
+  }));
+  const r = runVerify(['--sandbox', sandbox, '--fixture', '01-wrong-month.md'], { PATH: `${dir}:${process.env.PATH}` });
+  const out = JSON.parse(r.stdout);
+  assert.deepEqual(out.observed.prLabels, ['ready']);
+  assert.deepEqual(out.observed.prCommentKinds, ['verdict', 'ready', 'verdict']);
+  assert.equal(out.observed.reviewVerdict, 'accepted');
+  assert.equal(out.observed.fixRuns, 1);
+});
+
+test('a fixture with issueFile resolves the issue number through that file', () => {
+  const sandbox = makeSandbox({ '01-wrong-month.md': 5 });
+  const dir = fakeGh(baseRoutes({
+    'api repos/o/r/contents/docs/pipeline/5?ref=claude%2F5-x': [],
+    'api repos/o/r/contents/docs/pipeline/5/screenshots?ref=claude%2F5-x': [],
+  }));
+  const r = runVerify(['--sandbox', sandbox, '--fixture', '14-review-broken.md'], { PATH: `${dir}:${process.env.PATH}` });
+  assert.equal(JSON.parse(r.stdout).issue, 5, r.stderr);
 });

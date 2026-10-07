@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { validateConfig } from '../skills/ship/scripts/lib/config.mjs';
@@ -29,7 +29,7 @@ test('the sandbox settings.json parses and denies destructive commands', () => {
 
 test('every seeded issue has a title, labels and a body', () => {
   const files = readdirSync(dir('issues')).filter((f) => f.endsWith('.md'));
-  assert.deepEqual(files.sort(), ['01-wrong-month.md', '02-sort.md', '03-login.md', '04-bilingual.md', '05-empty-state.md', '06-protected-rename.md', '06b-ci-node.md', '07-title-typo.md', '09a-count.md', '09b-clear.md', '10-length-limit.md']);
+  assert.deepEqual(files.sort(), ['01-wrong-month.md', '02-sort.md', '03-login.md', '04-bilingual.md', '05-empty-state.md', '06-protected-rename.md', '06b-ci-node.md', '07-title-typo.md', '09a-count.md', '09b-clear.md', '10-length-limit.md', '12-archive-toggle.md', '13-sort-stability.md']);
   for (const f of files) {
     const [title, labels, sep, ...body] = readFileSync(dir(`issues/${f}`), 'utf8').split('\n');
     assert.match(title, /^title: \S/, f);
@@ -45,7 +45,7 @@ test('the planted defects are present', () => {
 });
 
 test('fixtures 01-07 (including 06b) and 10 carry the claude label; 09a and 09b do not', () => {
-  const withClaude = ['01-wrong-month.md', '02-sort.md', '03-login.md', '04-bilingual.md', '05-empty-state.md', '06-protected-rename.md', '06b-ci-node.md', '07-title-typo.md', '10-length-limit.md'];
+  const withClaude = ['01-wrong-month.md', '02-sort.md', '03-login.md', '04-bilingual.md', '05-empty-state.md', '06-protected-rename.md', '06b-ci-node.md', '07-title-typo.md', '10-length-limit.md', '12-archive-toggle.md', '13-sort-stability.md'];
   const withoutClaude = ['09a-count.md', '09b-clear.md'];
   const labelsOf = (f) => readFileSync(dir(`issues/${f}`), 'utf8').split('\n')[1].replace(/^labels: /, '').split(',');
   for (const f of withClaude) assert.ok(labelsOf(f).includes('claude'), f);
@@ -95,4 +95,17 @@ test('setup-sandbox.sh writes CANARY.md only for a private sandbox, before git a
   assert.ok(block.index < src.indexOf('git add -A'), 'the canary is written before git add -A');
   assert.equal(src.split('> CANARY.md').length - 1, 1, 'CANARY.md is written in exactly one place');
   assert.equal(readdirSync(dir('app')).includes('CANARY.md'), false, 'the app template has no CANARY.md');
+});
+
+test('seeded PR fixtures carry the files a fix run needs and the planted defects', () => {
+  for (const name of ['12-archive-toggle', '13-sort-stability']) {
+    const base = `prs/${name}/`;
+    for (const f of ['docs/pipeline/KEY/spec.md', 'docs/pipeline/KEY/plan.md', 'docs/pipeline/KEY/progress.md', 'docs/pipeline/KEY/evidence.md', 'pr-body.md']) {
+      assert.ok(existsSync(dir(base + f)), `${base}${f}`);
+    }
+  }
+  const thirteen = readFileSync(dir('prs/13-sort-stability/src/list.test.ts'), 'utf8');
+  assert.match(thirteen, /it\.only\(/);
+  assert.match(readFileSync(dir('prs/12-archive-toggle/pr-body.md'), 'utf8'), /Decision needed/);
+  assert.doesNotThrow(() => execFileSync('bash', ['-n', fileURLToPath(dir('seed-pr.sh'))]));
 });

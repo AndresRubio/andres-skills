@@ -6,7 +6,8 @@ import { evaluateFixture, findLeaks, verdictFromComments } from '../acceptance/l
 const observed = (over = {}) => ({
   verdict: 'ready', pr: { url: 'u', headRefName: 'claude/5-x', body: 'Fixes #5' }, labels: ['claude'],
   commentKinds: ['lock', 'grade', 'report'], artifacts: ['research.md', 'grade.md', 'spec.md', 'plan.md', 'progress.md', 'evidence.md'],
-  screenshots: 1, subIssues: 0, branchPushed: true, issueNumber: 5, ...over,
+  screenshots: 1, subIssues: 0, branchPushed: true, issueNumber: 5,
+  prLabels: ['ready'], prCommentKinds: ['verdict', 'ready'], reviewVerdict: 'accepted', fixRuns: 0, ...over,
 });
 const expectations = JSON.parse(readFileSync(new URL('../acceptance/fixtures.json', import.meta.url), 'utf8'));
 
@@ -122,4 +123,31 @@ test('findLeaks refuses an empty or non-string marker instead of matching nothin
   assert.throws(() => findLeaks(texts, ''), /non-empty/);
   assert.throws(() => findLeaks(texts, undefined), /non-empty/);
   assert.throws(() => findLeaks(texts, null), /non-empty/);
+});
+
+test('PR-side expectations: labels, comment kinds, review verdict, fix-run count', () => {
+  const e = { verdict: ['ready', 'small-gaps'], pr: true, prLabelsPresent: ['ready'], prLabelsAbsent: ['claude-fix'], prCommentKinds: ['verdict', 'ready'], reviewVerdict: 'accepted', fixRuns: 1 };
+  const ok = observed({ prLabels: ['ready'], prCommentKinds: ['verdict', 'ready'], reviewVerdict: 'accepted', fixRuns: 1 });
+  assert.deepEqual(evaluateFixture(e, ok), { pass: true, failures: [] });
+  const bad = evaluateFixture(e, observed({ prLabels: ['claude-fix'], prCommentKinds: ['verdict'], reviewVerdict: 'revision-needed', fixRuns: 2 }));
+  assert.match(bad.failures.join('|'), /PR label ready missing/);
+  assert.match(bad.failures.join('|'), /PR label claude-fix should be absent/);
+  assert.match(bad.failures.join('|'), /no ready comment on the PR/);
+  assert.match(bad.failures.join('|'), /review verdict revision-needed, expected accepted/);
+  assert.match(bad.failures.join('|'), /2 fix runs, expected 1/);
+});
+
+test('fixtures 12, 13 and 14 are defined with the Phase 2a outcomes', () => {
+  assert.equal(expectations['12-archive-toggle.md'].reviewVerdict, 'human-decision-needed');
+  assert.equal(expectations['12-archive-toggle.md'].fixRuns, 0);
+  assert.deepEqual(expectations['12-archive-toggle.md'].labelsPresent, ['needs-decision']);
+  assert.equal(expectations['13-sort-stability.md'].reviewVerdict, 'accepted');
+  assert.equal(expectations['13-sort-stability.md'].fixRuns, 1);
+  assert.deepEqual(expectations['13-sort-stability.md'].prLabelsPresent, ['ready']);
+  assert.deepEqual(expectations['14-review-broken.md'].prLabelsAbsent, ['ready']);
+  assert.equal(expectations['14-review-broken.md'].reviewVerdict, 'human-decision-needed');
+  for (const f of ['01-wrong-month.md', '02-sort.md', '05-empty-state.md', '07-title-typo.md']) {
+    assert.deepEqual(expectations[f].prLabelsPresent, ['ready'], f);
+    assert.equal(expectations[f].reviewVerdict, 'accepted', f);
+  }
 });

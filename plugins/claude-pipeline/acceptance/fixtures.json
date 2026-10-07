@@ -5,7 +5,11 @@
     "prFixesIssue": true,
     "labelsAbsent": ["claude-working", "needs-decision"],
     "commentKinds": ["lock", "grade", "report"],
-    "artifacts": ["research.md", "grade.md", "spec.md", "plan.md", "progress.md", "evidence.md"]
+    "artifacts": ["research.md", "grade.md", "spec.md", "plan.md", "progress.md", "evidence.md"],
+    "prLabelsPresent": ["ready"],
+    "prLabelsAbsent": ["claude-fix"],
+    "prCommentKinds": ["verdict", "ready"],
+    "reviewVerdict": "accepted"
   },
   "02-sort.md": {
     "verdict": ["small-gaps"],
@@ -13,7 +17,11 @@
     "prFixesIssue": true,
     "labelsAbsent": ["claude-working", "needs-decision"],
     "commentKinds": ["lock", "grade", "assumptions", "report"],
-    "artifacts": ["research.md", "grade.md", "spec.md", "plan.md", "progress.md", "evidence.md"]
+    "artifacts": ["research.md", "grade.md", "spec.md", "plan.md", "progress.md", "evidence.md"],
+    "prLabelsPresent": ["ready"],
+    "prLabelsAbsent": ["claude-fix"],
+    "prCommentKinds": ["verdict", "ready"],
+    "reviewVerdict": "accepted"
   },
   "03-login.md": {
     "verdict": ["fork"],
@@ -38,7 +46,11 @@
     "labelsAbsent": ["claude-working", "needs-decision"],
     "commentKinds": ["lock", "grade", "report"],
     "artifacts": ["research.md", "grade.md", "spec.md", "plan.md", "progress.md", "evidence.md"],
-    "screenshots": true
+    "screenshots": true,
+    "prLabelsPresent": ["ready"],
+    "prLabelsAbsent": ["claude-fix"],
+    "prCommentKinds": ["verdict", "ready"],
+    "reviewVerdict": "accepted"
   },
   "07-title-typo.md": {
     "verdict": ["ready", "small-gaps"],
@@ -46,7 +58,11 @@
     "prFixesIssue": true,
     "labelsAbsent": ["claude-working", "needs-decision"],
     "commentKinds": ["lock", "grade", "report"],
-    "artifacts": ["research.md", "grade.md", "spec.md", "plan.md", "progress.md", "evidence.md"]
+    "artifacts": ["research.md", "grade.md", "spec.md", "plan.md", "progress.md", "evidence.md"],
+    "prLabelsPresent": ["ready"],
+    "prLabelsAbsent": ["claude-fix"],
+    "prCommentKinds": ["verdict", "ready"],
+    "reviewVerdict": "accepted"
   },
   "10-length-limit.md": {
     "verdict": ["ready", "small-gaps"],
@@ -55,6 +71,61 @@
     "labelsAbsent": ["claude-working", "needs-decision"],
     "commentKinds": ["lock", "grade", "report"],
     "artifacts": ["research.md", "grade.md", "spec.md", "plan.md", "progress.md", "evidence.md"],
-    "noLeak": true
+    "noLeak": true,
+    "prLabelsPresent": ["ready"],
+    "prLabelsAbsent": ["claude-fix"],
+    "prCommentKinds": ["verdict", "ready"],
+    "reviewVerdict": "accepted"
+  },
+  "06-protected-rename.md": {
+    "verdict": ["ready", "small-gaps"],
+    "pr": true,
+    "prFixesIssue": true,
+    "labelsAbsent": ["claude-working", "needs-decision"],
+    "commentKinds": ["lock", "grade", "report"],
+    "artifacts": ["research.md", "grade.md", "spec.md", "plan.md", "progress.md", "evidence.md"],
+    "prLabelsPresent": ["ready"],
+    "prLabelsAbsent": ["claude-fix"],
+    "prCommentKinds": ["verdict", "ready"],
+    "reviewVerdict": "accepted",
+    "readyReportMentions": "Protected path changed"
+  },
+  "12-archive-toggle.md": {
+    "verdict": [],
+    "pr": true,
+    "prFixesIssue": true,
+    "labelsPresent": ["needs-decision"],
+    "labelsAbsent": ["claude-working"],
+    "commentKinds": ["blocked"],
+    "prLabelsAbsent": ["ready", "claude-fix"],
+    "prCommentKinds": ["verdict"],
+    "reviewVerdict": "human-decision-needed",
+    "fixRuns": 0,
+    "seededPr": true
+  },
+  "13-sort-stability.md": {
+    "verdict": [],
+    "pr": true,
+    "prFixesIssue": true,
+    "labelsAbsent": ["claude-working", "needs-decision"],
+    "commentKinds": ["lock", "report"],
+    "prLabelsPresent": ["ready"],
+    "prLabelsAbsent": ["claude-fix"],
+    "prCommentKinds": ["verdict", "ready"],
+    "reviewVerdict": "accepted",
+    "fixRuns": 1,
+    "seededPr": true
+  },
+  "14-review-broken.md": {
+    "verdict": ["ready", "small-gaps"],
+    "pr": true,
+    "prFixesIssue": true,
+    "labelsPresent": ["needs-decision"],
+    "labelsAbsent": ["claude-working"],
+    "commentKinds": ["lock", "grade", "report", "blocked"],
+    "prLabelsAbsent": ["ready"],
+    "prCommentKinds": ["verdict"],
+    "reviewVerdict": "human-decision-needed",
+    "issueFile": "01-wrong-month.md"
   }
 }

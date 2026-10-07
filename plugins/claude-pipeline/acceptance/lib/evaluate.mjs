@@ -17,7 +17,7 @@ export function findLeaks(texts, forbidden) {
 export function evaluateFixture(expected, observed) {
   const failures = [];
   const verdicts = [].concat(expected.verdict);
-  if (!verdicts.includes(observed.verdict)) failures.push(`verdict ${observed.verdict ?? 'none'} not in [${verdicts.join(', ')}]`);
+  if (!expected.seededPr && !verdicts.includes(observed.verdict)) failures.push(`verdict ${observed.verdict ?? 'none'} not in [${verdicts.join(', ')}]`);
   if (expected.pr === true && !observed.pr) failures.push('expected a PR, found none');
   if (expected.pr === false && observed.pr) failures.push(`expected no PR, found ${observed.pr.url}`);
   if (expected.prFixesIssue && observed.pr && !observed.pr.body.includes(`Fixes #${observed.issueNumber}`)) {
@@ -36,6 +36,16 @@ export function evaluateFixture(expected, observed) {
     // Fail closed: a missing scan result must not read as "no leaks".
     if (!Array.isArray(observed.leaks)) failures.push('private-data scan did not run');
     else for (const where of observed.leaks) failures.push(`private marker found in ${where}`);
+  }
+  for (const l of expected.prLabelsPresent ?? []) if (!(observed.prLabels ?? []).includes(l)) failures.push(`PR label ${l} missing`);
+  for (const l of expected.prLabelsAbsent ?? []) if ((observed.prLabels ?? []).includes(l)) failures.push(`PR label ${l} should be absent`);
+  for (const k of expected.prCommentKinds ?? []) if (!(observed.prCommentKinds ?? []).includes(k)) failures.push(`no ${k} comment on the PR`);
+  if (expected.reviewVerdict !== undefined && observed.reviewVerdict !== expected.reviewVerdict) {
+    failures.push(`review verdict ${observed.reviewVerdict ?? 'none'}, expected ${expected.reviewVerdict}`);
+  }
+  if (expected.fixRuns !== undefined && observed.fixRuns !== expected.fixRuns) failures.push(`${observed.fixRuns ?? 0} fix runs, expected ${expected.fixRuns}`);
+  if (expected.readyReportMentions !== undefined && !(observed.readyReport ?? '').includes(expected.readyReportMentions)) {
+    failures.push(`ready report does not mention "${expected.readyReportMentions}"`);
   }
   if (observed.verdict === 'small-gaps' && !observed.commentKinds.includes('assumptions')) {
     failures.push('small-gaps but no assumptions comment');
