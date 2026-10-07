@@ -46,10 +46,11 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allowed_bots: "claude[bot]"
-          plugin_marketplaces: {{PLUGIN_REPO}}
-          plugins: claude-pipeline@{{MARKETPLACE}}
           prompt: "/claude-pipeline:review ${{ github.event.pull_request.number }} --head ${{ github.event.pull_request.head.sha }}"
+          # The agent loads the pinned checkout above, so its skills, stages and hooks match the CLI it calls.
+          # Verify on the first sandbox run that claude-code-action passes --plugin-dir through.
           claude_args: |
+            --plugin-dir .claude-pipeline-plugin/{{PLUGIN_SUBDIR}}
             --model claude-fable-5-1
             --max-budget-usd 15
             --disallowedTools Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh pr edit:*),Bash(git push:*)

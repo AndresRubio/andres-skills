@@ -34,6 +34,8 @@ A run ends at an open PR. With the Phase 2a workflows installed (`/claude-pipeli
 - `claude-review` — reviews each `claude/*` PR and posts a verdict for its head commit.
 - `pipeline-ready` — deterministic, no AI: keeps the branch current, requests a fix when needed, and labels the PR `ready` once CI is green, the verdict is accepted and the branch is current. It never merges.
 
+The agent in `claude-ship` and `claude-review` loads the plugin with `--plugin-dir` from the pinned checkout of `AndresRubio/andres-skills` (tag `claude-pipeline--v<version>`, set by setup), not from the marketplace, so its skills and the CLI it calls are the same version. The marketplace is for installing the plugin by hand.
+
 Before they can run, install the Claude GitHub App on the repository (`/install-github-app` in Claude Code, or https://github.com/apps/claude); the workflows run as `claude[bot]` through it. They need two repository secrets: `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) and `PIPELINE_TOKEN`, a fine-grained personal access token for the repo owner, scoped to the repo, with `contents`, `issues` and `pull-requests` write. `PIPELINE_TOKEN` is required for the fix lane and branch updates: events made with the default `GITHUB_TOKEN` start no workflows, so without it a `claude-fix` label or a branch update never triggers `claude-ship`, CI or `claude-review`.
 
 ## Review

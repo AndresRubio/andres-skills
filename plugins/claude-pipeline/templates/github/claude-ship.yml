@@ -74,9 +74,10 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allowed_bots: "claude[bot]"
-          plugin_marketplaces: {{PLUGIN_REPO}}
-          plugins: claude-pipeline@{{MARKETPLACE}}
           prompt: ${{ needs.route.outputs.prompt }}
+          # The agent loads the pinned checkout above, so its skills, stages and hooks match the CLI it calls.
+          # Verify on the first sandbox run that claude-code-action passes --plugin-dir through.
           claude_args: |
+            --plugin-dir .claude-pipeline-plugin/{{PLUGIN_SUBDIR}}
             --max-budget-usd 25
             --disallowedTools Bash(gh pr merge:*),Bash(gh pr review:*),Bash(git push --force:*),Bash(git push -f:*)

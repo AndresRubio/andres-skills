@@ -50,8 +50,6 @@ test('claude-ship: routes with lane-target, runs the action only when run is tru
   assert.doesNotMatch(t, /^concurrency:/m);
   assert.equal((t.match(/actions\/setup-node@v4/g) || []).length, 2);
   assert.match(t, /--disallowedTools .*Bash\(gh pr merge:\*\)/);
-  assert.match(t, /plugin_marketplaces: https:\/\/github\.com\/AndresRubio\/andres-skills\.git/);
-  assert.match(t, /plugins: claude-pipeline@andres-skills/);
 });
 
 test('no workflow edits .github/workflows or merges', () => {
@@ -82,4 +80,14 @@ test('pipeline-ready warns when PIPELINE_TOKEN is missing, before deciding, and 
   assert.doesNotMatch(t, /^\s+if: .*secrets\./m);
   assert.doesNotMatch(t, /GitHub App token/);
   assert.match(t, /GH_TOKEN: \$\{\{ secrets\.PIPELINE_TOKEN \|\| github\.token \}\}/);
+});
+
+test('the agent loads the pinned plugin checkout with --plugin-dir, never the marketplace HEAD', () => {
+  for (const name of ['claude-ship.yml', 'claude-review.yml']) {
+    const t = rendered(name);
+    assert.doesNotMatch(t, /plugin_marketplaces:|^\s+plugins:/m, name);
+    assert.match(t, /claude_args: \|\n\s+--plugin-dir \.claude-pipeline-plugin\/plugins\/claude-pipeline\/\n/, name);
+    assert.match(t, /repository: AndresRubio\/andres-skills\n\s+ref: claude-pipeline--v\d+\.\d+\.\d+\n\s+path: \.claude-pipeline-plugin/, name);
+    assert.match(t, /# Verify on the first sandbox run that claude-code-action passes --plugin-dir through\./, name);
+  }
 });
