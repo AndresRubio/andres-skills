@@ -59,3 +59,30 @@ test('CLI setup renders with overrides', () => {
   assert.match(ready, /workflows: \[CI, Lint, claude-review\]/);
   assert.equal(existsSync(path.join(root, '.claude/pipeline.json')), true);
 });
+
+const doc = (rel) => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
+
+test('setup skill: installs the Claude GitHub App before the secrets, and PIPELINE_TOKEN is required, not an App token', () => {
+  const text = doc('skills/setup/SKILL.md');
+  const steps = text.split('## Steps')[1].split('\n## ')[0];
+  const app = steps.indexOf('/install-github-app');
+  const secrets = steps.indexOf('CLAUDE_CODE_OAUTH_TOKEN');
+  assert.ok(app > 0 && app < secrets, 'the Claude GitHub App step must come before the secrets step');
+  assert.match(steps, /https:\/\/github\.com\/apps\/claude/);
+  assert.match(steps, /claude\[bot\]/);
+  assert.match(steps, /`PIPELINE_TOKEN`[^\n]*required/i);
+  assert.match(steps, /contents: write[^\n]*issues: write[^\n]*pull-requests: write/);
+  assert.match(steps, /start no workflows/);
+  assert.doesNotMatch(text, /GitHub App token/);
+  assert.doesNotMatch(text, /`PIPELINE_TOKEN` is optional|Optional second secret/);
+});
+
+test('README: names both secrets and the Claude GitHub App', () => {
+  const text = doc('README.md');
+  const wf = text.split('## Workflows')[1].split('\n## ')[0];
+  assert.match(wf, /CLAUDE_CODE_OAUTH_TOKEN/);
+  assert.match(wf, /PIPELINE_TOKEN/);
+  assert.match(wf, /\/install-github-app/);
+  assert.doesNotMatch(wf, /The one secret/);
+  assert.doesNotMatch(text, /GitHub App token/);
+});

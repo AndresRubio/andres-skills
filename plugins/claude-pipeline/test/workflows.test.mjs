@@ -70,3 +70,16 @@ test('ship and review jobs set origin/HEAD right after the target-repo checkout 
   const review = rendered('claude-review.yml');
   assert.match(review, /steps:\n      - uses: actions\/checkout@v4\n        with:\n          fetch-depth: 0\n          ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}\n      - run: git remote set-head origin --auto\n/);
 });
+
+test('pipeline-ready warns when PIPELINE_TOKEN is missing, before deciding, and still falls back to the default token', () => {
+  const t = rendered('pipeline-ready.yml');
+  const warn = t.indexOf('PIPELINE_TOKEN is not set; fix requests and branch updates will not trigger workflows');
+  assert.ok(warn > 0, 'missing warning');
+  assert.ok(warn < t.indexOf('name: Decide and act'), 'the warning must come before Decide and act');
+  // The secrets context is not available in a step-level if:, so the check runs in the shell.
+  assert.match(t, /PIPELINE_TOKEN_SET: \$\{\{ secrets\.PIPELINE_TOKEN != '' \}\}/);
+  assert.match(t, /if \[ "\$PIPELINE_TOKEN_SET" != "true" \]; then echo "::warning::PIPELINE_TOKEN is not set/);
+  assert.doesNotMatch(t, /^\s+if: .*secrets\./m);
+  assert.doesNotMatch(t, /GitHub App token/);
+  assert.match(t, /GH_TOKEN: \$\{\{ secrets\.PIPELINE_TOKEN \|\| github\.token \}\}/);
+});

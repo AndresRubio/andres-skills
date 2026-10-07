@@ -36,9 +36,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # The secrets context is not available in a step-level if:, so the check runs in the shell.
+      - name: Check PIPELINE_TOKEN
+        env:
+          PIPELINE_TOKEN_SET: ${{ secrets.PIPELINE_TOKEN != '' }}
+        run: |
+          if [ "$PIPELINE_TOKEN_SET" != "true" ]; then echo "::warning::PIPELINE_TOKEN is not set; fix requests and branch updates will not trigger workflows"; fi
       - name: Decide and act
         env:
-          # Optional: a fine-grained PAT or GitHub App token with contents:write and pull-requests:write. Branch updates made with the default token do not re-trigger CI or claude-review.
+          # Required for the fix lane and branch updates: a fine-grained PAT for the repo owner (contents, issues and
+          # pull-requests write). Events made with the default token start no workflows; the fallback only labels and comments.
           GH_TOKEN: ${{ secrets.PIPELINE_TOKEN || github.token }}
         run: |
           git remote set-head origin --auto
