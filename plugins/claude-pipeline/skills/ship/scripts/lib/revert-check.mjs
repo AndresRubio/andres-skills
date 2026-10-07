@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { git } from './git.mjs';
@@ -30,12 +30,18 @@ export function revertCheck(cwd, base, { command, timeoutMs = 600_000, maxBuffer
   try {
     // Check the blobs out by SHA (same object database): bytes and file modes survive.
     git(wt, ['checkout', headSha, '--', ...testFiles]);
+    // A fresh worktree has no dependencies, so the test runner would not be found and every check
+    // would "fail". Base and HEAD dependencies usually match; diff-risk flags dependency changes.
+    const deps = path.resolve(cwd, 'node_modules');
+    if (existsSync(deps) && !existsSync(path.join(wt, 'node_modules'))) symlinkSync(deps, path.join(wt, 'node_modules'), 'dir');
     const r = spawnSync('sh', ['-c', command], { cwd: wt, encoding: 'utf8', timeout: timeoutMs, maxBuffer });
     let error = null;
     if (r.error?.code === 'ETIMEDOUT') error = `timed out after ${timeoutMs} ms`;
     else if (r.error) error = `${r.error.code ?? 'error'}: ${r.error.message}`;
     else if (r.signal) error = `killed by ${r.signal}`;
     const exitCode = error === null ? r.status : null;
+    // The shell's own codes: the command was never run, so this says nothing about the tests.
+    if (exitCode === 126 || exitCode === 127) error = `${exitCode}: command not found or not executable`;
     const output = `${r.stdout ?? ''}${r.stderr ?? ''}`;
     return { skipped: false, testFiles, exitCode, failed: error === null && exitCode !== 0, error, tail: output.trim().split('\n').slice(-20).join('\n') };
   } finally {

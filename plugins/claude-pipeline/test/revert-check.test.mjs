@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { changedTestFiles, revertCheck } from '../skills/ship/scripts/lib/revert-check.mjs';
 import { git, makeRepoWithOrigin, writeFiles } from './helpers/git.mjs';
@@ -103,4 +103,26 @@ test('CLI revert-check prints the result', () => {
   assert.equal(r.code, 0, r.stderr);
   assert.equal(r.json().failed, true);
   assert.equal(runCli(['revert-check', '--base', base, '--cwd', root]).code, 2);
+});
+
+test('revertCheck links the checkout\'s node_modules into the temporary worktree, so a local-bin test runner runs', () => {
+  const { root, base } = repoWithChange({ lib: 'new\n', test: 'grep -q new lib.txt\n', extra: { '.gitignore': 'node_modules\n' } });
+  writeFiles(root, { 'node_modules/.bin/mytool': '#!/bin/sh\nsh test/t.sh\n' });
+  chmodSync(path.join(root, 'node_modules/.bin/mytool'), 0o755);
+  const r = revertCheck(root, base, { command: 'PATH="$PWD/node_modules/.bin:$PATH" mytool' });
+  assert.equal(r.error, null, r.tail);
+  assert.equal(r.exitCode, 1, r.tail);
+  assert.equal(r.failed, true);
+  assert.ok(existsSync(path.join(root, 'node_modules/.bin/mytool')), 'removing the worktree leaves the real node_modules alone');
+  assert.equal(git(root, ['worktree', 'list', '--porcelain']).split('worktree ').length - 1, 1);
+});
+
+test('revertCheck reports exit 127 and 126 (command not found or not executable) as errors, not failing tests', () => {
+  const { root, base } = repoWithChange({ lib: 'new\n', test: 'grep -q new lib.txt\n' });
+  const missing = revertCheck(root, base, { command: 'cp-no-such-tool-xyz' });
+  assert.deepEqual([missing.exitCode, missing.failed], [127, false]);
+  assert.equal(missing.error, '127: command not found or not executable');
+  const notExec = revertCheck(root, base, { command: './test/t.sh' });
+  assert.deepEqual([notExec.exitCode, notExec.failed], [126, false]);
+  assert.equal(notExec.error, '126: command not found or not executable');
 });
