@@ -33,3 +33,12 @@ test('the findings template is valid JSON with the documented shape', () => {
   assert.ok(Array.isArray(sample));
   for (const f of sample) for (const k of ['file', 'line', 'severity', 'kind', 'problem', 'impact', 'correction']) assert.ok(k in f, k);
 });
+
+test('review SKILL.md fallback writes verdict.json, uses a detached worktree and passes the test command through a file', () => {
+  const text = read('SKILL.md');
+  const fallback = text.split('## If you cannot finish')[1];
+  assert.ok(fallback.includes('> "$RUN_DIR/verdict.json"'));
+  assert.ok(text.includes('git worktree add --detach'));
+  const procedure = text.split('## Procedure')[1].split('\n## ')[0];
+  assert.ok(procedure.includes('test-cmd.txt'));
+});
