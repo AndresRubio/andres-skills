@@ -42,3 +42,8 @@ test('review SKILL.md fallback writes verdict.json, uses a detached worktree and
   const procedure = text.split('## Procedure')[1].split('\n## ')[0];
   assert.ok(procedure.includes('test-cmd.txt'));
 });
+
+test('review SKILL.md installs dependencies in the worktree during Setup', () => {
+  const setup = read('SKILL.md').split('## Setup')[1].split('\n## ')[0];
+  assert.match(setup, /npm ci/);
+});
