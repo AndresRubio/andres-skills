@@ -1,6 +1,5 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import path from 'node:path';
 import { isTestFile, analyzeDiff, diffRisk } from '../skills/ship/scripts/lib/diff-risk.mjs';
 import { git, makeRepoWithOrigin, writeFiles } from './helpers/git.mjs';
 import { runCli } from './helpers/cli.mjs';
@@ -15,7 +14,7 @@ test('isTestFile recognises common test layouts and nothing else', () => {
 });
 
 const patchFor = (file, removed, added) => [
-  `diff --git a/${file} b/${file}`, `--- a/${file}`, `+++ b/${file}`, '@@ -1,0 +1,0 @@',
+  `diff --git a/${file} b/${file}`, `--- a/${file}`, `+++ b/${file}`, `@@ -1,${removed.length} +1,${added.length} @@`,
   ...removed.map((l) => `-${l}`), ...added.map((l) => `+${l}`),
 ].join('\n');
 
@@ -62,6 +61,71 @@ test('analyzeDiff flags test, lint, typecheck and coverage config, and dependenc
 test('analyzeDiff on a clean change has no hits', () => {
   const r = analyzeDiff({ nameStatus: 'M\tsrc/list.ts\nM\tsrc/list.test.ts', patch: patchFor('src/list.test.ts', [], ['expect(x).toBe(1);']) });
   assert.deepEqual(r.hits, []);
+});
+
+test('parsePatch handles removed lines starting with dash-space correctly', () => {
+  // Removed line looks like "-- expect(...)" which would be `--- expect(...)` in raw diff
+  const patch = [
+    `diff --git a/src/list.test.ts b/src/list.test.ts`,
+    `--- a/src/list.test.ts`,
+    `+++ b/src/list.test.ts`,
+    `@@ -1,3 +1,1 @@`,
+    `-- expect(1).toBe(1);`,
+    `-expect(2).toBe(2);`,
+    `-assert.equal(c, 3);`,
+    `+expect(x).toBe(x);`,
+  ].join('\n');
+  const r = analyzeDiff({ nameStatus: 'M\tsrc/list.test.ts', patch });
+  assert.deepEqual(r.hits.map((h) => h.rule), ['assertions-lost']);
+  assert.match(r.hits[0].detail, /3 removed, 1 added/);
+});
+
+test('parsePatch handles added lines starting with plus-plus correctly', () => {
+  // Added line looks like "++ b/src/x.ts" which would be `+++ b/src/x.ts` in raw diff
+  // but it should be part of the content of src/real.test.ts hunk, not a file header
+  const patch = [
+    `diff --git a/src/real.test.ts b/src/real.test.ts`,
+    `--- a/src/real.test.ts`,
+    `+++ b/src/real.test.ts`,
+    `@@ -1,2 +1,3 @@`,
+    ` it('existing', () => {});`,
+    `-old code`,
+    `++ b/src/x.ts`,
+    `+it.only(1)`,
+  ].join('\n');
+  const r = analyzeDiff({ nameStatus: 'M\tsrc/real.test.ts', patch });
+  const skip = r.hits.filter((h) => h.rule === 'skip-marker');
+  assert.equal(skip.length, 1);
+  assert.equal(skip[0].file, 'src/real.test.ts');
+  assert.match(skip[0].detail, /\.only\(/);
+});
+
+test('diffRisk handles test file with spaces in path', () => {
+  const { root } = makeRepoWithOrigin({ 't/a b.test.ts': 'expect(1).toBe(1);\nexpect(2).toBe(2);\n' });
+  const base = git(root, ['rev-parse', 'HEAD']).trim();
+  git(root, ['checkout', '-b', 'fix']);
+  writeFiles(root, { 't/a b.test.ts': 'expect(1).toBe(1);\n' });
+  git(root, ['add', '-A']);
+  git(root, ['commit', '-m', 'change']);
+  const r = diffRisk(root, base);
+  assert.deepEqual(r.hits.map((h) => h.rule), ['assertions-lost']);
+  assert.equal(r.hits[0].file, 't/a b.test.ts');
+});
+
+test('parsePatch handles deleted test file with /dev/null correctly', () => {
+  // A deleted file has +++ /dev/null, which should not create assertions-lost hits
+  const patch = [
+    `diff --git a/src/old.test.ts b/src/old.test.ts`,
+    `--- a/src/old.test.ts`,
+    `+++ /dev/null`,
+    `@@ -1,2 +0,0 @@`,
+    `-expect(1).toBe(1);`,
+    `-expect(2).toBe(2);`,
+  ].join('\n');
+  const r = analyzeDiff({ nameStatus: 'D\tsrc/old.test.ts', patch });
+  assert.equal(r.hits.length, 1);
+  assert.equal(r.hits[0].rule, 'test-file-removed');
+  assert.equal(r.hits[0].file, 'src/old.test.ts');
 });
 
 test('diffRisk reads git and excludes docs/pipeline', () => {

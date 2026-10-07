@@ -27,18 +27,86 @@ function parseNameStatus(text) {
 }
 
 // Splits a unified diff into { file: { added: [lines], removed: [lines] } }, using the +++ b/ path.
+// Hunk-aware parser that respects @@ line counts to avoid confusing content with headers.
 function parsePatch(text) {
   const files = {};
-  let current = null;
-  for (const line of text.split('\n')) {
-    if (line.startsWith('+++ ')) {
-      const p = line.slice(4).replace(/^b\//, '');
-      current = p === '/dev/null' ? null : (files[p] ??= { added: [], removed: [] });
-    } else if (line.startsWith('--- ') || line.startsWith('diff --git') || line.startsWith('@@') || line.startsWith('index ')) {
-      if (line.startsWith('diff --git')) current = null;
-    } else if (current && line.startsWith('+')) current.added.push(line.slice(1));
-    else if (current && line.startsWith('-')) current.removed.push(line.slice(1));
+  const lines = text.split('\n');
+  let i = 0;
+  let currentFile = null;
+  let removedLeft = 0;
+  let addedLeft = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Start of a new file section
+    if (line.startsWith('diff --git')) {
+      currentFile = null;
+      removedLeft = 0;
+      addedLeft = 0;
+      i++;
+      continue;
+    }
+
+    // File headers (before any @@)
+    if (removedLeft === 0 && addedLeft === 0) {
+      if (line.startsWith('--- ')) {
+        i++;
+        continue;
+      }
+      if (line.startsWith('+++ ')) {
+        // Extract path, strip trailing tab if present, then strip b/ prefix
+        let p = line.slice(4);
+        p = p.replace(/\t.*$/, '');
+        p = p.replace(/^b\//, '');
+        currentFile = p === '/dev/null' ? null : (files[p] ??= { added: [], removed: [] });
+        i++;
+        continue;
+      }
+      if (line.startsWith('index ')) {
+        i++;
+        continue;
+      }
+    }
+
+    // Hunk header: @@ -a[,b] +c[,d] @@
+    if (line.startsWith('@@')) {
+      const match = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+      if (match) {
+        removedLeft = parseInt(match[2] ?? '1', 10);
+        addedLeft = parseInt(match[4] ?? '1', 10);
+      }
+      i++;
+      continue;
+    }
+
+    // Skip "\ No newline at end of file"
+    if (line === '\\ No newline at end of file') {
+      i++;
+      continue;
+    }
+
+    // Hunk body lines
+    if (removedLeft > 0 || addedLeft > 0) {
+      if (currentFile && line.startsWith('-')) {
+        currentFile.removed.push(line.slice(1));
+        removedLeft--;
+      } else if (currentFile && line.startsWith('+')) {
+        currentFile.added.push(line.slice(1));
+        addedLeft--;
+      } else if (line.startsWith(' ')) {
+        // Context line
+        removedLeft--;
+        addedLeft--;
+      }
+      // Ignore other lines (e.g., lines with no prefix at end of hunk)
+      i++;
+      continue;
+    }
+
+    i++;
   }
+
   return files;
 }
 
@@ -76,7 +144,7 @@ export function analyzeDiff({ nameStatus, patch }) {
 
 const EXCLUDE = ['--', '.', ':(exclude)docs/pipeline'];
 export function diffRisk(cwd, base) {
-  const nameStatus = git(cwd, ['diff', '--name-status', `${base}...HEAD`, ...EXCLUDE]);
-  const patch = git(cwd, ['diff', '--unified=0', '--no-color', `${base}...HEAD`, ...EXCLUDE]);
+  const nameStatus = git(cwd, ['-c', 'core.quotePath=false', 'diff', '--name-status', `${base}...HEAD`, ...EXCLUDE]);
+  const patch = git(cwd, ['-c', 'core.quotePath=false', 'diff', '--unified=0', '--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/', `${base}...HEAD`, ...EXCLUDE]);
   return { base, ...analyzeDiff({ nameStatus, patch }) };
 }
