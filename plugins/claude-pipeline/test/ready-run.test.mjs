@@ -195,3 +195,38 @@ test('a stale ready label is removed when the head is no longer green', async ()
   const r = await runReady({ repo: REPO, config, now: NOW }, pending.deps);
   assert.deepEqual([r.actions[0].action, pending.calls], ['wait', [['removeLabel', 'pr', 7, 'ready']]]);
 });
+
+const lockAt = (iso) => normalizeComments([{ id: 50, user: { login: 'claude[bot]' }, author_association: 'NONE', created_at: iso, body: `**[claude-pipeline]** lock · ${iso} · local` }]);
+const revision = verdictComment('revision-needed', [{ file: 'a', line: 1, severity: 'Important', kind: 'unambiguous', problem: 'p', impact: 'i', correction: 'c' }]);
+const reviewRed = () => basePr({ labels: ['ready'], statusCheckRollup: [run('test', 'SUCCESS'), run('claude-review', 'FAILURE')] });
+
+test('a fix, update or needs-decision waits with no writes at all while the linked issue has a fresh claude-working lock', async () => {
+  const working = issue(['claude', 'claude-working'], lockAt('2026-10-07T09:30:00Z'));
+  for (const [pr, comments] of [
+    [reviewRed(), revision],
+    [basePr({ labels: ['ready'], mergeStateStatus: 'BEHIND' }), verdictComment('accepted')],
+    [reviewRed(), verdictComment('human-decision-needed', [judgmentFinding])],
+  ]) {
+    const { deps, calls } = fakeDeps({ prs: [pr], comments, issue: working });
+    const r = await runReady({ repo: REPO, config, now: NOW }, deps);
+    assert.deepEqual(r.actions.map((a) => [a.action, a.reason]), [['wait', 'fix run in progress (claude-working on issue 5)']]);
+    assert.deepEqual(calls, []);
+  }
+});
+
+test('without claude-working, or with a lock older than lockTtlHours, the fix request goes ahead', async () => {
+  for (const iss of [issue(['claude'], lockAt('2026-10-07T09:30:00Z')), issue(['claude', 'claude-working'], lockAt('2026-10-07T05:00:00Z'))]) {
+    const { deps, calls } = fakeDeps({ prs: [reviewRed()], comments: revision, issue: iss });
+    const r = await runReady({ repo: REPO, config, now: NOW }, deps);
+    assert.equal(r.actions[0].action, 'fix');
+    assert.deepEqual(calls, [['removeLabel', 'pr', 7, 'ready'], ['addLabel', 'pr', 7, 'claude-fix']]);
+  }
+});
+
+test('a PR without a linked issue is not gated by any lock', async () => {
+  const { deps, calls } = fakeDeps({ prs: [basePr({ body: 'no link', statusCheckRollup: [run('test', 'SUCCESS'), run('claude-review', 'FAILURE')] })], comments: revision });
+  deps.fetchIssue = () => { throw new Error('should not fetch'); };
+  const r = await runReady({ repo: REPO, config, now: NOW }, deps);
+  assert.equal(r.actions[0].action, 'fix');
+  assert.deepEqual(calls, [['addLabel', 'pr', 7, 'claude-fix']]);
+});

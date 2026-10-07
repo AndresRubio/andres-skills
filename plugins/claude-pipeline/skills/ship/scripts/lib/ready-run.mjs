@@ -2,6 +2,9 @@ import { ghJson, ghText, fetchPr, fetchPrComments, fetchIssue, postPrComment, po
 import { latestVerdict } from './verdict.mjs';
 import { decideReady, readyReport, issueNumberFromBody } from './ready.mjs';
 import { formatMarker, defaultRun } from './marker.mjs';
+import { lockStatus } from './lock.mjs';
+
+const LOCK_GATED = new Set(['fix', 'update', 'needs-decision']);
 
 export function realDeps(repo) {
   return {
@@ -53,19 +56,31 @@ export async function runReady({ repo, config, now = new Date(), dryRun = false,
       const verdict = latestVerdict(prComments, pr.headRefOid);
       const decision = decideReady({ pr, config, verdict });
       if (decision.action === 'skip') continue;
+      const issueNumber = issueNumberFromBody(pr.body);
+      let issue;
+      const linkedIssue = () => (issue ??= deps.fetchIssue(repo, issueNumber));
+      // A run holding the issue's lock (a fix run, or the ship run still reporting) owns the branch:
+      // asking for another fix, updating the branch or posting a decision now would race it. A lock
+      // older than lockTtlHours is stale and no longer holds anything back. No write at all here.
+      if (LOCK_GATED.has(decision.action) && issueNumber !== null) {
+        const lock = lockStatus(linkedIssue(), { ttlHours: config.lockTtlHours, now });
+        if (lock.locked && !lock.stale) {
+          actions.push({ pr: pr.number, action: 'wait', reason: `fix run in progress (claude-working on issue ${issueNumber})`, done });
+          continue;
+        }
+      }
       if (decision.removeReady) act('remove label ready', () => deps.removeLabel('pr', pr.number, 'ready'));
       if (decision.action === 'fix') {
         if (!pr.labels.includes('claude-fix')) act('add label claude-fix', () => deps.addLabel('pr', pr.number, 'claude-fix'));
       } else if (decision.action === 'update') {
         act('update branch', () => deps.updateBranch(pr.number));
       } else if (decision.action === 'needs-decision') {
-        const issueNumber = issueNumberFromBody(pr.body);
         const marker = formatMarker('blocked', { now, run });
         const body = blockedBody({ pr, findings: decision.findings ?? [], reason: decision.reason, marker });
         if (issueNumber === null) {
           if (!alreadyMarkedForHead(prComments, 'blocked', sha7)) act(`comment on PR ${pr.number}`, () => deps.comment('pr', pr.number, body));
         } else {
-          const issue = deps.fetchIssue(repo, issueNumber);
+          const issue = linkedIssue();
           if (!alreadyMarkedForHead(issue.comments, 'blocked', sha7)) act(`comment on issue ${issueNumber}`, () => deps.comment('issue', issueNumber, body));
           if (!issue.labels.includes('needs-decision')) act('add label needs-decision', () => deps.addLabel('issue', issueNumber, 'needs-decision'));
         }
@@ -74,7 +89,6 @@ export async function runReady({ repo, config, now = new Date(), dryRun = false,
         const marker = formatMarker('ready', { now, run });
         const report = readyReport({ pr, config, verdict, changedFiles, marker, runSummary: null });
         if (!alreadyMarkedForHead(prComments, 'ready', sha7)) act(`comment on PR ${pr.number}`, () => deps.comment('pr', pr.number, report));
-        const issueNumber = issueNumberFromBody(pr.body);
         if (issueNumber !== null) act(`comment on issue ${issueNumber}`, () => deps.comment('issue', issueNumber, report));
         act('add label ready', () => deps.addLabel('pr', pr.number, 'ready'));
         actions.push({ pr: pr.number, action: 'ready', reason: null, done });
