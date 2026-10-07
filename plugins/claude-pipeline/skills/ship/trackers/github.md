@@ -26,6 +26,10 @@ Takes a marker kind and a body.
 
 `gh issue edit "$NUMBER" --repo "$REPO" --remove-label "<label>[,<label>…]"`
 
+## remove-pr-labels
+
+`gh pr edit <PR> --repo "$REPO" --remove-label "<label>[,<label>…]"`
+
 ## set-in-progress
 
 GitHub issues have no status field; the `claude-working` label shows the issue is in progress. Nothing to do.

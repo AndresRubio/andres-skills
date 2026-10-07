@@ -18,7 +18,7 @@ export function markdownFiles(dir = SKILL_DIR) {
   });
 }
 
-export const TRACKER_OPS = ['read-issue', 'post-comment', 'add-labels', 'remove-labels', 'set-in-progress', 'create-issue', 'create-sub-issue', 'add-blocked-by', 'active-runs', 'create-pr'];
+export const TRACKER_OPS = ['read-issue', 'post-comment', 'add-labels', 'remove-labels', 'set-in-progress', 'create-issue', 'create-sub-issue', 'add-blocked-by', 'active-runs', 'create-pr', 'remove-pr-labels'];
 
 test('every node "$PIPELINE" <command> reference names a real command', () => {
   for (const file of markdownFiles()) {
@@ -418,10 +418,10 @@ test('fix mode takes the lock like stage 0 steps 10 and 12, and posts a report o
   const fix = read('stages/fix.md');
   assert.match(fix, /stage 0 steps 10 and 12/);
   assert.match(fix, /without step 11's recount/);
-  const step11 = step(section(fix, 'Steps'), 11);
+  const step11 = step(section(fix, 'Steps'), 12);
   const reportAt = step11.indexOf('kind `report`');
   const releaseAt = step11.indexOf('tracker:remove-labels` `claude-working`');
-  assert.ok(reportAt >= 0 && releaseAt > reportAt, `fix.md step 11 must post a report before removing claude-working:\n${step11}`);
+  assert.ok(reportAt >= 0 && releaseAt > reportAt, `fix.md step 12 must post a report before removing claude-working:\n${step11}`);
   assert.match(step11, /Fix run finished on PR #<PR>\./);
 });
 
@@ -583,4 +583,50 @@ test('README says the interactive wait question comes before the fork questions 
   const override = readme.split('\n').find((l) => l.startsWith('- **Overriding it.**')) ?? '';
   assert.match(override, /before/);
   assert.doesNotMatch(override, /after fork questions are answered|told to proceed/);
+});
+
+// --- Task 10: Phase 2a stage edits (D15, D18) ---
+
+test('Phase 2a: evidence template has the revert-check and diff-risk sections', () => {
+  const h = headings(read('templates/evidence.md'));
+  for (const s of ['Revert check', 'Diff risk']) assert.ok(h.includes(s), `templates/evidence.md lacks ## ${s}`);
+});
+
+test('Phase 2a: stage 7 runs the revert check and records it', () => {
+  const verify = read('stages/07-verify.md');
+  assert.match(verify, /node "\$PIPELINE" revert-check --base "\$BASE_SHA" --command/);
+  assert.match(verify, /Revert check/);
+});
+
+test('Phase 2a: stage 8 runs diff-risk and classifies skip markers as Critical confessions', () => {
+  const review = read('stages/08-review.md');
+  assert.match(review, /node "\$PIPELINE" diff-risk --base "\$BASE_SHA"/);
+  assert.match(review, /Diff risk/);
+  assert.match(review, /skip-marker/);
+});
+
+test('Phase 2a: stage 9 writes intent and diff risk into the PR body', () => {
+  const finish = read('stages/09-finish.md');
+  for (const s of ['How it works', 'Alternatives rejected', 'Diff risk']) assert.match(finish, new RegExp(s), s);
+});
+
+test('Phase 2a: stage 10 tells the owner about pipeline-ready, not a Phase 2 merge gate', () => {
+  const report = read('stages/10-report.md');
+  assert.match(report, /pipeline-ready/);
+  assert.doesNotMatch(report, /merge gate arrives in Phase 2/);
+});
+
+test('Phase 2a: fix mode removes claude-fix first, reads the verdict, then the owner reply, then review comments', () => {
+  const fix = read('stages/fix.md');
+  const steps = fix.split('## Steps')[1].split('\n## ')[0];
+  const removeAt = steps.indexOf('`tracker:remove-pr-labels` `claude-fix`');
+  const verdictAt = steps.indexOf('node "$PIPELINE" verdict-latest');
+  const replyAt = steps.indexOf("owner's reply");
+  const commentsAt = steps.indexOf('Review comments');
+  assert.ok(removeAt > 0 && verdictAt > removeAt && replyAt > verdictAt && commentsAt > replyAt, 'order: remove label, verdict, reply, comments');
+  assert.match(fix, /human-decision-needed/);
+});
+
+test('Phase 2a: the GitHub adapter defines remove-pr-labels', () => {
+  assert.ok(headings(read('trackers/github.md')).includes('remove-pr-labels'));
 });

@@ -17,6 +17,14 @@ One line per file: `screenshots/<file>` — what it shows — which AC it demons
 
 Every place the implementation differs from spec.md, and why. Or "None."
 
+## Revert check
+
+Result of `revert-check`: the test files from HEAD against the base's source. "Skipped: <reason>"; or "Revert check could not run: <error>" when the check itself failed to run (that is not a pass); or the test files, the exit code and whether they failed (they should).
+
+## Diff risk
+
+Output of `diff-risk`: one line per hit as `rule: file — detail`, or "None."
+
 ## Self-review
 
 ### Standards

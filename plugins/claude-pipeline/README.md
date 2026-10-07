@@ -8,7 +8,7 @@ Design: `docs/superpowers/specs/2026-09-24-claude-pipeline-design.md`.
 - Claude Code with the `superpowers` and `mattpocock-skills` plugins.
 - The `confession-box` skill in `~/.claude/skills` (optional; stage 8 has a fallback).
 - `gh` logged in, git, Node 22+, Chrome/Chromium for screenshots.
-- The target repo has `.claude/pipeline.json` on its default branch and the 7 labels (`claude`, `claude-go`, `needs-local`, `needs-decision`, `claude-working`, `ship-it`, `claude-fix`). `sandbox/setup-sandbox.sh` shows how they are created.
+- The target repo has `.claude/pipeline.json` on its default branch and the 7 labels (`claude`, `claude-go`, `needs-local`, `needs-decision`, `claude-working`, `claude-fix`, `ready`). `/claude-pipeline:setup` installs them; `sandbox/setup-sandbox.sh` shows how they are created for the sandbox repos.
 
 ## Use
 
@@ -24,7 +24,25 @@ Then, in the target repo:
 
 Worktrees live at `~/.claude-pipeline/worktrees/<repo>/<KEY>`. Environment variables: `CLAUDE_PIPELINE_HOME`, `CLAUDE_PIPELINE_LANE`, `CLAUDE_PIPELINE_CHROME`.
 
-Phase 1 ends at an open PR — you merge it yourself.
+A run ends at an open PR. With the Phase 2a workflows installed (`/claude-pipeline:setup`), `claude-review` posts a verdict, `pipeline-ready` keeps the branch current and labels the PR `ready` when it is yours to merge. Nothing merges on its own.
+
+## Workflows
+
+`/claude-pipeline:setup` installs three GitHub Actions workflows from `templates/github/` into the target repo:
+
+- `claude-ship` — the GitHub lane: routes labeled issues, comments and PR labels to a ship or fix run.
+- `claude-review` — reviews each `claude/*` PR and posts a verdict for its head commit.
+- `pipeline-ready` — deterministic, no AI: keeps the branch current, requests a fix when needed, and labels the PR `ready` once CI is green, the verdict is accepted and the branch is current. It never merges.
+
+The one secret they need is `CLAUDE_CODE_OAUTH_TOKEN`.
+
+## Review
+
+`/claude-pipeline:review <PR> --head <sha>` reviews a pipeline PR at that head commit and posts one of three verdicts:
+
+- `accepted` — nothing blocks the merge.
+- `revision-needed` — findings with file, line, problem and correction; a fix run works through them.
+- `human-decision-needed` — judgment findings that need the owner's reply before a fix run can act.
 
 Q10: the short `/ship` alias is unverified; use `/claude-pipeline:ship`.
 
