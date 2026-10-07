@@ -1,0 +1,46 @@
+# claude-pipeline: readiness gate (spec §7.1, D17). Deterministic: no AI, no merge token, never merges.
+name: pipeline-ready
+on:
+  workflow_run:
+    workflows: {{CI_WORKFLOWS_WITH_REVIEW}}
+    types: [completed]
+  pull_request:
+    types: [labeled, unlabeled, synchronize, reopened, closed]
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: read
+
+concurrency:
+  group: pipeline-ready-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  pipeline-ready:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: {{PLUGIN_REPO_SLUG}}
+          ref: {{PLUGIN_REF}}
+          path: .claude-pipeline-plugin
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Decide and act
+        env:
+          # Optional: a fine-grained PAT or GitHub App token with contents:write and pull-requests:write. Branch updates made with the default token do not re-trigger CI or claude-review.
+          GH_TOKEN: ${{ secrets.PIPELINE_TOKEN || github.token }}
+        run: |
+          git remote set-head origin --auto
+          node .claude-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs config --repo-root . > "$RUNNER_TEMP/config.json"
+          node .claude-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs ready --repo ${{ github.repository }} --config-file "$RUNNER_TEMP/config.json"

@@ -18,6 +18,7 @@ import { diffRisk } from './diff-risk.mjs';
 import { revertCheck } from './revert-check.mjs';
 import { runReady } from './ready-run.mjs';
 import { laneTarget } from './lane.mjs';
+import { defaultVars, installFiles } from './setup.mjs';
 
 export class UsageError extends Error {}
 
@@ -136,6 +137,15 @@ export const COMMANDS = {
     const v = parse(argv, { 'repo-root': { type: 'string' }, key: { type: 'string' } });
     required(v, 'repo-root', 'key');
     return { path: worktreePath(v['repo-root'], v.key) };
+  },
+  setup: (argv) => {
+    const v = parse(argv, { 'repo-root': { type: 'string' }, 'plugin-repo': { type: 'string' }, 'plugin-ref': { type: 'string' }, 'plugin-subdir': { type: 'string' }, marketplace: { type: 'string' }, 'ci-workflows': { type: 'string' }, force: { type: 'boolean' } });
+    required(v, 'repo-root');
+    const vars = defaultVars({
+      ciWorkflows: v['ci-workflows'] ? v['ci-workflows'].split(',').map((s) => s.trim()).filter(Boolean) : undefined,
+      pluginRepo: v['plugin-repo'], pluginRef: v['plugin-ref'], pluginSubdir: v['plugin-subdir'], marketplace: v.marketplace,
+    });
+    return { vars, ...installFiles(v['repo-root'], vars, { force: Boolean(v.force) }) };
   },
   config: (argv) => {
     const v = parse(argv, { 'repo-root': { type: 'string' }, ref: { type: 'string' } });

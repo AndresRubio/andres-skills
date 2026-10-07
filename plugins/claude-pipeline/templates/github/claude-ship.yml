@@ -1,0 +1,59 @@
+# claude-pipeline: GitHub lane (spec §6.2). Installed by /claude-pipeline:setup; pinned to {{PLUGIN_REF}}.
+name: claude-ship
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  id-token: write
+
+concurrency:
+  group: ship-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  ship:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: {{PLUGIN_REPO_SLUG}}
+          ref: {{PLUGIN_REF}}
+          path: .claude-pipeline-plugin
+      - id: target
+        name: Route the event
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          out=$(node .claude-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs lane-target --event-file "$GITHUB_EVENT_PATH" --event-name "${{ github.event_name }}" --repo "${{ github.repository }}")
+          echo "$out"
+          echo "run=$(echo "$out" | node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(0,"utf8")).run))')" >> "$GITHUB_OUTPUT"
+          echo "prompt=$(echo "$out" | node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).prompt || "")')" >> "$GITHUB_OUTPUT"
+      - name: Run the pipeline
+        if: steps.target.outputs.run == 'true'
+        uses: anthropics/claude-code-action@v1
+        env:
+          CLAUDE_PIPELINE_LANE: github
+          CLAUDE_PIPELINE_GUARD: '1'
+          CI: 'true'
+          CLAUDE_PIPELINE_HOME: ${{ runner.temp }}/claude-pipeline
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: "claude[bot]"
+          plugin_marketplaces: {{PLUGIN_REPO}}
+          plugins: claude-pipeline@{{MARKETPLACE}}
+          prompt: ${{ steps.target.outputs.prompt }}
+          claude_args: |
+            --max-budget-usd 25
+            --disallowedTools Bash(gh pr merge:*),Bash(gh pr review:*),Bash(git push --force:*),Bash(git push -f:*)

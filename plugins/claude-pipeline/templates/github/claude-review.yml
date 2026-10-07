@@ -1,0 +1,59 @@
+# claude-pipeline: PR reviewer (spec §7.4, D18). The job and check are both named claude-review.
+name: claude-review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  claude-review:
+    name: claude-review
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.draft == false && startsWith(github.event.pull_request.head.ref, 'claude/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/checkout@v4
+        with:
+          repository: {{PLUGIN_REPO_SLUG}}
+          ref: {{PLUGIN_REF}}
+          path: .claude-pipeline-plugin
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install the repo's dependencies for the evidence re-run
+        run: if [ -f package-lock.json ]; then npm ci; fi
+      - name: Review
+        uses: anthropics/claude-code-action@v1
+        env:
+          CLAUDE_PIPELINE_LANE: github
+          CLAUDE_PIPELINE_GUARD: '1'
+          CI: 'true'
+          CLAUDE_PIPELINE_HOME: ${{ runner.temp }}/claude-pipeline
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: "claude[bot]"
+          plugin_marketplaces: {{PLUGIN_REPO}}
+          plugins: claude-pipeline@{{MARKETPLACE}}
+          prompt: "/claude-pipeline:review ${{ github.event.pull_request.number }} --head ${{ github.event.pull_request.head.sha }}"
+          claude_args: |
+            --model claude-fable-5-1
+            --max-budget-usd 15
+            --disallowedTools Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh pr edit:*),Bash(git push:*)
+      - name: Verdict → check status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .claude-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs verdict-status --repo "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --head "${{ github.event.pull_request.head.sha }}" --post-missing
