@@ -1,9 +1,13 @@
 import { test } from 'node:test';
+import { writeFileSync } from 'node:fs';
+import path from 'node:path';
 import assert from 'node:assert/strict';
 import { runReady } from '../skills/ship/scripts/lib/ready-run.mjs';
 import { formatVerdictBody } from '../skills/ship/scripts/lib/verdict.mjs';
 import { validateConfig } from '../skills/ship/scripts/lib/config.mjs';
-import { normalizeComments } from '../skills/ship/scripts/lib/github.mjs';
+import { normalizeComments, PR_FIELDS } from '../skills/ship/scripts/lib/github.mjs';
+import { runCli } from './helpers/cli.mjs';
+import { fakeGh } from './helpers/fake-gh.mjs';
 
 const REPO = 'o/r';
 const HEAD = 'a'.repeat(40);
@@ -45,9 +49,9 @@ test('a green, accepted, current PR gets the ready label and reports on PR and i
   const r = await runReady({ repo: REPO, config, now: NOW }, deps);
   assert.deepEqual(r.actions.map((a) => [a.pr, a.action]), [[7, 'ready']]);
   assert.deepEqual(calls, [
-    ['addLabel', 'pr', 7, 'ready'],
     ['comment', 'pr', 7, '**[claude-pipeline]** ready · 2026-10-07T10:00:00Z · local'],
     ['comment', 'issue', 5, '**[claude-pipeline]** ready · 2026-10-07T10:00:00Z · local'],
+    ['addLabel', 'pr', 7, 'ready'],
   ]);
 });
 
@@ -109,5 +113,72 @@ test('red CI asks for a fix; pending waits; drafts, forks and other branches are
 test('dry run decides without acting', async () => {
   const { deps, calls } = fakeDeps({ prs: [basePr()], comments: verdictComment('accepted') });
   const r = await runReady({ repo: REPO, config, now: NOW, dryRun: true }, deps);
-  assert.deepEqual([r.actions[0].action, r.actions[0].done, calls], ['ready', ['would add label ready', 'would comment on PR 7', 'would comment on issue 5'], []]);
+  assert.deepEqual([r.actions[0].action, r.actions[0].done, calls], ['ready', ['would comment on PR 7', 'would comment on issue 5', 'would add label ready'], []]);
+});
+
+const judgmentFinding = { file: 'src/list.ts', line: 40, severity: 'Critical', kind: 'judgment', problem: 'archive deletes', impact: 'data loss', correction: 'decide' };
+const asComment = (id, body) => normalizeComments([{ id, user: { login: 'github-actions[bot]' }, author_association: 'NONE', created_at: '2026-10-07T10:00:00Z', body }]);
+
+test('without a linked issue the blocked comment goes on the PR once per head', async () => {
+  const pr = basePr({ body: 'no link', statusCheckRollup: [run('test', 'SUCCESS'), run('claude-review', 'FAILURE')] });
+  const verdicts = verdictComment('human-decision-needed', [judgmentFinding]);
+  const first = fakeDeps({ prs: [pr], comments: verdicts });
+  await runReady({ repo: REPO, config, now: NOW }, first.deps);
+  assert.deepEqual(first.calls, [['comment', 'pr', 7, '**[claude-pipeline]** blocked · 2026-10-07T10:00:00Z · local']]);
+  const posted = asComment(9, `**[claude-pipeline]** blocked · 2026-10-07T10:00:00Z · local\n\nReview verdict on PR #7: human decision needed at head \`${HEAD.slice(0, 7)}\`.`);
+  const second = fakeDeps({ prs: [pr], comments: [...verdicts, ...posted] });
+  await runReady({ repo: REPO, config, now: NOW }, second.deps);
+  assert.deepEqual(second.calls, []);
+});
+
+test('a missed needs-decision label is repaired even when the blocked comment already exists', async () => {
+  const pr = basePr({ statusCheckRollup: [run('test', 'SUCCESS'), run('claude-review', 'FAILURE')] });
+  const posted = asComment(9, `**[claude-pipeline]** blocked · 2026-10-07T10:00:00Z · local\n\nReview verdict on PR #7: human decision needed at head \`${HEAD.slice(0, 7)}\`.`);
+  const { deps, calls } = fakeDeps({ prs: [pr], comments: verdictComment('human-decision-needed', [judgmentFinding]), issue: issue(['claude'], posted) });
+  await runReady({ repo: REPO, config, now: NOW }, deps);
+  assert.deepEqual(calls, [['addLabel', 'issue', 5, 'needs-decision']]);
+});
+
+test('a ready report already on the PR is not posted twice, and the label is still added', async () => {
+  const report = asComment(9, `**[claude-pipeline]** ready · 2026-10-07T09:30:00Z · local\n\n**Ready to merge** at head \`${HEAD.slice(0, 7)}\`.`);
+  const { deps, calls } = fakeDeps({ prs: [basePr()], comments: [...verdictComment('accepted'), ...report] });
+  await runReady({ repo: REPO, config, now: NOW }, deps);
+  assert.deepEqual(calls, [
+    ['comment', 'issue', 5, '**[claude-pipeline]** ready · 2026-10-07T10:00:00Z · local'],
+    ['addLabel', 'pr', 7, 'ready'],
+  ]);
+});
+
+test('an error on one PR is recorded and the queue continues', async () => {
+  const bad = basePr({ body: 'Fixes #999', statusCheckRollup: [run('test', 'SUCCESS'), run('claude-review', 'FAILURE')] });
+  const good = basePr({ number: 8, headRefName: 'claude/6-y', body: 'Fixes #6' });
+  const { deps, calls } = fakeDeps({ prs: [bad, good], comments: verdictComment('human-decision-needed', [judgmentFinding]) });
+  deps.fetchIssue = (r, n) => { if (n === 999) throw new Error('issue 999 not found'); return issue(); };
+  deps.fetchPrComments = (r, n) => (n === 8 ? verdictComment('accepted') : verdictComment('human-decision-needed', [judgmentFinding]));
+  const r = await runReady({ repo: REPO, config, now: NOW }, deps);
+  assert.deepEqual(r.actions.map((a) => [a.pr, a.action]), [[7, 'error'], [8, 'ready']]);
+  assert.equal(r.actions[0].reason, 'issue 999 not found');
+  assert.deepEqual(calls.map((c) => c.slice(0, 3)), [['comment', 'pr', 8], ['comment', 'issue', 6], ['addLabel', 'pr', 8]]);
+});
+
+test('the CLI prints the result and exits 1 when any PR errored', () => {
+  const dir = fakeGh({
+    [`pr list --repo ${REPO} --state open --limit 500 --json number,headRefName,isCrossRepository,isDraft`]: [{ number: 7, headRefName: 'claude/5-x', isCrossRepository: false, isDraft: false }],
+    [`pr view 7 --repo ${REPO} --json ${PR_FIELDS}`]: { __ghError: 'boom' },
+  });
+  const cfg = path.join(dir, 'config.json');
+  writeFileSync(cfg, JSON.stringify({ tracker: { type: 'github' } }));
+  const r = runCli(['ready', '--repo', REPO, '--config-file', cfg, '--dry-run'], { env: { PATH: `${dir}:${process.env.PATH}` } });
+  assert.equal(r.code, 1, r.stderr);
+  const out = r.json();
+  assert.deepEqual(out.actions.map((a) => [a.pr, a.action]), [[7, 'error']]);
+});
+
+test('a stale ready label is removed when the head is no longer green', async () => {
+  const red = fakeDeps({ prs: [basePr({ labels: ['ready'], statusCheckRollup: [run('test', 'FAILURE'), run('claude-review', 'SUCCESS')] })], comments: verdictComment('accepted') });
+  await runReady({ repo: REPO, config, now: NOW }, red.deps);
+  assert.deepEqual(red.calls, [['removeLabel', 'pr', 7, 'ready'], ['addLabel', 'pr', 7, 'claude-fix']]);
+  const pending = fakeDeps({ prs: [basePr({ labels: ['ready'], statusCheckRollup: [run('test', 'SUCCESS'), { __typename: 'CheckRun', name: 'claude-review', status: 'IN_PROGRESS', conclusion: null }] })], comments: [] });
+  const r = await runReady({ repo: REPO, config, now: NOW }, pending.deps);
+  assert.deepEqual([r.actions[0].action, pending.calls], ['wait', [['removeLabel', 'pr', 7, 'ready']]]);
 });

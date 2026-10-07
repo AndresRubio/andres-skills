@@ -142,3 +142,15 @@ test('readyReport lists checks, flags, diff-risk hits and links, and never a gat
   const quiet = readyReport({ pr: pr({ url: 'https://github.com/o/r/pull/7' }), config, verdict: accepted, changedFiles: ['src/list.ts'], marker, runSummary: null });
   assert.match(quiet, /## Review with care\nNothing flagged\./);
 });
+
+test('decideReady asks for the ready label to be removed on every non-green decision when the PR carries it', () => {
+  const labelled = (over = {}) => pr({ labels: ['ready'], ...over });
+  const failedReview = labelled({ statusCheckRollup: [run('test', 'SUCCESS'), run('claude-review', 'FAILURE')] });
+  assert.equal(decideReady({ pr: failedReview, config, verdict: null }).removeReady, true);
+  assert.equal(decideReady({ pr: failedReview, config, verdict: { ...accepted, verdict: 'human-decision-needed', findings: [judgment] } }).removeReady, true);
+  assert.equal(decideReady({ pr: failedReview, config, verdict: { ...accepted, verdict: 'revision-needed' } }).removeReady, true);
+  assert.equal(decideReady({ pr: labelled({ statusCheckRollup: [run('test', 'FAILURE'), run('claude-review', 'SUCCESS')] }), config, verdict: accepted }).removeReady, true);
+  assert.equal(decideReady({ pr: labelled({ statusCheckRollup: [run('test', 'SUCCESS'), run('claude-review', null, 'QUEUED')] }), config, verdict: accepted }).removeReady, true);
+  assert.equal(decideReady({ pr: labelled(), config, verdict: accepted }).removeReady, undefined);
+  assert.equal(decideReady({ pr: pr({ statusCheckRollup: [run('test', 'FAILURE'), run('claude-review', 'SUCCESS')] }), config, verdict: accepted }).removeReady, undefined);
+});

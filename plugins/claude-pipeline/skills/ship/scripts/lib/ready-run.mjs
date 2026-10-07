@@ -33,8 +33,8 @@ export function blockedBody({ pr, findings, reason, marker }) {
   return parts.join('\n');
 }
 
-function alreadyBlockedForHead(issue, sha7) {
-  return issue.comments.some((c) => c.pipeline && c.marker?.kind === 'blocked' && c.body.includes(`head \`${sha7}\``));
+export function alreadyMarkedForHead(comments, kind, sha7) {
+  return comments.some((c) => c.pipeline && c.marker?.kind === kind && c.body.includes(`head \`${sha7}\``));
 }
 
 export async function runReady({ repo, config, now = new Date(), dryRun = false, run = defaultRun() }, deps = realDeps(repo)) {
@@ -44,42 +44,46 @@ export async function runReady({ repo, config, now = new Date(), dryRun = false,
     .sort((a, b) => a.number - b.number);
   const actions = [];
   for (const listed of prs) {
-    const pr = deps.fetchPr(repo, listed.number);
-    const verdict = latestVerdict(deps.fetchPrComments(repo, pr.number), pr.headRefOid);
-    const decision = decideReady({ pr, config, verdict });
     const done = [];
     const act = (label, fn) => { done.push(dryRun ? `would ${label}` : label); if (!dryRun) fn(); };
-    if (decision.action === 'skip') continue;
-    if (decision.removeReady) act('remove label ready', () => deps.removeLabel('pr', pr.number, 'ready'));
-    if (decision.action === 'fix') {
-      if (!pr.labels.includes('claude-fix')) act('add label claude-fix', () => deps.addLabel('pr', pr.number, 'claude-fix'));
-    } else if (decision.action === 'update') {
-      act('update branch', () => deps.updateBranch(pr.number));
-    } else if (decision.action === 'needs-decision') {
-      const issueNumber = issueNumberFromBody(pr.body);
-      const marker = formatMarker('blocked', { now, run });
-      const body = blockedBody({ pr, findings: decision.findings ?? [], reason: decision.reason, marker });
-      if (issueNumber === null) {
-        act(`comment on PR ${pr.number}`, () => deps.comment('pr', pr.number, body));
-      } else {
-        const issue = deps.fetchIssue(repo, issueNumber);
-        if (!alreadyBlockedForHead(issue, pr.headRefOid.slice(0, 7))) {
-          act(`comment on issue ${issueNumber}`, () => deps.comment('issue', issueNumber, body));
+    try {
+      const pr = deps.fetchPr(repo, listed.number);
+      const prComments = deps.fetchPrComments(repo, pr.number);
+      const sha7 = pr.headRefOid.slice(0, 7);
+      const verdict = latestVerdict(prComments, pr.headRefOid);
+      const decision = decideReady({ pr, config, verdict });
+      if (decision.action === 'skip') continue;
+      if (decision.removeReady) act('remove label ready', () => deps.removeLabel('pr', pr.number, 'ready'));
+      if (decision.action === 'fix') {
+        if (!pr.labels.includes('claude-fix')) act('add label claude-fix', () => deps.addLabel('pr', pr.number, 'claude-fix'));
+      } else if (decision.action === 'update') {
+        act('update branch', () => deps.updateBranch(pr.number));
+      } else if (decision.action === 'needs-decision') {
+        const issueNumber = issueNumberFromBody(pr.body);
+        const marker = formatMarker('blocked', { now, run });
+        const body = blockedBody({ pr, findings: decision.findings ?? [], reason: decision.reason, marker });
+        if (issueNumber === null) {
+          if (!alreadyMarkedForHead(prComments, 'blocked', sha7)) act(`comment on PR ${pr.number}`, () => deps.comment('pr', pr.number, body));
+        } else {
+          const issue = deps.fetchIssue(repo, issueNumber);
+          if (!alreadyMarkedForHead(issue.comments, 'blocked', sha7)) act(`comment on issue ${issueNumber}`, () => deps.comment('issue', issueNumber, body));
           if (!issue.labels.includes('needs-decision')) act('add label needs-decision', () => deps.addLabel('issue', issueNumber, 'needs-decision'));
         }
+      } else if (decision.action === 'ready') {
+        const changedFiles = deps.changedFiles(repo, pr.number);
+        const marker = formatMarker('ready', { now, run });
+        const report = readyReport({ pr, config, verdict, changedFiles, marker, runSummary: null });
+        if (!alreadyMarkedForHead(prComments, 'ready', sha7)) act(`comment on PR ${pr.number}`, () => deps.comment('pr', pr.number, report));
+        const issueNumber = issueNumberFromBody(pr.body);
+        if (issueNumber !== null) act(`comment on issue ${issueNumber}`, () => deps.comment('issue', issueNumber, report));
+        act('add label ready', () => deps.addLabel('pr', pr.number, 'ready'));
+        actions.push({ pr: pr.number, action: 'ready', reason: null, done });
+        break;
       }
-    } else if (decision.action === 'ready') {
-      const changedFiles = deps.changedFiles(repo, pr.number);
-      const marker = formatMarker('ready', { now, run });
-      const report = readyReport({ pr, config, verdict, changedFiles, marker, runSummary: null });
-      act('add label ready', () => deps.addLabel('pr', pr.number, 'ready'));
-      act(`comment on PR ${pr.number}`, () => deps.comment('pr', pr.number, report));
-      const issueNumber = issueNumberFromBody(pr.body);
-      if (issueNumber !== null) act(`comment on issue ${issueNumber}`, () => deps.comment('issue', issueNumber, report));
-      actions.push({ pr: pr.number, action: 'ready', reason: null, done });
-      break;
+      actions.push({ pr: pr.number, action: decision.action, reason: decision.reason ?? null, done });
+    } catch (err) {
+      actions.push({ pr: listed.number, action: 'error', reason: err.message, done });
     }
-    actions.push({ pr: pr.number, action: decision.action, reason: decision.reason ?? null, done });
   }
   return { actions };
 }

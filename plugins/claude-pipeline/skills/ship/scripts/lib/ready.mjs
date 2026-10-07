@@ -39,18 +39,20 @@ export function decideReady({ pr, config, verdict }) {
     return { action: 'skip', reason: 'not a pipeline branch' };
   }
   const hasReady = pr.labels.includes('ready');
+  // A stale label never survives a head that is no longer verified green (spec 6.3).
+  const stale = hasReady ? { removeReady: true } : {};
   const review = checkState(pr.statusCheckRollup, REVIEW_CHECK);
   if (review === 'failure' || (review === 'success' && verdict?.verdict !== 'accepted')) {
-    if (!verdict) return { action: 'needs-decision', reason: 'no verdict comment for this head SHA', findings: [] };
-    if (verdict.verdict === 'human-decision-needed') return { action: 'needs-decision', reason: 'review: human decision needed', findings: verdict.findings.filter((f) => f.kind === 'judgment') };
-    return { action: 'fix', reason: 'review' };
+    if (!verdict) return { action: 'needs-decision', reason: 'no verdict comment for this head SHA', findings: [], ...stale };
+    if (verdict.verdict === 'human-decision-needed') return { action: 'needs-decision', reason: 'review: human decision needed', findings: verdict.findings.filter((f) => f.kind === 'judgment'), ...stale };
+    return { action: 'fix', reason: 'review', ...stale };
   }
   const failing = config.ciChecks.filter((name) => checkState(pr.statusCheckRollup, name) === 'failure');
-  if (failing.length) return { action: 'fix', reason: 'ci', failing };
+  if (failing.length) return { action: 'fix', reason: 'ci', failing, ...stale };
   const notDone = [...config.ciChecks, REVIEW_CHECK].filter((name) => checkState(pr.statusCheckRollup, name) !== 'success');
-  if (notDone.length) return { action: 'wait', reason: `not success yet: ${notDone.join(', ')}` };
-  if (pr.mergeStateStatus === 'BEHIND') return { action: 'update', reason: 'behind base', removeReady: hasReady };
-  if (pr.mergeable === 'CONFLICTING') return { action: 'fix', reason: 'conflict', removeReady: hasReady };
+  if (notDone.length) return { action: 'wait', reason: `not success yet: ${notDone.join(', ')}`, ...stale };
+  if (pr.mergeStateStatus === 'BEHIND') return { action: 'update', reason: 'behind base', ...stale };
+  if (pr.mergeable === 'CONFLICTING') return { action: 'fix', reason: 'conflict', ...stale };
   if (hasReady) return { action: 'already-ready' };
   return { action: 'ready' };
 }

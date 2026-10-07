@@ -266,7 +266,9 @@ export const COMMANDS = {
     const v = parse(argv, { repo: { type: 'string' }, 'config-file': { type: 'string' }, 'dry-run': { type: 'boolean' }, now: { type: 'string' } });
     required(v, 'repo', 'config-file');
     if (v.now !== undefined && Number.isNaN(new Date(v.now).getTime())) throw new UsageError('--now must be an ISO date');
-    return runReady({ repo: v.repo, config: validateConfig(readJson(v['config-file'])), now: v.now ? new Date(v.now) : new Date(), dryRun: Boolean(v['dry-run']) });
+    const result = await runReady({ repo: v.repo, config: validateConfig(readJson(v['config-file'])), now: v.now ? new Date(v.now) : new Date(), dryRun: Boolean(v['dry-run']) });
+    if (result.actions.some((a) => a.action === 'error')) throw new ExitError(result);
+    return result;
   },
   screenshot: async (argv) => {
     const v = parse(argv, { url: { type: 'string' }, out: { type: 'string' }, width: { type: 'string' }, height: { type: 'string' } });
