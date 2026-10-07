@@ -1,0 +1,22 @@
+[
+  {
+    "file": "src/list.ts",
+    "line": 12,
+    "severity": "Important",
+    "kind": "unambiguous",
+    "problem": "The loop bound skips the last item.",
+    "impact": "The last added book never renders.",
+    "correction": "Use `<=` or iterate with `for…of`."
+  },
+  {
+    "file": "src/list.ts",
+    "line": 40,
+    "severity": "Critical",
+    "kind": "judgment",
+    "problem": "Archived items are deleted; acceptance criterion 2 says they are hidden.",
+    "impact": "Data loss for the user.",
+    "correction": "Decide whether archiving hides or deletes.",
+    "options": ["hide (keep the item, add an archived flag)", "delete (remove it from storage)"],
+    "recommendation": "hide, because the criterion says hidden and deletion can't be undone"
+  }
+]
