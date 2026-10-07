@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { parseSource } from './source.mjs';
 import { branchName, keyFromBranch, worktreePath } from './naming.mjs';
-import { loadConfig } from './config.mjs';
+import { loadConfig, validateConfig } from './config.mjs';
 import { formatMarker, parseMarker, defaultRun } from './marker.mjs';
 import { lockStatus } from './lock.mjs';
 import { checkEligibility, LANES } from './eligibility.mjs';
@@ -16,6 +16,7 @@ import { startPreview, stopPreview } from './preview.mjs';
 import { createWorktree, isolateInPlace, removeWorktreeIfEmpty } from './worktree.mjs';
 import { diffRisk } from './diff-risk.mjs';
 import { revertCheck } from './revert-check.mjs';
+import { runReady } from './ready-run.mjs';
 
 export class UsageError extends Error {}
 
@@ -260,6 +261,12 @@ export const COMMANDS = {
     const timeoutMs = v['timeout-ms'] === undefined ? undefined : Number(v['timeout-ms']);
     if (timeoutMs !== undefined && !(Number.isInteger(timeoutMs) && timeoutMs > 0)) throw new UsageError('--timeout-ms must be a positive integer');
     return revertCheck(v.cwd ?? process.cwd(), v.base, { command: v.command, timeoutMs });
+  },
+  ready: async (argv) => {
+    const v = parse(argv, { repo: { type: 'string' }, 'config-file': { type: 'string' }, 'dry-run': { type: 'boolean' }, now: { type: 'string' } });
+    required(v, 'repo', 'config-file');
+    if (v.now !== undefined && Number.isNaN(new Date(v.now).getTime())) throw new UsageError('--now must be an ISO date');
+    return runReady({ repo: v.repo, config: validateConfig(readJson(v['config-file'])), now: v.now ? new Date(v.now) : new Date(), dryRun: Boolean(v['dry-run']) });
   },
   screenshot: async (argv) => {
     const v = parse(argv, { url: { type: 'string' }, out: { type: 'string' }, width: { type: 'string' }, height: { type: 'string' } });
