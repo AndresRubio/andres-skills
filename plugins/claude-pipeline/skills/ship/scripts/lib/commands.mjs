@@ -14,6 +14,7 @@ import { findFreePort, diffSize } from './runtime.mjs';
 import { takeScreenshot } from './chrome.mjs';
 import { startPreview, stopPreview } from './preview.mjs';
 import { createWorktree, isolateInPlace, removeWorktreeIfEmpty } from './worktree.mjs';
+import { diffRisk } from './diff-risk.mjs';
 
 export class UsageError extends Error {}
 
@@ -246,6 +247,11 @@ export const COMMANDS = {
     const v = parse(argv, { base: { type: 'string' }, cwd: { type: 'string' } });
     required(v, 'base');
     return diffSize(v.cwd ?? process.cwd(), v.base);
+  },
+  'diff-risk': (argv) => {
+    const v = parse(argv, { base: { type: 'string' }, cwd: { type: 'string' } });
+    required(v, 'base');
+    return diffRisk(v.cwd ?? process.cwd(), v.base);
   },
   screenshot: async (argv) => {
     const v = parse(argv, { url: { type: 'string' }, out: { type: 'string' }, width: { type: 'string' }, height: { type: 'string' } });

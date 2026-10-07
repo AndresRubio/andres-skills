@@ -1,0 +1,82 @@
+import { git } from './git.mjs';
+
+const TEST_PATH = /(^|\/)(test|tests|__tests__|spec|specs)\//;
+const TEST_NAME = /(\.(test|spec)\.[cm]?[jt]sx?$)|(^|\/)test_[^/]+\.py$|_test\.(py|go|rb)$|_spec\.rb$/;
+export function isTestFile(file) {
+  return TEST_PATH.test(file) || TEST_NAME.test(file);
+}
+
+const ASSERTION = /\b(expect|assert\w*|should)\b/;
+const SKIP_MARKERS = [
+  [/\b(it|test|describe|suite)\.only\(/, '.only('], [/\b(it|test|describe|suite)\.skip\(/, '.skip('], [/\b(xit|xtest|xdescribe)\(/, 'x-prefixed test'],
+  [/\bit\.todo\(/, 'it.todo('], [/@ts-ignore/, '@ts-ignore'], [/@ts-expect-error/, '@ts-expect-error'], [/eslint-disable/, 'eslint-disable'],
+  [/#\s*noqa\b/, '# noqa'], [/#\s*type:\s*ignore/, '# type: ignore'], [/@pytest\.mark\.skip/, '@pytest.mark.skip'], [/@unittest\.skip/, '@unittest.skip'],
+];
+const TEST_CONFIG = /(^|\/)((vitest|jest|mocha|karma|playwright|cypress|ava|tap)\.config\.[cm]?[jt]s|\.mocharc[^/]*|jest\.config[^/]*|pytest\.ini|setup\.cfg|tox\.ini|pyproject\.toml|tsconfig[^/]*\.json|jsconfig\.json|\.eslintrc[^/]*|eslint\.config\.[cm]?[jt]s|biome\.json[c]?|\.nycrc[^/]*|codecov\.ya?ml|\.coveragerc|\.ruff\.toml|ruff\.toml|mypy\.ini)$/;
+const DEPENDENCY = /(^|\/)(package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|requirements[^/]*\.txt|poetry\.lock|uv\.lock|pyproject\.toml|Pipfile(\.lock)?|Cargo\.(toml|lock)|go\.(mod|sum)|Gemfile(\.lock)?|composer\.(json|lock))$/;
+const COVERAGE = /coverage|threshold/i;
+
+function parseNameStatus(text) {
+  const rows = [];
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    const [status, a, b] = line.split('\t');
+    rows.push({ status: status[0], file: a, renamedTo: b });
+  }
+  return rows;
+}
+
+// Splits a unified diff into { file: { added: [lines], removed: [lines] } }, using the +++ b/ path.
+function parsePatch(text) {
+  const files = {};
+  let current = null;
+  for (const line of text.split('\n')) {
+    if (line.startsWith('+++ ')) {
+      const p = line.slice(4).replace(/^b\//, '');
+      current = p === '/dev/null' ? null : (files[p] ??= { added: [], removed: [] });
+    } else if (line.startsWith('--- ') || line.startsWith('diff --git') || line.startsWith('@@') || line.startsWith('index ')) {
+      if (line.startsWith('diff --git')) current = null;
+    } else if (current && line.startsWith('+')) current.added.push(line.slice(1));
+    else if (current && line.startsWith('-')) current.removed.push(line.slice(1));
+  }
+  return files;
+}
+
+export function analyzeDiff({ nameStatus, patch }) {
+  const hits = [];
+  const rows = parseNameStatus(nameStatus);
+  const files = parsePatch(patch);
+  for (const row of rows) {
+    if ((row.status === 'D' || row.status === 'R') && isTestFile(row.file)) {
+      hits.push({ rule: 'test-file-removed', file: row.file, detail: row.status === 'D' ? 'deleted' : `renamed to ${row.renamedTo}` });
+    }
+  }
+  for (const [file, { added, removed }] of Object.entries(files)) {
+    if (isTestFile(file)) {
+      const lost = removed.filter((l) => ASSERTION.test(l)).length;
+      const gained = added.filter((l) => ASSERTION.test(l)).length;
+      if (lost > gained) hits.push({ rule: 'assertions-lost', file, detail: `assertions: ${lost} removed, ${gained} added` });
+    }
+    for (const line of added) {
+      for (const [re, label] of SKIP_MARKERS) {
+        if (re.test(line)) hits.push({ rule: 'skip-marker', file, detail: `${label}: ${line.trim().slice(0, 120)}` });
+      }
+    }
+  }
+  for (const row of rows) {
+    const file = row.renamedTo ?? row.file;
+    if (TEST_CONFIG.test(file)) {
+      const addedText = (files[file]?.added ?? []).join('\n');
+      hits.push({ rule: 'test-config-changed', file, detail: COVERAGE.test(addedText) ? 'coverage threshold or test/lint/typecheck config changed' : 'test, lint or typecheck config changed' });
+    }
+    if (DEPENDENCY.test(file)) hits.push({ rule: 'dependency-changed', file, detail: row.status === 'A' ? 'manifest or lockfile added' : 'manifest or lockfile changed' });
+  }
+  return { hits };
+}
+
+const EXCLUDE = ['--', '.', ':(exclude)docs/pipeline'];
+export function diffRisk(cwd, base) {
+  const nameStatus = git(cwd, ['diff', '--name-status', `${base}...HEAD`, ...EXCLUDE]);
+  const patch = git(cwd, ['diff', '--unified=0', '--no-color', `${base}...HEAD`, ...EXCLUDE]);
+  return { base, ...analyzeDiff({ nameStatus, patch }) };
+}
