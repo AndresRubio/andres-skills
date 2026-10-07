@@ -33,7 +33,11 @@ export function matchesProtected(file, patterns) {
 export function decideReady({ pr, config, verdict }) {
   if (pr.isDraft) return { action: 'skip', reason: 'draft' };
   if (pr.isCrossRepository) return { action: 'skip', reason: 'fork' };
-  if (!pr.headRefName.startsWith('claude/')) return { action: 'skip', reason: 'not a pipeline branch' };
+  try {
+    keyFromBranch(pr.headRefName);
+  } catch {
+    return { action: 'skip', reason: 'not a pipeline branch' };
+  }
   const hasReady = pr.labels.includes('ready');
   const review = checkState(pr.statusCheckRollup, REVIEW_CHECK);
   if (review === 'failure' || (review === 'success' && verdict?.verdict !== 'accepted')) {
@@ -52,6 +56,7 @@ export function decideReady({ pr, config, verdict }) {
 }
 
 export function readyReport({ pr, config, verdict, changedFiles, marker, runSummary }) {
+  if (!verdict || typeof verdict.verdict !== 'string') throw new Error('readyReport needs a parsed verdict');
   const key = keyFromBranch(pr.headRefName);
   const repoUrl = pr.url.replace(/\/pull\/\d+.*$/, '');
   const blob = (file) => `${repoUrl}/blob/${pr.headRefOid}/docs/pipeline/${key}/${file}`;

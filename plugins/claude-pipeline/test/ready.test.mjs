@@ -33,6 +33,12 @@ test('decideReady skips drafts, forks and non-pipeline branches', () => {
   assert.equal(decideReady({ pr: pr({ headRefName: 'feature/x' }), config, verdict: accepted }).action, 'skip');
 });
 
+test('decideReady skips non-key branch shapes like claude/experiment', () => {
+  assert.equal(decideReady({ pr: pr({ headRefName: 'claude/experiment' }), config, verdict: accepted }).action, 'skip');
+  assert.equal(decideReady({ pr: pr({ headRefName: 'claude/experiment' }), config, verdict: accepted }).reason, 'not a pipeline branch');
+  assert.deepEqual(decideReady({ pr: pr({ headRefName: 'claude/5' }), config, verdict: accepted }), { action: 'ready' });
+});
+
 test('a failed claude-review routes by verdict; a missing verdict is a human decision', () => {
   const failed = pr({ statusCheckRollup: [run('test', 'SUCCESS'), run('claude-review', 'FAILURE')] });
   const hd = decideReady({ pr: failed, config, verdict: { ...accepted, verdict: 'human-decision-needed', findings: [judgment] } });
@@ -49,6 +55,31 @@ test('red CI asks for a fix; pending checks wait; a missing required check waits
   assert.deepEqual(decideReady({ pr: pr({ statusCheckRollup: [run('test', 'FAILURE'), run('claude-review', 'SUCCESS')] }), config, verdict: accepted }), { action: 'fix', reason: 'ci', failing: ['test'] });
   assert.equal(decideReady({ pr: pr({ statusCheckRollup: [run('test', 'SUCCESS'), run('claude-review', null, 'QUEUED')] }), config, verdict: accepted }).action, 'wait');
   assert.equal(decideReady({ pr: pr({ statusCheckRollup: [run('claude-review', 'SUCCESS')] }), config, verdict: accepted }).action, 'wait');
+});
+
+test('review check failure + CI failure: routes by verdict first, never plain fix/ci', () => {
+  const both = pr({ statusCheckRollup: [run('test', 'FAILURE'), run('claude-review', 'FAILURE')] });
+  const hd = decideReady({ pr: both, config, verdict: { ...accepted, verdict: 'human-decision-needed', findings: [judgment] } });
+  assert.equal(hd.action, 'needs-decision');
+  const rev = decideReady({ pr: both, config, verdict: { ...accepted, verdict: 'revision-needed' } });
+  assert.equal(rev.action, 'fix');
+  assert.equal(rev.reason, 'review');
+});
+
+test('StatusContext SUCCESS is success and PENDING is pending', () => {
+  const rollup = [ctx('ci/github', 'SUCCESS'), ctx('ci/pending', 'PENDING')];
+  assert.equal(checkState(rollup, 'ci/github'), 'success');
+  assert.equal(checkState(rollup, 'ci/pending'), 'pending');
+});
+
+test('review check pending with revision-needed verdict waits', () => {
+  const pending = pr({ statusCheckRollup: [run('test', 'SUCCESS'), run('claude-review', null, 'QUEUED')] });
+  assert.equal(decideReady({ pr: pending, config, verdict: { ...accepted, verdict: 'revision-needed' } }).action, 'wait');
+});
+
+test('duplicate check names with mixed results report failure', () => {
+  const rollup = [run('test', 'FAILURE'), run('test', 'SUCCESS')];
+  assert.equal(checkState(rollup, 'test'), 'failure');
 });
 
 test('a green verdict check with a non-accepted comment is never ready', () => {
@@ -86,6 +117,11 @@ test('issueNumberFromBody reads closing keywords', () => {
   assert.equal(issueNumberFromBody('resolves #44 and more'), 44);
   assert.equal(issueNumberFromBody('see #9'), null);
   assert.equal(issueNumberFromBody(null), null);
+});
+
+test('readyReport requires a valid parsed verdict', () => {
+  assert.throws(() => readyReport({ pr: pr({ url: 'https://github.com/o/r/pull/7' }), config, verdict: null, changedFiles: [], marker: 'test', runSummary: null }), /readyReport needs a parsed verdict/);
+  assert.throws(() => readyReport({ pr: pr({ url: 'https://github.com/o/r/pull/7' }), config, verdict: { verdict: null }, changedFiles: [], marker: 'test', runSummary: null }), /readyReport needs a parsed verdict/);
 });
 
 test('readyReport lists checks, flags, diff-risk hits and links, and never a gate', () => {
