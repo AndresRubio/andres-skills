@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { git } from './git.mjs';
@@ -19,24 +19,25 @@ export function changedTestFiles(cwd, base) {
 }
 
 // The tests come from HEAD; everything else from base. At least one test should fail.
-export function revertCheck(cwd, base, { command, timeoutMs = 600_000 } = {}) {
+export function revertCheck(cwd, base, { command, timeoutMs = 600_000, maxBuffer = 16 * 1024 * 1024 } = {}) {
   if (typeof command !== 'string' || command === '') throw new Error('a test command is required');
   const testFiles = changedTestFiles(cwd, base);
   if (testFiles.length === 0) return { skipped: true, reason: 'no test files changed between the base and HEAD' };
+  const headSha = git(cwd, ['rev-parse', 'HEAD']).trim();
   const wt = mkdtempSync(path.join(tmpdir(), 'cp-revert-'));
   rmSync(wt, { recursive: true, force: true });
   git(cwd, ['worktree', 'add', '--detach', wt, base]);
   try {
-    for (const file of testFiles) {
-      const content = git(cwd, ['show', `HEAD:${file}`]);
-      mkdirSync(path.dirname(path.join(wt, file)), { recursive: true });
-      writeFileSync(path.join(wt, file), content);
-    }
-    const r = spawnSync('sh', ['-c', command], { cwd: wt, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 });
-    const timedOut = r.error?.code === 'ETIMEDOUT';
-    const output = `${r.stdout ?? ''}${r.stderr ?? ''}${timedOut ? `\n(timed out after ${timeoutMs} ms)` : ''}`;
-    const exitCode = timedOut ? null : r.status;
-    return { skipped: false, testFiles, exitCode, failed: exitCode !== 0, tail: output.trim().split('\n').slice(-20).join('\n') };
+    // Check the blobs out by SHA (same object database): bytes and file modes survive.
+    git(wt, ['checkout', headSha, '--', ...testFiles]);
+    const r = spawnSync('sh', ['-c', command], { cwd: wt, encoding: 'utf8', timeout: timeoutMs, maxBuffer });
+    let error = null;
+    if (r.error?.code === 'ETIMEDOUT') error = `timed out after ${timeoutMs} ms`;
+    else if (r.error) error = `${r.error.code ?? 'error'}: ${r.error.message}`;
+    else if (r.signal) error = `killed by ${r.signal}`;
+    const exitCode = error === null ? r.status : null;
+    const output = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+    return { skipped: false, testFiles, exitCode, failed: error === null && exitCode !== 0, error, tail: output.trim().split('\n').slice(-20).join('\n') };
   } finally {
     try { git(cwd, ['worktree', 'remove', '--force', wt]); } catch { rmSync(wt, { recursive: true, force: true }); git(cwd, ['worktree', 'prune']); }
   }
