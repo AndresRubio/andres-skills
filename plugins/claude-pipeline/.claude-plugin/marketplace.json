@@ -1,0 +1,14 @@
+{
+  "name": "claude-pipeline",
+  "description": "Marketplace for the claude-pipeline plugin.",
+  "owner": { "name": "AndresRubio", "url": "https://github.com/AndresRubio" },
+  "plugins": [
+    {
+      "name": "claude-pipeline",
+      "description": "Issue-to-PR pipeline for Claude Code.",
+      "version": "0.1.0",
+      "source": "./",
+      "author": { "name": "AndresRubio", "url": "https://github.com/AndresRubio" }
+    }
+  ]
+}

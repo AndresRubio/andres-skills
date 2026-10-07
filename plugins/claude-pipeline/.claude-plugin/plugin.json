@@ -1,0 +1,10 @@
+{
+  "name": "claude-pipeline",
+  "description": "Issue-to-PR pipeline for Claude Code: research, grade, spec, plan, build, verify, self-review, pull request and report, reusing superpowers and mattpocock-skills.",
+  "version": "0.1.0",
+  "author": { "name": "AndresRubio", "url": "https://github.com/AndresRubio" },
+  "homepage": "https://github.com/AndresRubio/claude-pipeline",
+  "repository": "https://github.com/AndresRubio/claude-pipeline",
+  "license": "MIT",
+  "keywords": ["pipeline", "automation", "issues", "pull-requests"]
+}
