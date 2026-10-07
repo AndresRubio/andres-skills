@@ -63,14 +63,15 @@ test('analyzeDiff on a clean change has no hits', () => {
   assert.deepEqual(r.hits, []);
 });
 
-test('parsePatch handles removed lines starting with dash-space correctly', () => {
-  // Removed line looks like "-- expect(...)" which would be `--- expect(...)` in raw diff
+test('parsePatch handles removed lines starting with three dashes correctly', () => {
+  // Removed line with content `-- expect(...)` appears in raw diff as `--- expect(...)`,
+  // which the old prefix-only parser would mistake for a file header
   const patch = [
     `diff --git a/src/list.test.ts b/src/list.test.ts`,
     `--- a/src/list.test.ts`,
     `+++ b/src/list.test.ts`,
     `@@ -1,3 +1,1 @@`,
-    `-- expect(1).toBe(1);`,
+    `--- expect(1).toBe(1);`,
     `-expect(2).toBe(2);`,
     `-assert.equal(c, 3);`,
     `+expect(x).toBe(x);`,
@@ -80,9 +81,9 @@ test('parsePatch handles removed lines starting with dash-space correctly', () =
   assert.match(r.hits[0].detail, /3 removed, 1 added/);
 });
 
-test('parsePatch handles added lines starting with plus-plus correctly', () => {
-  // Added line looks like "++ b/src/x.ts" which would be `+++ b/src/x.ts` in raw diff
-  // but it should be part of the content of src/real.test.ts hunk, not a file header
+test('parsePatch handles added lines starting with three plusses correctly', () => {
+  // Added line with content `++ b/src/x.ts` appears in raw diff as `+++ b/src/x.ts`,
+  // which the old prefix-only parser would mistake for a file header and lose context
   const patch = [
     `diff --git a/src/real.test.ts b/src/real.test.ts`,
     `--- a/src/real.test.ts`,
@@ -90,7 +91,7 @@ test('parsePatch handles added lines starting with plus-plus correctly', () => {
     `@@ -1,2 +1,3 @@`,
     ` it('existing', () => {});`,
     `-old code`,
-    `++ b/src/x.ts`,
+    `+++ b/src/x.ts`,
     `+it.only(1)`,
   ].join('\n');
   const r = analyzeDiff({ nameStatus: 'M\tsrc/real.test.ts', patch });
