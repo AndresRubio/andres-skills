@@ -37,8 +37,12 @@ test('installFiles writes three workflows and a config, never overwriting withou
   assert.equal(again.skipped.length, 4);
   assert.equal(readFileSync(path.join(root, '.github/workflows/claude-ship.yml'), 'utf8'), 'custom\n');
   const forced = installFiles(root, defaultVars(), { force: true });
-  assert.equal(forced.written.length, 4);
+  assert.deepEqual(forced.written.sort(), ['.github/workflows/claude-review.yml', '.github/workflows/claude-ship.yml', '.github/workflows/pipeline-ready.yml']);
+  assert.deepEqual(forced.skipped, ['.claude/pipeline.json']);
   assert.notEqual(readFileSync(path.join(root, '.github/workflows/claude-ship.yml'), 'utf8'), 'custom\n');
+  writeFiles(root, { '.claude/pipeline.json': '{"mine":true}\n' });
+  installFiles(root, defaultVars(), { force: true });
+  assert.equal(readFileSync(path.join(root, '.claude/pipeline.json'), 'utf8'), '{"mine":true}\n');
 });
 
 test('LABELS are the seven Phase 2a labels', () => {

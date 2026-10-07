@@ -40,12 +40,14 @@ test('claude-ship: routes with lane-target, runs the action only when run is tru
   assert.match(t, /issue_comment:\n\s+types: \[created\]/);
   assert.match(t, /pull_request:\n\s+types: \[labeled\]/);
   assert.match(t, /pipeline\.mjs lane-target --event-file "\$GITHUB_EVENT_PATH" --event-name "\$\{\{ github\.event_name \}\}" --repo/);
-  assert.match(t, /if: steps\.target\.outputs\.run == 'true'/);
-  assert.match(t, /prompt: \$\{\{ steps\.target\.outputs\.prompt \}\}/);
+  assert.match(t, /if: needs\.route\.outputs\.run == 'true'/);
+  assert.match(t, /prompt: \$\{\{ needs\.route\.outputs\.prompt \}\}/);
   assert.match(t, /CLAUDE_PIPELINE_LANE: github/);
   assert.match(t, /CLAUDE_PIPELINE_GUARD: '1'/);
   assert.match(t, /CI: 'true'/);
-  assert.match(t, /concurrency:\n\s+group: \$\{\{ steps\.target\.outputs\.concurrency \}\}|group: ship-\$\{\{ github\.event\.issue\.number \|\| github\.event\.pull_request\.number \}\}/);
+  assert.match(t, /concurrency:\n\s+group: \$\{\{ needs\.route\.outputs\.concurrency \}\}/);
+  assert.doesNotMatch(t, /^concurrency:/m);
+  assert.equal((t.match(/actions\/setup-node@v4/g) || []).length, 2);
   assert.match(t, /--disallowedTools .*Bash\(gh pr merge:\*\)/);
   assert.match(t, /plugin_marketplaces: https:\/\/github\.com\/AndresRubio\/andres-skills\.git/);
   assert.match(t, /plugins: claude-pipeline@andres-skills/);

@@ -48,16 +48,17 @@ export function renderWorkflow(template, vars) {
 export function installFiles(repoRoot, vars, { force = false } = {}) {
   const written = [];
   const skipped = [];
-  const put = (rel, content) => {
+  const put = (rel, content, { overwrite = false } = {}) => {
     const full = path.join(repoRoot, rel);
-    if (existsSync(full) && !force) { skipped.push(rel); return; }
+    if (existsSync(full) && !overwrite) { skipped.push(rel); return; }
     mkdirSync(path.dirname(full), { recursive: true });
     writeFileSync(full, content);
     written.push(rel);
   };
   for (const name of WORKFLOWS) {
-    put(`.github/workflows/${name}`, renderWorkflow(readFileSync(new URL(`github/${name}`, TEMPLATES), 'utf8'), vars));
+    put(`.github/workflows/${name}`, renderWorkflow(readFileSync(new URL(`github/${name}`, TEMPLATES), 'utf8'), vars), { overwrite: force });
   }
+  // The owner's config (ciChecks, protectedPaths, ...) is never overwritten, not even with force.
   put('.claude/pipeline.json', readFileSync(new URL('pipeline.json', TEMPLATES), 'utf8'));
   return { written, skipped };
 }
