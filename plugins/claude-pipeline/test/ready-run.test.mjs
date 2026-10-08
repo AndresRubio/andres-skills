@@ -24,16 +24,19 @@ const verdictComment = (verdict, findings = []) => normalizeComments([{
 }]);
 const issue = (labels = ['claude', 'claude-working'], comments = []) => ({ number: 5, labels, comments });
 
-function fakeDeps({ prs, comments = [], issue: iss = issue(), files = ['src/list.ts'] }) {
+function fakeDeps({ prs, comments = [], issue: iss = issue(), files = ['src/list.ts'], behindBy = 0 }) {
   const calls = [];
+  const compares = [];
   return {
     calls,
+    compares,
     deps: {
       listPrs: () => prs.map((p) => ({ number: p.number, headRefName: p.headRefName, isCrossRepository: p.isCrossRepository, isDraft: p.isDraft })),
       fetchPr: (repo, n) => prs.find((p) => p.number === n),
       fetchPrComments: () => comments,
       fetchIssue: () => iss,
       changedFiles: () => files,
+      compare: (repo, base, head) => { compares.push([repo, base, head]); return { behind_by: behindBy }; },
       addLabel: (kind, n, label) => calls.push(['addLabel', kind, n, label]),
       removeLabel: (kind, n, label) => calls.push(['removeLabel', kind, n, label]),
       updateBranch: (n) => calls.push(['updateBranch', n]),
@@ -229,4 +232,26 @@ test('a PR without a linked issue is not gated by any lock', async () => {
   const r = await runReady({ repo: REPO, config, now: NOW }, deps);
   assert.equal(r.actions[0].action, 'fix');
   assert.deepEqual(calls, [['addLabel', 'pr', 7, 'claude-fix']]);
+});
+
+test('a PR that would be ready but is behind its base (compare API) gets a branch update instead (final review I8)', async () => {
+  const plain = fakeDeps({ prs: [basePr()], comments: verdictComment('accepted'), behindBy: 2 });
+  const r = await runReady({ repo: REPO, config, now: NOW }, plain.deps);
+  assert.deepEqual(r.actions.map((a) => [a.action, a.reason]), [['update', 'behind base']]);
+  assert.deepEqual(plain.compares, [[REPO, 'main', HEAD]]);
+  assert.deepEqual(plain.calls, [['updateBranch', 7]]);
+  const labelled = fakeDeps({ prs: [basePr({ labels: ['ready'] })], comments: verdictComment('accepted'), behindBy: 1 });
+  await runReady({ repo: REPO, config, now: NOW }, labelled.deps);
+  assert.deepEqual(labelled.calls, [['removeLabel', 'pr', 7, 'ready'], ['updateBranch', 7]]);
+  const locked = fakeDeps({ prs: [basePr({ labels: ['ready'] })], comments: verdictComment('accepted'), behindBy: 1, issue: issue(['claude', 'claude-working'], lockAt('2026-10-07T09:30:00Z')) });
+  const w = await runReady({ repo: REPO, config, now: NOW }, locked.deps);
+  assert.equal(w.actions[0].action, 'wait');
+  assert.deepEqual(locked.calls, []);
+});
+
+test('a ready PR that is not behind stays ready; already-ready is checked too', async () => {
+  const current = fakeDeps({ prs: [basePr({ labels: ['ready'] })], comments: verdictComment('accepted') });
+  const r = await runReady({ repo: REPO, config, now: NOW }, current.deps);
+  assert.equal(r.actions[0].action, 'already-ready');
+  assert.deepEqual([current.compares, current.calls], [[[REPO, 'main', HEAD]], []]);
 });

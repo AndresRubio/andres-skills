@@ -12,6 +12,9 @@ export function realDeps(repo) {
     fetchPr: (r, n) => fetchPr(r, n),
     fetchPrComments: (r, n) => fetchPrComments(r, n),
     fetchIssue: (r, n) => fetchIssue(r, n),
+    // BEHIND in mergeStateStatus may only be reported when branch protection requires up-to-date
+    // branches, so "behind" is read from the compare API. Verify on the first sandbox run.
+    compare: (r, base, head) => ghJson(['api', `repos/${r}/compare/${base}...${head}`, '--jq', '{behind_by}']),
     changedFiles: (r, n) => ghJson(['api', '--paginate', '--slurp', `repos/${r}/pulls/${n}/files`]).flat().map((f) => f.filename),
     addLabel: (kind, n, label) => ghText([kind, 'edit', String(n), '--repo', repo, '--add-label', label]),
     removeLabel: (kind, n, label) => ghText([kind, 'edit', String(n), '--repo', repo, '--remove-label', label]),
@@ -54,8 +57,13 @@ export async function runReady({ repo, config, now = new Date(), dryRun = false,
       const prComments = deps.fetchPrComments(repo, pr.number);
       const sha7 = pr.headRefOid.slice(0, 7);
       const verdict = latestVerdict(prComments, pr.headRefOid);
-      const decision = decideReady({ pr, config, verdict });
+      let decision = decideReady({ pr, config, verdict });
       if (decision.action === 'skip') continue;
+      // A PR is ready only when it holds every commit of its base (verify on the first sandbox run).
+      if (decision.action === 'ready' || decision.action === 'already-ready') {
+        const { behind_by: behindBy } = deps.compare(repo, pr.baseRefName, pr.headRefOid);
+        if (behindBy > 0) decision = { action: 'update', reason: 'behind base', ...(pr.labels.includes('ready') ? { removeReady: true } : {}) };
+      }
       const issueNumber = issueNumberFromBody(pr.body);
       let issue;
       const linkedIssue = () => (issue ??= deps.fetchIssue(repo, issueNumber));

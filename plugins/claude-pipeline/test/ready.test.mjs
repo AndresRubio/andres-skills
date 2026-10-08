@@ -110,6 +110,12 @@ test('behind base updates; conflict asks for a fix; both drop ready', () => {
   assert.deepEqual(conflict, { action: 'fix', reason: 'conflict', removeReady: true });
 });
 
+test('a merge state GitHub has not computed yet waits instead of reading as ready (final review I8)', () => {
+  assert.deepEqual(decideReady({ pr: pr({ mergeable: 'UNKNOWN' }), config, verdict: accepted }), { action: 'wait', reason: 'merge state not computed yet' });
+  assert.deepEqual(decideReady({ pr: pr({ mergeStateStatus: 'UNKNOWN', labels: ['ready'] }), config, verdict: accepted }), { action: 'wait', reason: 'merge state not computed yet', removeReady: true });
+  assert.deepEqual(decideReady({ pr: pr({ mergeable: 'UNKNOWN', mergeStateStatus: 'BEHIND' }), config, verdict: accepted }).action, 'wait');
+});
+
 test('green, accepted, current and clean is ready; already labelled is already-ready', () => {
   assert.deepEqual(decideReady({ pr: pr(), config, verdict: accepted }), { action: 'ready' });
   assert.deepEqual(decideReady({ pr: pr({ labels: ['ready'] }), config, verdict: accepted }), { action: 'already-ready' });

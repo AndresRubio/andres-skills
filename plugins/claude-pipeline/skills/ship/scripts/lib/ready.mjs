@@ -68,6 +68,8 @@ export function decideReady({ pr, config, verdict }) {
   if (failing.length) return { action: 'fix', reason: 'ci', failing, ...stale };
   const notDone = [...config.ciChecks, REVIEW_CHECK].filter((name) => checkState(pr.statusCheckRollup, name) !== 'success');
   if (notDone.length) return { action: 'wait', reason: `not success yet: ${notDone.join(', ')}`, ...stale };
+  // GitHub computes mergeability lazily; UNKNOWN (common right after the base moves) is not "clean".
+  if (pr.mergeable === 'UNKNOWN' || pr.mergeStateStatus === 'UNKNOWN') return { action: 'wait', reason: 'merge state not computed yet', ...stale };
   if (pr.mergeStateStatus === 'BEHIND') return { action: 'update', reason: 'behind base', ...stale };
   if (pr.mergeable === 'CONFLICTING') return { action: 'fix', reason: 'conflict', ...stale };
   if (hasReady) return { action: 'already-ready' };
