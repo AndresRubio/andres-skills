@@ -1,4 +1,4 @@
-import { keyFromBranch } from './naming.mjs';
+import { isPipelineBranch, keyFromBranch } from './naming.mjs';
 
 const FAILURE_CONCLUSIONS = new Set(['FAILURE', 'TIMED_OUT', 'STARTUP_FAILURE', 'ACTION_REQUIRED', 'CANCELLED']);
 const FAILURE_STATES = new Set(['ERROR', 'FAILURE']);
@@ -52,11 +52,7 @@ export function matchesProtected(file, patterns) {
 export function decideReady({ pr, config, verdict }) {
   if (pr.isDraft) return { action: 'skip', reason: 'draft' };
   if (pr.isCrossRepository) return { action: 'skip', reason: 'fork' };
-  try {
-    keyFromBranch(pr.headRefName);
-  } catch {
-    return { action: 'skip', reason: 'not a pipeline branch' };
-  }
+  if (!isPipelineBranch(pr.headRefName)) return { action: 'skip', reason: 'not a pipeline branch' };
   const hasReady = pr.labels.includes('ready');
   // A stale label never survives a head that is no longer verified green (spec 6.3).
   const stale = hasReady ? { removeReady: true } : {};

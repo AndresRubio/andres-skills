@@ -15,8 +15,14 @@ export function branchName(key, title) {
   return slug ? `claude/${key}-${slug}` : `claude/${key}`;
 }
 
+const BRANCH_KEY = /^claude\/(\d+|[a-z][a-z0-9]*-\d+)(?:-|$)/;
+
+export function isPipelineBranch(branch) {
+  return BRANCH_KEY.test(String(branch));
+}
+
 export function keyFromBranch(branch) {
-  const m = String(branch).match(/^claude\/(\d+|[a-z][a-z0-9]*-\d+)(?:-|$)/);
+  const m = String(branch).match(BRANCH_KEY);
   if (!m) throw new Error(`not a pipeline branch: ${branch}`);
   return m[1];
 }

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { slugify, branchName, keyFromBranch, worktreePath } from '../skills/ship/scripts/lib/naming.mjs';
+import { slugify, branchName, isPipelineBranch, keyFromBranch, worktreePath } from '../skills/ship/scripts/lib/naming.mjs';
 import { runCli } from './helpers/cli.mjs';
 import { tempDir } from './helpers/git.mjs';
 
@@ -67,4 +67,11 @@ test('CLI branch-name --issue-file is a domain error when the file is missing, u
   const noTitle = path.join(dir, 'no-title.json');
   writeFileSync(noTitle, JSON.stringify({ notTitle: 'x' }));
   assert.equal(runCli(['branch-name', '--key', '5', '--issue-file', noTitle]).code, 1, 'no string title');
+});
+
+test('isPipelineBranch mirrors keyFromBranch without throwing', () => {
+  assert.equal(isPipelineBranch('claude/43-fix'), true);
+  assert.equal(isPipelineBranch('claude/abc-7'), true);
+  assert.equal(isPipelineBranch('claude/experiment'), false);
+  assert.equal(isPipelineBranch(undefined), false);
 });
