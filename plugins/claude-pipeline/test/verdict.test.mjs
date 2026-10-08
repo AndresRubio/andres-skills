@@ -76,6 +76,33 @@ test('latestVerdict picks the newest pipeline verdict for the head SHA only', ()
   assert.equal(latestVerdict([forged], HEAD), null);
 });
 
+test('latestVerdict accepts verdicts only from the pipeline bots or the owner (final review I6)', () => {
+  const accepted = formatVerdictBody({ verdict: 'accepted', head: HEAD, findings: [], diffRisk: [], marker: MK('2026-10-07T11:00:00Z') });
+  const by = (author, assoc) => [marked(9, '2026-10-07T11:00:00Z', accepted, author, assoc)];
+  assert.equal(latestVerdict(by('some-member', 'MEMBER'), HEAD), null);
+  assert.equal(latestVerdict(by('some-collaborator', 'COLLABORATOR'), HEAD), null);
+  assert.equal(latestVerdict(by('AndresRubio', 'OWNER'), HEAD).verdict, 'accepted');
+  assert.equal(latestVerdict(by('claude[bot]', 'NONE'), HEAD).verdict, 'accepted');
+  assert.equal(latestVerdict(by('github-actions[bot]', 'NONE'), HEAD).verdict, 'accepted');
+  // A MEMBER's newer verdict does not hide the bot's older one.
+  const revision = formatVerdictBody({ verdict: 'revision-needed', head: HEAD, findings: [unambiguous], diffRisk: [], marker: MK('2026-10-07T10:00:00Z') });
+  assert.equal(latestVerdict([marked(1, '2026-10-07T10:00:00Z', revision, 'claude[bot]'), ...by('some-member', 'MEMBER')], HEAD).verdict, 'revision-needed');
+});
+
+test('parseVerdictBody rejects a stated verdict its findings contradict; a reason-only verdict still parses', () => {
+  const lie = (verdict, findings) => {
+    const body = formatVerdictBody({ verdict: 'accepted', head: HEAD, findings: [], diffRisk: [], marker: MK('2026-10-07T10:00:00Z') });
+    return body.replace(/<!-- claude-pipeline-verdict \{.*\} -->/, `<!-- claude-pipeline-verdict ${JSON.stringify({ v: 1, verdict, head: HEAD, findings, diffRisk: [], model: null, reason: null })} -->`);
+  };
+  assert.equal(parseVerdictBody(lie('accepted', [unambiguous])), null);
+  assert.equal(parseVerdictBody(lie('accepted', [judgment])), null);
+  assert.equal(parseVerdictBody(lie('revision-needed', [judgment])), null);
+  assert.equal(parseVerdictBody(lie('revision-needed', [unambiguous])).verdict, 'revision-needed');
+  assert.equal(parseVerdictBody(lie('accepted', [minor])).verdict, 'accepted');
+  const reasonOnly = formatVerdictBody({ verdict: 'human-decision-needed', head: HEAD, findings: [], diffRisk: [], reason: 'review did not complete', marker: MK('2026-10-07T10:00:00Z') });
+  assert.equal(parseVerdictBody(reasonOnly).verdict, 'human-decision-needed');
+});
+
 test('CLI verdict computes the verdict from a findings file and prints the body', () => {
   const dir = tempDir();
   writeFileSync(path.join(dir, 'findings.json'), JSON.stringify([unambiguous]));

@@ -1,4 +1,5 @@
 import { parseMarker } from './marker.mjs';
+import { PIPELINE_BOTS } from './lock.mjs';
 
 export const VERDICTS = Object.freeze(['accepted', 'revision-needed', 'human-decision-needed']);
 export const SEVERITIES = Object.freeze(['Critical', 'Important', 'Minor']);
@@ -69,6 +70,11 @@ export function parseVerdictBody(body) {
   try { payload = JSON.parse(m[1]); } catch { return null; }
   if (!VERDICTS.includes(payload.verdict) || !SHA_RE.test(payload.head ?? '')) return null;
   try { validateFindings(payload.findings ?? []); } catch { return null; }
+  // The verdict is computed, never chosen: without a reason it must be what its findings give;
+  // a reason (the review could not finish) always means a human decision.
+  if (payload.reason == null) {
+    if (computeVerdict(payload.findings ?? []) !== payload.verdict) return null;
+  } else if (typeof payload.reason !== 'string' || payload.verdict !== 'human-decision-needed') return null;
   return {
     verdict: payload.verdict, head: payload.head, findings: payload.findings ?? [],
     diffRisk: Array.isArray(payload.diffRisk) ? payload.diffRisk : [], model: payload.model ?? null, reason: payload.reason ?? null,
@@ -76,10 +82,16 @@ export function parseVerdictBody(body) {
   };
 }
 
+// Verdicts come from the pipeline's bots, or from the owner (the local lane and the owner's
+// PIPELINE_TOKEN post as the owner). Other trusted humans (MEMBER, COLLABORATOR) can't set one.
+export function isVerdictAuthor(c) {
+  return PIPELINE_BOTS.has(c.author) || c.authorAssociation === 'OWNER';
+}
+
 // comments: normalised PR comments (github.fetchPrComments). Newest first by id, pipeline only, matching head.
 export function latestVerdict(comments, head) {
   const candidates = comments
-    .filter((c) => c.pipeline && c.marker?.kind === 'verdict')
+    .filter((c) => c.pipeline && isVerdictAuthor(c) && c.marker?.kind === 'verdict')
     .map((c) => ({ id: c.id, parsed: parseVerdictBody(c.body) }))
     .filter((c) => c.parsed && c.parsed.head === head)
     .sort((a, b) => b.id - a.id);
