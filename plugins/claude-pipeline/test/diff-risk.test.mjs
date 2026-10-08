@@ -13,6 +13,15 @@ test('isTestFile recognises common test layouts and nothing else', () => {
   }
 });
 
+test('a file under a test or spec directory is a test only when it is code (final review I10)', () => {
+  for (const f of ['docs/specs/x.md', 'test/fixtures/data.json', 'spec/openapi.yaml', 'tests/snapshots/a.snap', 'test/fixture.bin', 'docs/superpowers/specs/2026-10-07-design.md']) {
+    assert.equal(isTestFile(f), false, f);
+  }
+  for (const f of ['test/foo.js', 'src/a.test.ts', 'tests/helpers/setup.py', 'spec/support/x.rb', 'test/Main.java', 'test/run.sh']) {
+    assert.equal(isTestFile(f), true, f);
+  }
+});
+
 const patchFor = (file, removed, added) => [
   `diff --git a/${file} b/${file}`, `--- a/${file}`, `+++ b/${file}`, `@@ -1,${removed.length} +1,${added.length} @@`,
   ...removed.map((l) => `-${l}`), ...added.map((l) => `+${l}`),

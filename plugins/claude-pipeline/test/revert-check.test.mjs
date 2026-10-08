@@ -77,13 +77,14 @@ test('revertCheck preserves the executable bit of changed test files', () => {
 });
 
 test('revertCheck preserves the bytes of binary test files', () => {
-  const { root } = makeRepoWithOrigin({ 'lib.txt': 'old\n', 'test/fixture.bin': Buffer.from([0x00]) });
+  // A test file whose bytes aren't text (a fixture alone, such as test/fixture.bin, is not a test: I10).
+  const { root } = makeRepoWithOrigin({ 'lib.txt': 'old\n', 'test/blob.test.js': Buffer.from([0x00]) });
   const base = git(root, ['rev-parse', 'HEAD']).trim();
   git(root, ['checkout', '-b', 'claude/4-x']);
-  writeFileSync(path.join(root, 'test/fixture.bin'), Buffer.from([0xff, 0xfe, 0x00, 0x80]));
+  writeFileSync(path.join(root, 'test/blob.test.js'), Buffer.from([0xff, 0xfe, 0x00, 0x80]));
   git(root, ['add', '-A']);
   git(root, ['commit', '-m', 'binary']);
-  const r = revertCheck(root, base, { command: 'od -An -tx1 test/fixture.bin | tr -d " \\n" | grep -q fffe0080' });
+  const r = revertCheck(root, base, { command: 'od -An -tx1 test/blob.test.js | tr -d " \\n" | grep -q fffe0080' });
   assert.equal(r.exitCode, 0);
   assert.equal(r.failed, false);
 });

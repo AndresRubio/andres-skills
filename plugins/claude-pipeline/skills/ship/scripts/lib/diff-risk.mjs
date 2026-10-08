@@ -2,8 +2,11 @@ import { git } from './git.mjs';
 
 const TEST_PATH = /(^|\/)(test|tests|__tests__|spec|specs)\//;
 const TEST_NAME = /(\.(test|spec)\.[cm]?[jt]sx?$)|(^|\/)test_[^/]+\.py$|_test\.(py|go|rb)$|_spec\.rb$/;
+// A file under a test directory counts only when it is code: fixtures, snapshots, specs in
+// Markdown or OpenAPI YAML are not tests. Shell scripts (sh, bats) count, as test runners.
+const CODE_EXT = /\.(?:[cm]?[jt]sx?|py|go|rb|rs|java|kt|cs|php|swift|sh|bats)$/;
 export function isTestFile(file) {
-  return TEST_PATH.test(file) || TEST_NAME.test(file);
+  return (TEST_PATH.test(file) && CODE_EXT.test(file)) || TEST_NAME.test(file);
 }
 
 const ASSERTION = /\b(expect|assert\w*|should)\b/;
