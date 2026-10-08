@@ -50,6 +50,6 @@ test('review SKILL.md installs dependencies in the worktree during Setup', () =>
 
 test('review SKILL.md allows bare npx rows only for installed local bins, run as `npx --no` (final review I11)', () => {
   const step = read('SKILL.md').match(/^2\. \*\*Re-run the evidence\.\*\*.*$/m)?.[0] ?? '';
-  assert.match(step, /`npx <tool> …` only when `\$WT\/node_modules\/\.bin\/<tool>` exists/);
+  assert.match(step, /`npx <tool> …` or `npx --no <tool> …` only when `<tool>` is a bare name .* and `\$WT\/node_modules\/\.bin\/<tool>` exists/);
   assert.match(step, /always run as `npx --no <tool> …`/);
 });
