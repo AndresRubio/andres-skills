@@ -77,9 +77,24 @@ test('review check pending with revision-needed verdict waits', () => {
   assert.equal(decideReady({ pr: pending, config, verdict: { ...accepted, verdict: 'revision-needed' } }).action, 'wait');
 });
 
-test('duplicate check names with mixed results report failure', () => {
-  const rollup = [run('test', 'FAILURE'), run('test', 'SUCCESS')];
-  assert.equal(checkState(rollup, 'test'), 'failure');
+test('duplicate check names: only the newest entry counts (final review I7)', () => {
+  const at = (entry, startedAt, completedAt) => ({ ...entry, startedAt, completedAt });
+  // A re-run's newer success replaces the old failure, in either order in the rollup.
+  assert.equal(checkState([at(run('test', 'FAILURE'), '2026-10-07T09:00:00Z', '2026-10-07T09:05:00Z'), at(run('test', 'SUCCESS'), '2026-10-07T10:00:00Z', '2026-10-07T10:05:00Z')], 'test'), 'success');
+  assert.equal(checkState([at(run('test', 'SUCCESS'), '2026-10-07T10:00:00Z', '2026-10-07T10:05:00Z'), at(run('test', 'FAILURE'), '2026-10-07T09:00:00Z', '2026-10-07T09:05:00Z')], 'test'), 'success');
+  // The reverse: a newer failure wins over an older success.
+  assert.equal(checkState([at(run('test', 'SUCCESS'), '2026-10-07T09:00:00Z', '2026-10-07T09:05:00Z'), at(run('test', 'FAILURE'), '2026-10-07T10:00:00Z', '2026-10-07T10:05:00Z')], 'test'), 'failure');
+  // A re-run still in progress (gh prints the zero time for completedAt) ranks by startedAt.
+  assert.equal(checkState([at(run('test', 'FAILURE'), '2026-10-07T09:00:00Z', '2026-10-07T09:05:00Z'), at(run('test', null, 'IN_PROGRESS'), '2026-10-07T10:00:00Z', '0001-01-01T00:00:00Z')], 'test'), 'pending');
+  // Status contexts rank by createdAt; an entry without a timestamp ranks oldest.
+  const sc = (state, createdAt) => ({ ...ctx('ci/x', state), createdAt });
+  assert.equal(checkState([sc('FAILURE', '2026-10-07T09:00:00Z'), sc('SUCCESS', '2026-10-07T10:00:00Z')], 'ci/x'), 'success');
+  assert.equal(checkState([at(run('test', 'SUCCESS'), '2026-10-07T10:00:00Z', '2026-10-07T10:05:00Z'), run('test', 'FAILURE')], 'test'), 'success');
+});
+
+test('duplicate check names without any timestamps keep the old rule: any failure wins', () => {
+  assert.equal(checkState([run('test', 'FAILURE'), run('test', 'SUCCESS')], 'test'), 'failure');
+  assert.equal(checkState([run('test', 'SUCCESS'), run('test', null, 'IN_PROGRESS')], 'test'), 'pending');
 });
 
 test('a green verdict check with a non-accepted comment is never ready', () => {

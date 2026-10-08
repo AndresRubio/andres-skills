@@ -4,9 +4,26 @@ const FAILURE_CONCLUSIONS = new Set(['FAILURE', 'TIMED_OUT', 'STARTUP_FAILURE', 
 const FAILURE_STATES = new Set(['ERROR', 'FAILURE']);
 export const REVIEW_CHECK = 'claude-review';
 
+// When an entry happened: completedAt (else startedAt) for a check run, createdAt for a status
+// context. gh prints the zero time (0001-01-01) for a run that hasn't completed, so only real
+// dates count. No timestamp ranks oldest.
+function entryTime(e) {
+  const fields = e.__typename === 'StatusContext' ? [e.createdAt, e.startedAt] : [e.completedAt, e.startedAt];
+  for (const value of fields) {
+    const ms = value ? new Date(value).getTime() : NaN;
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  return -Infinity;
+}
+
+// The rollup keeps every run of a check for the commit (re-runs, other suites), so only the
+// newest entry for the name is judged; entries tied for newest (or all without a timestamp)
+// fall back to: any failure wins, then any pending.
 export function checkState(rollup, name) {
-  const entries = (rollup ?? []).filter((e) => (e.__typename === 'StatusContext' ? e.context : e.name) === name);
-  if (entries.length === 0) return 'missing';
+  const all = (rollup ?? []).filter((e) => (e.__typename === 'StatusContext' ? e.context : e.name) === name);
+  if (all.length === 0) return 'missing';
+  const newest = Math.max(...all.map(entryTime));
+  const entries = all.filter((e) => entryTime(e) === newest);
   const states = entries.map((e) => {
     if (e.__typename === 'StatusContext') return FAILURE_STATES.has(e.state) ? 'failure' : e.state === 'SUCCESS' ? 'success' : 'pending';
     if (e.status && e.status !== 'COMPLETED') return 'pending';
