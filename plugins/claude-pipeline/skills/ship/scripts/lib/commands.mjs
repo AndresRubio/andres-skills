@@ -6,7 +6,7 @@ import { loadConfig } from './config.mjs';
 import { formatMarker, parseMarker, defaultRun } from './marker.mjs';
 import { lockStatus } from './lock.mjs';
 import { checkEligibility, LANES } from './eligibility.mjs';
-import { ghJson, fetchIssue, currentRepo, fetchActiveRuns, fetchPrComments, postPrComment } from './github.mjs';
+import { ghJson, fetchIssue, fetchPr, currentRepo, fetchActiveRuns, fetchPrComments, postPrComment } from './github.mjs';
 import { computeVerdict, formatVerdictBody, latestVerdict } from './verdict.mjs';
 import { waitingFor, KEY_RE } from './runs.mjs';
 import { gradeVerdict } from './grade.mjs';
@@ -107,6 +107,8 @@ export const COMMANDS = {
       return result;
     }
     if (v['post-missing']) {
+      // A cancelled or superseded review must not post "did not complete" for a head nobody needs.
+      if (fetchPr(v.repo, prNumber(v.pr)).headRefOid !== head) throw new ExitError({ verdict: 'human-decision-needed', source: 'stale' });
       const marker = formatMarker('verdict');
       postPrComment(v.repo, prNumber(v.pr), formatVerdictBody({ verdict: 'human-decision-needed', head, findings: [], diffRisk: [], reason: 'review did not complete', marker }));
       throw new ExitError({ verdict: 'human-decision-needed', source: 'posted' });

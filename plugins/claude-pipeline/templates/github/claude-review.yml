@@ -55,7 +55,8 @@ jobs:
             --max-budget-usd 15
             --disallowedTools Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh pr edit:*),Bash(git push:*)
       - name: Verdict → check status
-        if: always()
+        # Skipped when cancelled: a run cancelled by a newer push must not post a verdict for a superseded head.
+        if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: node .claude-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs verdict-status --repo "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --head "${{ github.event.pull_request.head.sha }}" --post-missing

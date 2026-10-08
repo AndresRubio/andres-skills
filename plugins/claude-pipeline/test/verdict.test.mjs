@@ -6,6 +6,7 @@ import { computeVerdict, formatVerdictBody, parseVerdictBody, latestVerdict } fr
 import { runCli } from './helpers/cli.mjs';
 import { fakeGh } from './helpers/fake-gh.mjs';
 import { tempDir } from './helpers/git.mjs';
+import { PR_FIELDS } from '../skills/ship/scripts/lib/github.mjs';
 
 const HEAD = 'a'.repeat(40);
 const unambiguous = { file: 'src/list.ts', line: 12, severity: 'Important', kind: 'unambiguous', problem: 'off by one', impact: 'last item hidden', correction: 'use <= in the loop bound' };
@@ -119,6 +120,7 @@ test('CLI verdict computes the verdict from a findings file and prints the body'
 
 const REPO = 'o/r';
 const PR_COMMENTS = `api --paginate --slurp repos/${REPO}/issues/7/comments`;
+const PR_VIEW = `pr view 7 --repo ${REPO} --json ${PR_FIELDS}`;
 const apiComment = (id, created_at, body, login = 'github-actions[bot]', author_association = 'NONE') => ({ id, user: { login }, author_association, body, created_at });
 
 test('CLI verdict-latest and verdict-status read the PR comments', () => {
@@ -139,9 +141,21 @@ test('CLI verdict-latest and verdict-status read the PR comments', () => {
 test('CLI verdict-status --post-missing posts a fallback verdict and still exits 1', () => {
   const dir = fakeGh({
     [PR_COMMENTS]: [[]],
+    [PR_VIEW]: { number: 7, headRefOid: HEAD, labels: [] },
     [`pr comment 7 --repo ${REPO} --body-file BODY`]: 'https://github.com/o/r/pull/7#issuecomment-1',
   });
   const r = runCli(['verdict-status', '--repo', REPO, '--pr', '7', '--head', HEAD, '--post-missing'], { env: { PATH: `${dir}:${process.env.PATH}`, CLAUDE_PIPELINE_BODY_FILE: 'BODY' }, cwd: dir });
   assert.equal(r.code, 1);
   assert.deepEqual(r.json(), { verdict: 'human-decision-needed', source: 'posted' });
+});
+
+test('CLI verdict-status --post-missing posts nothing for a head the PR has moved past (final review I9)', () => {
+  const dir = fakeGh({
+    [PR_COMMENTS]: [[]],
+    [PR_VIEW]: { number: 7, headRefOid: 'b'.repeat(40), labels: [] },
+    // No route for `pr comment`: posting would make the fake gh fail.
+  });
+  const r = runCli(['verdict-status', '--repo', REPO, '--pr', '7', '--head', HEAD, '--post-missing'], { env: { PATH: `${dir}:${process.env.PATH}`, CLAUDE_PIPELINE_BODY_FILE: 'BODY' }, cwd: dir });
+  assert.equal(r.code, 1, r.stderr);
+  assert.deepEqual(r.json(), { verdict: 'human-decision-needed', source: 'stale' });
 });

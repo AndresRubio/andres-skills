@@ -6,7 +6,7 @@ import { renderWorkflow, defaultVars } from '../skills/ship/scripts/lib/setup.mj
 const tpl = (name) => readFileSync(new URL(`../templates/github/${name}`, import.meta.url), 'utf8');
 const rendered = (name) => renderWorkflow(tpl(name), defaultVars());
 
-test('claude-review: job and check are both named claude-review; it never approves; the status step always runs', () => {
+test('claude-review: job and check are both named claude-review; it never approves; the status step runs unless cancelled', () => {
   const t = rendered('claude-review.yml');
   assert.match(t, /^name: claude-review$/m);
   assert.match(t, /^  claude-review:\n    name: claude-review$/m);
@@ -14,7 +14,8 @@ test('claude-review: job and check are both named claude-review; it never approv
   assert.match(t, /prompt: "\/claude-pipeline:review \$\{\{ github\.event\.pull_request\.number \}\} --head \$\{\{ github\.event\.pull_request\.head\.sha \}\}"/);
   assert.match(t, /--model claude-fable-5-1/);
   assert.match(t, /--disallowedTools .*Bash\(gh pr review:\*\)/);
-  assert.match(t, /if: always\(\)[\s\S]*?run: node .*pipeline\.mjs verdict-status .* --post-missing/);
+  assert.match(t, /if: \$\{\{ !cancelled\(\) \}\}\n[\s\S]*?run: node .*pipeline\.mjs verdict-status .* --post-missing/);
+  assert.doesNotMatch(t, /always\(\)/);
   assert.match(t, /head\.repo\.full_name == github\.repository/);
   assert.match(t, /CLAUDE_PIPELINE_GUARD: '1'/);
   assert.doesNotMatch(t, /gh pr review --approve/);
