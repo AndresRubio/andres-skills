@@ -47,3 +47,9 @@ test('review SKILL.md installs dependencies in the worktree during Setup', () =>
   const setup = read('SKILL.md').split('## Setup')[1].split('\n## ')[0];
   assert.match(setup, /npm ci/);
 });
+
+test('review SKILL.md allows npx only as `npx --no` for a declared dependency (final review I11)', () => {
+  const step = read('SKILL.md').match(/^2\. \*\*Re-run the evidence\.\*\*.*$/m)?.[0] ?? '';
+  assert.match(step, /`npx --no <tool> …` only when `<tool>` is a key in `package\.json`'s `dependencies` or `devDependencies`/);
+  assert.doesNotMatch(step, /`npx <tool>/);
+});
