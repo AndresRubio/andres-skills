@@ -6,13 +6,15 @@ export const REVIEW_CHECK = 'claude-review';
 
 // When an entry happened: completedAt (else startedAt) for a check run, createdAt for a status
 // context. gh prints the zero time (0001-01-01) for a run that hasn't completed, so only real
-// dates count. No timestamp ranks oldest.
+// dates count. No timestamp ranks oldest, except an unfinished run, which ranks newest.
 function entryTime(e) {
   const fields = e.__typename === 'StatusContext' ? [e.createdAt, e.startedAt] : [e.completedAt, e.startedAt];
   for (const value of fields) {
     const ms = value ? new Date(value).getTime() : NaN;
     if (Number.isFinite(ms) && ms > 0) return ms;
   }
+  // A check run that hasn't started yet (QUEUED, no real timestamps) is the newest attempt.
+  if (e.__typename !== 'StatusContext' && e.status && e.status !== 'COMPLETED') return Infinity;
   return -Infinity;
 }
 

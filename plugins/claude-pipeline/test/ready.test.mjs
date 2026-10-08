@@ -175,3 +175,10 @@ test('decideReady asks for the ready label to be removed on every non-green deci
   assert.equal(decideReady({ pr: labelled(), config, verdict: accepted }).removeReady, undefined);
   assert.equal(decideReady({ pr: pr({ statusCheckRollup: [run('test', 'FAILURE'), run('claude-review', 'SUCCESS')] }), config, verdict: accepted }).removeReady, undefined);
 });
+
+test('a queued re-run with no timestamps outranks an older failure (final review re-review)', () => {
+  const failed = { __typename: 'CheckRun', name: 'claude-review', status: 'COMPLETED', conclusion: 'FAILURE', startedAt: '2026-10-07T09:00:00Z', completedAt: '2026-10-07T09:05:00Z' };
+  const queued = { __typename: 'CheckRun', name: 'claude-review', status: 'QUEUED', conclusion: null, startedAt: '0001-01-01T00:00:00Z', completedAt: '0001-01-01T00:00:00Z' };
+  assert.equal(checkState([failed, queued], 'claude-review'), 'pending');
+  assert.equal(checkState([queued, failed], 'claude-review'), 'pending');
+});
