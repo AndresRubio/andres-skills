@@ -537,7 +537,7 @@ A model checking its own work shares its own blind spots. These additions put de
 
 ### 7.5 Measurement (Phase 2b, D19)
 
-Warp knows its cost per PR fell from $80 to $30 because every run is recorded and a sample is graded. The pipeline gets the same instruments, kept deliberately small: files in git, one CLI command, no dashboard.
+Warp tracks cost per PR and grades a sample of runs, which is how it can show the trend (the specific figures sometimes quoted for Warp have no public source we could find). The pipeline gets the same instruments, kept deliberately small: files in git, one CLI command, no dashboard.
 
 **`run.json`, one per run.** Stage 10 and fix mode write `docs/pipeline/<KEY>/run.json` on the branch (fix runs append to a `runs` array in the same file). The report comment carries its one-line summary. Fields:
 
