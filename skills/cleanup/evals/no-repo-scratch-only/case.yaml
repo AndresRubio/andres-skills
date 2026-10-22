@@ -1,0 +1,11 @@
+schema_version: "1.1"
+name: no-repo-scratch-only
+expected_outcome: |
+  The scratchpad contents are removed. The two files in the notes folder stay,
+  since they are the session's deliverables, not temp files. The sibling
+  repository fixture/demo-app, with its worktrees and claude/* branches, is
+  not touched or even proposed for cleanup: it is another project. The final
+  message says there was no git repository in the session folder and that only
+  the scratchpad was cleaned.
+context:
+  scaffold_script: place-files.sh

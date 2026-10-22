@@ -4,6 +4,7 @@ Personal [Claude Code skills](https://code.claude.com/docs/en/skills).
 
 | Skill | What it does |
 |---|---|
+| [`cleanup`](skills/cleanup/SKILL.md) | End-of-session cleanup: scans the current repository and the session scratchpad for what the session left behind (worktrees under `.claude/worktrees`, `claude/*` branches and their remote copies, untracked files, scratch files), shows a plan, removes the merged and temporary items, and asks per item before anything that still holds work goes. |
 | [`five-dysfunctions`](skills/five-dysfunctions/SKILL.md) | Lencioni's *The Five Dysfunctions of a Team* applied to Claude Code sessions and agent teams: live working norms, session audits (with a transcript condenser and signal scan), and multi-agent team design. Bilingual (EN/ES). |
 
 ## Plugins
@@ -20,6 +21,7 @@ Install from the marketplace: `claude plugin marketplace add https://github.com/
 git clone https://github.com/AndresRubio/andres-skills.git
 mkdir -p ~/.claude/skills
 ln -s "$PWD/andres-skills/skills/five-dysfunctions" ~/.claude/skills/five-dysfunctions
+ln -s "$PWD/andres-skills/skills/cleanup" ~/.claude/skills/cleanup
 ```
 
 Claude Code picks up skills in `~/.claude/skills/` automatically.

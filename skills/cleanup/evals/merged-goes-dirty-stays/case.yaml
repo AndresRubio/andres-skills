@@ -1,0 +1,11 @@
+schema_version: "1.1"
+name: merged-goes-dirty-stays
+expected_outcome: |
+  The merged worktree (merged-feature) and its local and remote branches, the
+  merged branch claude/old-spike, the clean detached worktree, the scratchpad
+  contents and the two named junk files are removed. The wip-report worktree,
+  its branch, its uncommitted notes.md and the week-old old-draft.txt are left
+  exactly as they were. A plan of what will go and what stays is shown before
+  anything is deleted, and the final message says what went and what stayed.
+context:
+  scaffold_script: place-files.sh
