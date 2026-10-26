@@ -18,11 +18,12 @@ Turns one work item into a pull request, one stage at a time. Every stage reads 
 ## Setup (do this first)
 
 1. Create the run directory and its variables file in one command, then remember the printed path as RUN_DIR:
-   `mkdir -p "${CLAUDE_PIPELINE_HOME:-$HOME/.claude-pipeline}/runs" && RUN_DIR=$(mktemp -d "${CLAUDE_PIPELINE_HOME:-$HOME/.claude-pipeline}/runs/run-XXXXXX") && printf "set -u\nPIPELINE='%s'\nRUN_DIR='%s'\n" "<this skill's base directory>/scripts/pipeline.mjs" "$RUN_DIR" > "$RUN_DIR/vars.sh" && echo "$RUN_DIR"`
+   `mkdir -p "${CLAUDE_PIPELINE_HOME:-$HOME/.claude-pipeline}/runs" && RUN_DIR=$(mktemp -d "${CLAUDE_PIPELINE_HOME:-$HOME/.claude-pipeline}/runs/run-XXXXXX") && mkdir "$RUN_DIR/logs" && printf "set -u\nPIPELINE='%s'\nRUN_DIR='%s'\n" "<this skill's base directory>/scripts/pipeline.mjs" "$RUN_DIR" > "$RUN_DIR/vars.sh" && echo "$RUN_DIR"`
    Files that must never be committed go in RUN_DIR: issue JSON, config JSON, checklists, comment and PR bodies. Creating it under the pipeline home means a headless run needs only one extra allowed directory.
 2. **Shell variables don't survive between separate Bash tool calls.** Start every command that uses a `$VARIABLE` with `. '<RUN_DIR>/vars.sh' &&`, writing RUN_DIR's path literally. Once stage 1 has set WT, the prefix becomes `. '<RUN_DIR>/vars.sh' && cd "$WT" && ` — cwd doesn't survive between calls either, so every command from here on needs the `cd`, not just the first one. A command that pushes contains only that prefix, `git add`, `git commit`, `git status` and the push itself (`git push origin "$BRANCH"` or `git push -u origin "$BRANCH"`): do anything else (copying files, recording a SHA) in a separate command. Exception: after the stop procedure removes the worktree, commands run without `cd "$WT"`. Whenever a stage sets a variable (KEY, NUMBER, REPO, BRANCH, WT, …), append it to vars.sh as `NAME='value'` (single quotes: paths may contain spaces). `node "$PIPELINE" …` commands print JSON on stdout (except `marker`, which prints one line); on failure they exit non-zero with `{"error": …}` on stderr. Commands shown in the stage files and the tracker adapter leave this prefix out — always add it. `set -u` makes an unset variable an error once vars.sh is sourced; if a `node "$PIPELINE"` command prints nothing at all, vars.sh wasn't sourced: stop and fix the command. Inside a value, write a single quote as `'\''`. When a subagent must run such commands, give it the same prefix. If RUN_DIR is lost within the *same* run (a new session, or context compaction), run step 1 again, re-append every row of progress.md's Run table to the new vars.sh, and rebuild RUN_DIR's inputs — each of these is read-only: `node "$PIPELINE" config > "$RUN_DIR/config.json"`; `tracker:read-issue`; `tracker:active-runs` (without `--expect-locked`: this is only a rebuild); stage 1 step 4 for `checks.txt`; and `source.json` from stage 0 step 1. A *resumed* run is different and is handled by stage 1 step 2 instead, which takes only BASE_SHA and TASKS from that table.
 3. Read `trackers/github.md`. Stage files name tracker operations as `tracker:<operation>`; each one is a section of the adapter. (Phase 1 supports GitHub only.)
 4. Note MODE. In automatic mode never ask the user anything: every place a stage would ask becomes a stop.
+5. Read `context-hygiene.md`: how to keep what you re-read small (subagent briefs, `/clear` points, idle sessions).
 
 ## Hard rules
 
@@ -38,6 +39,7 @@ These apply in every mode and every stage.
 8. **A parent issue with open sub-issues:** automatic mode works only the children; interactive mode asks which one.
 9. **If the diff grows past `maxPrSize` mid-build, stop and propose a split.**
 10. **Every commit message ends with a `Co-Authored-By: Claude <model> <noreply@anthropic.com>` trailer** naming the model running this session. Commits are authored by the repo's configured git user.
+11. **Keep tool output short.** A command that can print more than ~50 lines sends its output to a file and shows only what the stage needs: `… > "$RUN_DIR/logs/<stage>-<what>.log" 2>&1; tail -n 40 "$RUN_DIR/logs/<stage>-<what>.log"`, or a `grep -E 'error|fail|warn' | head -40` of it. Package installs, dev servers and test runs always go through a log file; test runners get their quiet flag (`--reporter=dot`, `--silent`, `-q`). Never `cat` a file to read it: use the Read tool with a line range or `sed -n`. The evidence Commands table records the log path and the exit code, not the output.
 
 ## Stages
 
@@ -78,7 +80,18 @@ Use this whenever a stage says "stop procedure".
 
 ## Model policy
 
-Name the model on every subagent dispatch:
-- **haiku:** tracker queries and label operations.
-- **sonnet:** research, implementer subagents, evidence write-up.
-- **opus (or the strongest available model):** grading, spec, plan, reviews, conflict resolution.
+Name the model and the effort on every subagent dispatch and at run start:
+
+| Work | Model | Effort |
+|---|---|---|
+| Tracker queries, labels, resolve and lock | haiku | low |
+| Research, implementers, evidence write-up | sonnet | medium |
+| Grade, spec, plan | strongest available | high |
+| Stage 8 review, `claude-review`, conflict resolution | strongest available | high; max only for a `human-decision-needed` re-check |
+
+Effort is set once per run (headless: `--effort` in `claude_args`; interactive: at stage 0), never mid-run, because each model keeps its own cache and a switch re-processes the whole context.
+
+Subagent rules:
+- Work of three steps or fewer is done inline, with no subagent.
+- Independent subagents are dispatched in the same message so they run in parallel.
+- Each dispatch carries a bounded brief and a 30-line return limit.

@@ -92,3 +92,11 @@ test('the agent loads the pinned plugin checkout with --plugin-dir, never the ma
     assert.match(t, /# Verify on the first sandbox run that claude-code-action passes --plugin-dir through\./, name);
   }
 });
+
+test('both agent lanes run at --effort high, never max (token-leaks amendment D)', () => {
+  for (const name of ['claude-ship.yml', 'claude-review.yml']) {
+    const t = rendered(name);
+    assert.match(t, /claude_args: \|\n(?:\s+--[^\n]+\n)*\s+--effort high\n/, name);
+    assert.doesNotMatch(t, /--effort max/, name);
+  }
+});

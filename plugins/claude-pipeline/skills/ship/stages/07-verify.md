@@ -8,7 +8,7 @@ WT, BASE_SHA, `$RUN_DIR/checks.txt`, `$RUN_DIR/config.json` (`preview`), `docs/p
 
 ## Steps
 
-1. Follow superpowers:verification-before-completion. Run every command in `checks.txt` fresh, in WT. Create `docs/pipeline/<KEY>/evidence.md` from `templates/evidence.md` if it doesn't already exist (fix mode reuses it: replace the Commands table with the fresh results and add to the other sections instead of recreating the file). For each command record the command, its exit code and its last 5 lines of output in the Commands table.
+1. Follow superpowers:verification-before-completion. Run every command in `checks.txt` fresh, in WT, each one redirected to its own log in one command: `<command> > "$RUN_DIR/logs/verify-<n>.log" 2>&1` (use the test runner's quiet flag, such as `--reporter=dot`, `--silent` or `-q`). Read the result in a separate command: `tail -n 40 "$RUN_DIR/logs/verify-<n>.log"`, or `grep -E 'error|fail|warn' "$RUN_DIR/logs/verify-<n>.log" | head -40`. Create `docs/pipeline/<KEY>/evidence.md` from `templates/evidence.md` if it doesn't already exist (fix mode reuses it: replace the Commands table with the fresh results and add to the other sections instead of recreating the file). The Commands table records each command, the log path and the exit code, not the output.
 2. **Any command red:** diagnose it (mattpocock-skills:diagnosing-bugs), fix it test-first, commit, and re-run all the commands. At most 2 fix attempts.
 3. **Revert check** (spec §7.4). Take the command in `checks.txt` that runs the test suite (the one that invokes the `test` script; if there are several, the first). Run `node "$PIPELINE" revert-check --base "$BASE_SHA" --command "<that command>" > "$RUN_DIR/revert.json"`. Read the result as one of these outcomes and record it under "Revert check" in evidence.md:
    - `skipped` is true: record the reason. No finding.
@@ -19,7 +19,7 @@ WT, BASE_SHA, `$RUN_DIR/checks.txt`, `$RUN_DIR/config.json` (`preview`), `docs/p
 5. **If yes and the config has `preview`:**
    1. `node "$PIPELINE" free-port` gives PORT.
    2. `node "$PIPELINE" preview-start --config-file "$RUN_DIR/config.json" --port "<PORT>" --cwd "$WT" --log "$RUN_DIR/preview.log" --pid-file "$RUN_DIR/preview.pid"`. If it fails, write "Visual check needed: preview did not start" and skip to step 6.
-   3. For each changed screen reachable by URL: `node "$PIPELINE" screenshot --url "http://localhost:<PORT>/<path>" --out "docs/pipeline/<KEY>/screenshots/<n>-<what>.png"`.
+   3. For each changed screen reachable by URL: `node "$PIPELINE" screenshot --url "http://localhost:<PORT>/<path>" --out "docs/pipeline/<KEY>/screenshots/<n>-<what>.png"`. The command captures the 1280x800 viewport, never the full page, and writes one file per changed screen. The PNG files are evidence for the PR and the user. Don't read them into your context, unless an acceptance criterion needs a visual judgement: then read one at a time.
    4. For a state that needs interaction (clicking, typing), use the session's browser tool if one exists, and describe what you saw.
    5. List every screenshot under "Screenshots": the file, what it shows, and which AC it demonstrates.
    6. `node "$PIPELINE" preview-stop --pid-file "$RUN_DIR/preview.pid"`, on every path out of step 5.
@@ -34,8 +34,8 @@ evidence.md (Commands, Revert check, Visible change, Screenshots, Departures fro
 
 ## Automatic mode
 
-Still red after 2 attempts: stop procedure, with the failing command and its output.
+Still red after 2 attempts: stop procedure, with the failing command, its log path and the last 20 lines of that log.
 
 ## Interactive mode
 
-Still red after 2 attempts: show the failures and ask. For a visible change, show the screenshots and ask whether they look right.
+Still red after 2 attempts: show the failures and ask. For a visible change, give the user the path of each screenshot (not the image) and ask whether they look right.

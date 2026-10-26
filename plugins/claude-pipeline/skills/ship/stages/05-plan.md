@@ -30,3 +30,5 @@ TASKS > 8: stop procedure. The `blocked` comment carries a proposed split writte
 ## Interactive mode
 
 Give the plan's path and task count and ask "Continue to build?" If the user edits the plan, count the tasks again. TASKS > 8: show a proposed split and ask.
+
+Once the plan is committed and pushed, say so and recommend `/clear` followed by `/claude-pipeline:ship <KEY>`. A fresh session costs the backpack and a few lines of `progress.md`, and stage 1 resumes from it.

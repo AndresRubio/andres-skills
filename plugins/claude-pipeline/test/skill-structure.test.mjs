@@ -82,10 +82,10 @@ test('SKILL.md is a model-invocable skill named ship', () => {
   assert.doesNotMatch(front[1], /disable-model-invocation/);
 });
 
-test('SKILL.md carries the ten hard rules and the stop procedure', () => {
+test('SKILL.md carries the eleven hard rules and the stop procedure', () => {
   const text = read('SKILL.md');
   const rules = text.split('## Hard rules')[1]?.split('\n## ')[0] ?? '';
-  for (let n = 1; n <= 10; n += 1) assert.match(rules, new RegExp(`^${n}\\. \\*\\*`, 'm'), `hard rule ${n} missing`);
+  for (let n = 1; n <= 11; n += 1) assert.match(rules, new RegExp(`^${n}\\. \\*\\*`, 'm'), `hard rule ${n} missing`);
   assert.ok(headings(text).includes('Stop procedure'));
   assert.ok(headings(text).includes('Model policy'));
 });
@@ -632,4 +632,35 @@ test('Phase 2a: fix mode removes claude-fix first, reads the verdict, then the o
 
 test('Phase 2a: the GitHub adapter defines remove-pr-labels', () => {
   assert.ok(headings(read('trackers/github.md')).includes('remove-pr-labels'));
+});
+
+test('token leaks: SKILL.md stays under 100 lines and loads its files lazily', () => {
+  const text = read('SKILL.md');
+  assert.ok(text.trimEnd().split('\n').length < 100, 'SKILL.md must stay under 100 lines');
+  for (const f of readdirSync(path.join(SKILL_DIR, 'stages')).filter((n) => n.endsWith('.md'))) {
+    assert.ok(text.includes(`stages/${f}`), `SKILL.md does not reference stages/${f}`);
+  }
+  for (const rel of ['context-hygiene.md', 'trackers/github.md']) {
+    assert.ok(statSync(path.join(SKILL_DIR, rel)).isFile(), `${rel} is missing`);
+    assert.ok(text.includes(rel), `SKILL.md does not reference ${rel}`);
+  }
+});
+
+test('token leaks: SKILL.md has the output rule, the effort column and the subagent rules', () => {
+  const text = read('SKILL.md');
+  const rules = text.split('## Hard rules')[1]?.split('\n## ')[0] ?? '';
+  assert.match(rules, /^11\. \*\*Keep tool output short\.\*\*/m);
+  assert.match(rules, /tail -n 40/);
+  const policy = text.split('## Model policy')[1] ?? '';
+  assert.match(policy, /\| Work \| Model \| Effort \|/);
+  assert.match(policy, /`--effort` in `claude_args`/);
+  assert.match(policy, /three steps or fewer/);
+  assert.match(policy, /30-line return limit/);
+});
+
+test('token leaks: context-hygiene.md has its five rules and no inlined copy lives in SKILL.md', () => {
+  const hygiene = read('context-hygiene.md');
+  assert.match(hygiene, /^# Context hygiene$/m);
+  assert.equal((hygiene.match(/^- /gm) ?? []).length, 5);
+  assert.doesNotMatch(read('SKILL.md'), /\/claude-pipeline:ship <KEY>/);
 });

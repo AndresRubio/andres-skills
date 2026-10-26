@@ -79,5 +79,6 @@ jobs:
           # Verify on the first sandbox run that claude-code-action passes --plugin-dir through.
           claude_args: |
             --plugin-dir .claude-pipeline-plugin/{{PLUGIN_SUBDIR}}
+            --effort high
             --max-budget-usd 25
             --disallowedTools Bash(gh pr merge:*),Bash(gh pr review:*),Bash(git push --force:*),Bash(git push -f:*)

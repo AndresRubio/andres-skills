@@ -1,6 +1,6 @@
 # Token leaks amendment (2026-10-07)
 
-Amendment to `2026-09-24-claude-pipeline-design.md`. Status: proposed; nothing below is implemented yet.
+Amendment to `2026-09-24-claude-pipeline-design.md`. Status: D21 accepted. A, C, D, F, G and H applied on 2026-10-26 (prose and templates, see the disposition at the end). B, E and I wait for Phase 2b.
 
 **Source.** Andrea Eskailet, "Tus tokens de Claude Code se van así (y cómo pararlo)" (youtube.com/watch?v=TZ1Uh4MZXsk), measured over 25,000+ Claude Code responses from her own sessions. The numbers are hers, not ours; `metrics` (D19) will tell us how far they hold for pipeline runs.
 

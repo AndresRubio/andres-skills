@@ -25,6 +25,7 @@ KEY, BRANCH, BASE_REF, REPO_ROOT, `$RUN_DIR/config.json`.
 5. Baseline: run every command in `checks.txt` in WT. All must pass.
 6. `BASE_SHA=$(git rev-parse "$BASE_REF")`.
 7. Create `docs/pipeline/<KEY>/progress.md` from `templates/progress.md`. Fill in the Run table and tick stages 0 and 1. Don't commit yet.
+8. Check the size of the repo's instructions file: `wc -l CLAUDE.md` (and `wc -l AGENTS.md` if it exists), run in WT. Over 200 lines, add a line under "Known issues" in progress.md: "CLAUDE.md is N lines; Anthropic recommends under 200" (name AGENTS.md instead when that is the long one). Never edit either file: they belong to the repo owner. Interactive mode: also say it to the user in one line.
 
 ## Outputs
 

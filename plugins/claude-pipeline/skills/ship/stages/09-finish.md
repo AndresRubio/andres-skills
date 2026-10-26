@@ -40,3 +40,5 @@ Use superpowers:finishing-a-development-branch.
 - If the user chooses "Push and create a Pull Request": if step 2 found an existing PR, reuse it as PR_URL and don't create another; otherwise create it with `tracker:create-pr` and the body above.
 - If the user chooses to merge locally: follow that skill's steps, but skip its worktree-cleanup step — stage 10 still uses WT and tells the user how to remove it. Stage 10 still reports, with "merged locally" in place of a PR link.
 - If the user keeps the branch as-is: go to stage 10 with no PR.
+
+Once the PR is open, say so and recommend `/clear` followed by `/claude-pipeline:ship <KEY>`. Stage 1 resumes from `progress.md`, so the next session does not need this one's context.
