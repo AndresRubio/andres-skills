@@ -249,3 +249,11 @@ test('pr-count is now an unknown command', () => {
   assert.equal(r.code, 2);
   assert.match(JSON.parse(r.stderr).error, /unknown command "pr-count"/);
 });
+
+test('normalizeIssue keeps the creation time, which orders the sweep', () => {
+  const issue = normalizeIssue({
+    number: 3, id: 1, node_id: 'n', title: 't', body: '', state: 'open', html_url: 'https://github.com/o/r/issues/3',
+    user: { login: 'AndresRubio' }, author_association: 'OWNER', labels: [], created_at: '2026-10-20T08:00:00Z',
+  }, []);
+  assert.equal(issue.createdAt, '2026-10-20T08:00:00Z');
+});

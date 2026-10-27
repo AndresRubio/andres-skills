@@ -58,3 +58,9 @@ test('verdict and ready are marker kinds and round-trip', () => {
     assert.deepEqual(parseMarker(`${line}\n\n**Verdict:** \`accepted\``), { kind, at: '2026-09-25T10:00:00Z', run: 'local' });
   }
 });
+
+test('score is a marker kind and round-trips', () => {
+  assert.ok(MARKER_KINDS.includes('score'));
+  const line = formatMarker('score', { now: NOW, run: 'local' });
+  assert.deepEqual(parseMarker(`${line}\n\n**Score** at head \`aaaaaaa\``), { kind: 'score', at: '2026-09-25T10:00:00Z', run: 'local' });
+});

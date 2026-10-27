@@ -60,6 +60,7 @@ export function normalizeIssue(apiIssue, apiComments, { blockedBy = [], subIssue
     title: apiIssue.title,
     body: apiIssue.body ?? '',
     state: apiIssue.state,
+    createdAt: apiIssue.created_at ?? null,
     url: apiIssue.html_url,
     author: apiIssue.user?.login ?? null,
     authorAssociation: apiIssue.author_association,
