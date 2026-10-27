@@ -100,3 +100,16 @@ test('both agent lanes run at --effort high, never max (token-leaks amendment D)
     assert.doesNotMatch(t, /--effort max/, name);
   }
 });
+
+test('claude-ship: a workflow_dispatch with an issue input is routed like the other events', () => {
+  const t = rendered('claude-ship.yml');
+  assert.match(t, /^  workflow_dispatch:\n    inputs:\n      issue:\n[\s\S]*?required: true\n\s+type: string/m);
+});
+
+test('pipeline-ready: the sweep runs on schedule, by hand and on a merged claude/* PR, and may dispatch workflows', () => {
+  const t = rendered('pipeline-ready.yml');
+  assert.match(t, /^  actions: write$/m);
+  assert.match(t, /- name: Sweep deferred and waiting issues\n\s+if: \$\{\{ !cancelled\(\) && \(github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch' \|\| \(github\.event_name == 'pull_request' && github\.event\.action == 'closed' && github\.event\.pull_request\.merged && startsWith\(github\.event\.pull_request\.head\.ref, 'claude\/'\)\)\) \}\}/);
+  assert.match(t, /pipeline\.mjs sweep --repo-root \. --repo \$\{\{ github\.repository \}\}/);
+  assert.ok(t.indexOf('pipeline.mjs ready') < t.indexOf('pipeline.mjs sweep'), 'the sweep runs after the readiness pass');
+});

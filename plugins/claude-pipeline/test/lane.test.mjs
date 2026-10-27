@@ -59,6 +59,15 @@ test('other events never run', () => {
   assert.equal(laneTarget({ name: 'issues', payload: { action: 'opened', issue: issue() } }, { openPrs: [] }).run, false);
 });
 
+test('workflow_dispatch from the sweep starts a ship run for the named issue', () => {
+  assert.deepEqual(laneTarget({ name: 'workflow_dispatch', payload: { inputs: { issue: '12' } } }), {
+    run: true, prompt: '/claude-pipeline:ship #12 --mode auto', key: '12', concurrency: 'ship-12',
+  });
+  for (const issue of ['', '0', '12a', '-3', ' 12', undefined]) {
+    assert.equal(laneTarget({ name: 'workflow_dispatch', payload: { inputs: { issue } } }).run, false, String(issue));
+  }
+});
+
 test('CLI lane-target reads the event file and lists PRs only for comments', () => {
   const dir = tempDir();
   const file = path.join(dir, 'event.json');

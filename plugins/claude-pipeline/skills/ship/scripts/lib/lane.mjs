@@ -46,5 +46,12 @@ export function laneTarget({ name, payload }, { openPrs = [] } = {}) {
     if (names(pr.labels).includes('needs-local')) return no('needs-local PRs are fixed only by the local runner');
     return yes(`/claude-pipeline:ship ${pr.number} --mode auto --fix`, `PR-${pr.number}`);
   }
+  // The sweep (pipeline-ready) dispatches claude-ship with an issue number. Only users with write
+  // access, or the workflow token, can dispatch; stage 0 still checks the issue's eligibility.
+  if (name === 'workflow_dispatch') {
+    const raw = payload.inputs?.issue;
+    if (typeof raw !== 'string' || !/^[1-9]\d*$/.test(raw)) return no('workflow_dispatch needs a positive issue number input');
+    return yes(`/claude-pipeline:ship #${raw} --mode auto`, raw);
+  }
   return no(`event ${name}/${payload.action ?? ''} is not routed`);
 }

@@ -14,7 +14,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
-  actions: read
+  actions: write
 
 concurrency:
   group: pipeline-ready-${{ github.repository }}
@@ -50,3 +50,9 @@ jobs:
         run: |
           git remote set-head origin --auto
           node .claude-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs ready --repo-root . --repo ${{ github.repository }}
+      # The sweep (spec §8.1): restarts deferred, waiting and crashed issues by dispatching claude-ship.
+      - name: Sweep deferred and waiting issues
+        if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged && startsWith(github.event.pull_request.head.ref, 'claude/'))) }}
+        env:
+          GH_TOKEN: ${{ secrets.PIPELINE_TOKEN || github.token }}
+        run: node .claude-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs sweep --repo-root . --repo ${{ github.repository }}
