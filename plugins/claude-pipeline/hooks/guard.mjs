@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync
 import os from 'node:os';
 import path from 'node:path';
 import { checkCommand, isActivating } from '../skills/ship/scripts/lib/guard.mjs';
+import { runDirFromCommand, recordSession, readMarker, markerContent } from '../skills/ship/scripts/lib/session.mjs';
 
 // The run guard, as a Claude Code PreToolUse hook on Bash. It reads the hook input on stdin
 // and exits 2 (with the reason on stderr) to block the command; exit 0 lets it through.
@@ -33,13 +34,14 @@ function markerPath(home, sessionId) {
   return path.join(home, 'guard', sessionId.replace(/[^A-Za-z0-9_-]/g, '_'));
 }
 
-// Marks this session as a pipeline run, then deletes markers older than 14 days. Best effort:
-// the guard still checks the current command when this fails.
-function activate(marker) {
+// Marks this session as a pipeline run, then deletes markers older than 14 days. The marker is
+// JSON carrying the run folder (kept from the old marker when this command names none). Best
+// effort: the guard still checks the current command when this fails.
+function activate(marker, runDir) {
   if (!marker) return;
   try {
     mkdirSync(path.dirname(marker), { recursive: true });
-    writeFileSync(marker, `${new Date().toISOString()}\n`);
+    writeFileSync(marker, markerContent(runDir ?? readMarker(marker).runDir ?? null));
     const dir = path.dirname(marker);
     for (const name of readdirSync(dir)) {
       const file = path.join(dir, name);
@@ -64,15 +66,22 @@ async function main() {
   const command = input?.tool_input?.command;
   if (input?.tool_name !== 'Bash' || typeof command !== 'string') return;
 
+  const home = process.env.CLAUDE_PIPELINE_HOME || path.join(os.homedir(), '.claude-pipeline');
+  const marker = markerPath(home, input.session_id);
+
+  // Measurement, not enforcement: record the transcript for run.json even when the guard is off.
+  const runDir = runDirFromCommand(command, home);
+  if (runDir) {
+    try { recordSession(runDir, { sessionId: input.session_id, transcriptPath: input.transcript_path }); } catch { /* best effort */ }
+  }
+
   const mode = process.env.CLAUDE_PIPELINE_GUARD;
   if (mode === '0') return;
 
-  const home = process.env.CLAUDE_PIPELINE_HOME || path.join(os.homedir(), '.claude-pipeline');
-  const marker = markerPath(home, input.session_id);
   let active = mode === '1' || (marker !== null && existsSync(marker));
   try {
     if (isActivating(command)) {
-      activate(marker);
+      activate(marker, runDir);
       active = true;
     }
     if (!active) return;

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, statSync, utimesSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, utimesSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkCommand, isActivating } from '../skills/ship/scripts/lib/guard.mjs';
@@ -1021,6 +1021,39 @@ const bashInput = (command, session) => JSON.stringify({
   ...(session === undefined ? {} : { session_id: session }),
 });
 
+const sessionInput = (command, session, transcript) => JSON.stringify({
+  hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, session_id: session, transcript_path: transcript,
+});
+
+test('hook: sourcing a run\'s vars.sh records the session in the run folder and the run folder in the marker', () => {
+  const home = makeHome('guard-session-');
+  const runDir = path.join(home, 'runs', 'run-abc123');
+  mkdirSync(runDir, { recursive: true });
+  const r = runHook({ home, input: sessionInput(`. '${runDir}/vars.sh' && git status`, 's1', '/tmp/t/s1.jsonl') });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(JSON.parse(readFileSync(path.join(runDir, 'session.json'), 'utf8')).sessions.map((s) => [s.sessionId, s.transcriptPath]), [['s1', '/tmp/t/s1.jsonl']]);
+  assert.equal(JSON.parse(readFileSync(path.join(home, 'guard', 's1'), 'utf8')).runDir, runDir);
+});
+
+test('hook: the session is recorded even with CLAUDE_PIPELINE_GUARD=0, which still checks nothing', () => {
+  const home = makeHome('guard-session-off-');
+  const runDir = path.join(home, 'runs', 'run-abc124');
+  mkdirSync(runDir, { recursive: true });
+  const r = runHook({ home, guard: '0', input: sessionInput(`. '${runDir}/vars.sh' && git push origin main`, 's2', '/tmp/t/s2.jsonl') });
+  assert.equal(r.code, 0);
+  assert.equal(r.stderr, '');
+  assert.ok(readFileSync(path.join(runDir, 'session.json'), 'utf8').includes('s2'));
+});
+
+test('hook: a vars.sh outside <home>/runs is never written to', () => {
+  const home = makeHome('guard-session-out-');
+  const outside = makeHome('elsewhere-');
+  const runDir = path.join(outside, 'runs', 'run-abc125');
+  mkdirSync(runDir, { recursive: true });
+  runHook({ home, input: sessionInput(`. '${runDir}/vars.sh' && git status`, 's3', '/tmp/t/s3.jsonl') });
+  assert.throws(() => readFileSync(path.join(runDir, 'session.json')));
+});
+
 test('hook: does nothing while the guard is not active', () => {
   const home = makeHome('guard-off-');
   const r = runHook({ home, input: bashInput('git push origin main', 'sx') });
@@ -1055,7 +1088,7 @@ test('hook: a pipeline command switches the guard on for its own session only', 
   assert.equal(setup.code, 0);
   const marker = path.join(home, 'guard', 's1');
   assert.ok(existsSync(marker), 'marker file');
-  assert.match(readFileSync(marker, 'utf8'), /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d/);
+  assert.match(JSON.parse(readFileSync(marker, 'utf8')).at, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d/);
 
   assert.equal(runHook({ home, input: bashInput('git push origin main', 's1') }).code, 2);
   assert.equal(runHook({ home, input: bashInput('git push origin main', 's2') }).code, 0);
