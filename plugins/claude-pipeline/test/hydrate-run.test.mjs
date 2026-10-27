@@ -147,7 +147,8 @@ async function listen(handler) {
 }
 
 test('a real redirect to a host outside hydrateHosts is refused and nothing is written; one inside is kept', async () => {
-  const target = await listen((req, res) => { res.setHeader('content-type', 'text/plain'); res.end('elsewhere'); });
+  let targetHits = 0;
+  const target = await listen((req, res) => { targetHits += 1; res.setHeader('content-type', 'text/plain'); res.end('elsewhere'); });
   const start = await listen((req, res) => {
     if (req.url === '/moved') { res.statusCode = 302; res.setHeader('location', `http://${target.host}/x`); res.end(); return; }
     res.setHeader('content-type', 'text/plain'); res.end('here');
@@ -155,11 +156,12 @@ test('a real redirect to a host outside hydrateHosts is refused and nothing is w
   try {
     const out = tempDir('ctx-');
     const map = { 'https://docs.example.com/moved': `http://${start.host}/moved`, 'https://docs.example.com/stay': `http://${start.host}/stay` };
-    const deps = { ...fakeDeps(), fetchUrl: (u) => fetchLimited(map[u]) };
+    const deps = { ...fakeDeps(), fetchUrl: (u, o) => fetchLimited(map[u], o) };
     const r = await hydrate({ issue: issue('https://docs.example.com/moved https://docs.example.com/stay'), repo: 'o/r', config: { hydrateHosts: ['docs.example.com', start.host] }, outDir: out }, deps);
     assert.match(readFileSync(path.join(out, 'index.md'), 'utf8'), /\| not fetched: redirected off allowed hosts \|/);
     assert.deepEqual(readdirSync(out).sort(), ['01-url-docs.example.com.md', 'index.md']);
     assert.equal(r.fetched, 1);
+    assert.equal(targetHits, 0, 'the off-list server never received a request');
   } finally {
     start.server.close();
     target.server.close();
@@ -187,4 +189,47 @@ test('real gh deps report the first stderr line of a failed call, not the comman
   } finally {
     process.env.PATH = saved;
   }
+});
+
+// A fetch stand-in: `to(url, calls)` gives the Location of a 302, or null for a 200 text page.
+function stubFetch(to) {
+  const calls = [];
+  const fetchFn = async (url) => {
+    calls.push(url);
+    const loc = to(url, calls);
+    return loc ? new Response(null, { status: 302, headers: { location: loc } }) : new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } });
+  };
+  return { calls, fetchFn };
+}
+const viaStub = (stub) => ({ ...fakeDeps(), fetchUrl: (u, o) => fetchLimited(u, { ...o, fetchFn: stub.fetchFn }) });
+const hydrateUrl = async (stub) => {
+  const out = tempDir('ctx-');
+  const r = await hydrate({ issue: issue('https://docs.example.com/start'), repo: 'o/r', config, outDir: out }, viaStub(stub));
+  return { r, index: readFileSync(path.join(out, 'index.md'), 'utf8'), files: readdirSync(out) };
+};
+
+test('a chain of more than 5 redirects on allowed hosts ends as too many redirects', async () => {
+  const stub = stubFetch((u, calls) => `https://docs.example.com/hop${calls.length}`);
+  const { r, index, files } = await hydrateUrl(stub);
+  assert.equal(r.fetched, 0);
+  assert.match(index, /\| not fetched: too many redirects \|/);
+  assert.deepEqual(files, ['index.md']);
+  assert.equal(stub.calls.length, 6);
+});
+
+test('a redirect to http, or to an unlisted host, is refused before any request goes to it', async () => {
+  for (const target of ['http://docs.example.com/x', 'https://169.254.169.254/latest', 'https://docs.example.com.evil.example/x', 'https://docs.example.com:8443/x']) {
+    const stub = stubFetch((u) => (u.endsWith('/start') ? target : null));
+    const { r, index } = await hydrateUrl(stub);
+    assert.equal(r.fetched, 0, target);
+    assert.match(index, /\| not fetched: redirected off allowed hosts \|/, target);
+    assert.deepEqual(stub.calls, ['https://docs.example.com/start'], target);
+  }
+});
+
+test('a relative redirect and a redirect to another listed host are followed; the final URL is the last hop', async () => {
+  const stub = stubFetch((u) => (u.endsWith('/start') ? '/next' : u.endsWith('/next') ? 'https://github.com/o/r/readme' : null));
+  const r = await fetchLimited('https://docs.example.com/start', { hydrateHosts: config.hydrateHosts, fetchFn: stub.fetchFn });
+  assert.equal(r.finalUrl, 'https://github.com/o/r/readme');
+  assert.equal(r.body.toString(), 'ok');
 });

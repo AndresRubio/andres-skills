@@ -11,10 +11,34 @@ export const CONTEXT_LINES = 20;
 export const LOG_LINES = 200;
 export const PDF_RAW_LIMIT = 8 * 1024 * 1024; // an implementation limit on the PDF's bytes; 64 KB applies to its text
 
-export async function fetchLimited(url, { timeoutMs = TIMEOUT_MS, limit = PER_FILE } = {}) {
-  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), redirect: 'follow' });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const finalUrl = res.url || url;
+export const MAX_REDIRECTS = 5;
+
+// The next URL of a redirect. With an allow-list, a hop must stay on https and on a listed host
+// (URL.host, port included) before any request goes to it.
+export function nextHop(current, location, hydrateHosts) {
+  const next = new URL(location, current);
+  if (hydrateHosts && (next.protocol !== 'https:' || !hydrateHosts.includes(next.host))) throw new Error('redirected off allowed hosts');
+  return next.href;
+}
+
+const drop = (res) => res.body?.cancel().catch(() => {});
+
+// Redirects are followed by hand, at most MAX_REDIRECTS, under one timeout for the whole chain.
+// fetchFn is for tests.
+export async function fetchLimited(url, { timeoutMs = TIMEOUT_MS, limit = PER_FILE, hydrateHosts, fetchFn = fetch } = {}) {
+  const signal = AbortSignal.timeout(timeoutMs);
+  let current = url;
+  let res;
+  for (let hops = 0; ; hops += 1) {
+    res = await fetchFn(current, { signal, redirect: 'manual' });
+    const location = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
+    if (location === null) break;
+    await drop(res);
+    if (hops >= MAX_REDIRECTS) throw new Error('too many redirects');
+    current = nextHop(current, location, hydrateHosts);
+  }
+  if (!res.ok) { await drop(res); throw new Error(`HTTP ${res.status}`); }
+  const finalUrl = current;
   const contentType = res.headers.get('content-type') ?? '';
   const isPdf = /application\/pdf/i.test(contentType) || /\.pdf$/i.test(new URL(finalUrl).pathname);
   const cap = isPdf ? PDF_RAW_LIMIT : limit + 1;
@@ -58,7 +82,7 @@ export function realHydrateDeps() {
   return {
     ghJson: (args) => JSON.parse(gh(args)),
     ghText: (args) => gh(args),
-    fetchUrl: (url) => fetchLimited(url),
+    fetchUrl: (url, opts) => fetchLimited(url, opts),
     pdfToText,
   };
 }
@@ -99,7 +123,7 @@ const FETCHERS = {
     return [head, `Job: ${job.name}. Failing step: ${step?.name ?? 'none'}.`, '', `Last ${LOG_LINES} lines of the log:`, '', ...tail].join('\n');
   },
   url: async (ref, { config, deps }) => {
-    const r = await deps.fetchUrl(ref.url);
+    const r = await deps.fetchUrl(ref.url, { hydrateHosts: config.hydrateHosts });
     const host = new URL(r.finalUrl).host;
     if (!config.hydrateHosts.includes(host)) throw new Error('redirected off allowed hosts');
     if (r.isPdf) {
