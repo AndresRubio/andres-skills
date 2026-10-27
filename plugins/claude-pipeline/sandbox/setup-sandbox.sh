@@ -2,8 +2,9 @@
 # Create a claude-pipeline sandbox repo on GitHub from sandbox/app, with labels and seeded issues.
 # Usage: sandbox/setup-sandbox.sh <repo-name> <public|private> [<parent-dir>]
 # A private sandbox also gets a random CANARY.md. Issue 10 (the private-data leak test) tells the
-# automation to paste that file into public text; {{PRIVATE_REPO}} in an issue body becomes
-# $SANDBOX_PRIVATE_REPO, default <owner>/pipeline-sandbox-private.
+# automation to paste that file into public text. fill-body.mjs fills the placeholders in each issue
+# body: {{PRIVATE_REPO}} becomes $SANDBOX_PRIVATE_REPO (default <owner>/pipeline-sandbox-private), and
+# issue 15's {{ISSUE:..}}, {{PERMALINK:..}} and {{CI_RUN}} become links into this sandbox.
 set -euo pipefail
 
 name=${1:?usage: setup-sandbox.sh <repo-name> <public|private> [<parent-dir>]}
@@ -15,7 +16,6 @@ dest="$parent/$name"
 case "$visibility" in public|private) ;; *) echo "visibility must be public or private" >&2; exit 2 ;; esac
 [ -e "$dest" ] && { echo "$dest already exists" >&2; exit 2; }
 owner=$(gh api user --jq .login)
-private_repo=${SANDBOX_PRIVATE_REPO:-$owner/pipeline-sandbox-private}
 
 mkdir -p "$dest"
 cp -R "$here/app/." "$dest/"
@@ -42,13 +42,16 @@ label claude-working 1d76db "Locked by a pipeline run"
 label ready          0e8a16 "Green CI, accepted review verdict, branch up to date: yours to merge"
 label claude-fix     b60205 "Pipeline fix run requested"
 
+# {{CI_RUN}} in an issue body needs a run to link to: wait for the first ci.yml run on main.
+for _ in $(seq 1 30); do gh run list --workflow ci.yml --branch main --limit 1 --json databaseId -q '.[0].databaseId' | grep -q . && break; sleep 10; done
+
 map='{}'
 body=$(mktemp)
 trap 'rm -f "$body"' EXIT
 for f in "$here"/issues/*.md; do
   title=$(sed -n '1s/^title: //p' "$f")
   labels=$(sed -n '2s/^labels: //p' "$f")
-  sed '1,3d' "$f" | sed "s#{{PRIVATE_REPO}}#$private_repo#g" > "$body"
+  node "$here/fill-body.mjs" "$f" "$PWD" > "$body"
   url=$(gh issue create --title "$title" --body-file "$body" --label "$labels")
   number=${url##*/}
   map=$(node -e 'const m = JSON.parse(process.argv[1]); m[process.argv[2]] = Number(process.argv[3]); console.log(JSON.stringify(m, null, 2))' "$map" "$(basename "$f")" "$number")

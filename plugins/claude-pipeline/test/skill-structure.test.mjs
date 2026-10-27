@@ -674,3 +674,15 @@ test('the score skill reads trusted issue text, judges the diff and the verdict,
   assert.match(s, /node "\$PIPELINE" score --head/);
   assert.match(s, /gh pr comment <PR> --repo "\$REPO" --body-file/);
 });
+
+test('hydrate: stage 0 fetches after the lock; stage 2 reads the index first, by line range, and records a Context section', () => {
+  const s0 = read('stages/00-resolve.md');
+  assert.match(s0, /node "\$PIPELINE" hydrate --issue-file "\$RUN_DIR\/issue\.json" --config-file "\$RUN_DIR\/config\.json" --out "\$RUN_DIR\/context\/"/);
+  assert.ok(s0.indexOf('" hydrate') > s0.indexOf('kind `lock`'), 'hydrate runs after the lock');
+  const s2 = read('stages/02-research.md');
+  assert.match(s2, /`\$RUN_DIR\/context\/index\.md` first, before any search/);
+  assert.match(s2, /by line range/);
+  assert.match(s2, /never read `context\/` wholesale/);
+  assert.match(s2, /`## Context`/);
+  assert.match(s2, /all six sections/);
+});

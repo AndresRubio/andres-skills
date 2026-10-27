@@ -14,6 +14,16 @@ export function findLeaks(texts, forbidden) {
   return texts.filter((t) => (t.text ?? '').includes(forbidden)).map((t) => t.where);
 }
 
+// Rows of research.md's `## Context` table whose result cell starts with "fetched" (test issue 15).
+export function countFetched(researchMd) {
+  const text = String(researchMd ?? '');
+  const start = text.search(/^## Context\b/m);
+  if (start < 0) return 0;
+  const rest = text.slice(start).split('\n').slice(1);
+  const end = rest.findIndex((l) => /^## /.test(l));
+  return (end < 0 ? rest : rest.slice(0, end)).filter((l) => /^\|\s*\d+\s*\|/.test(l) && /\|\s*fetched\b/.test(l)).length;
+}
+
 export function evaluateFixture(expected, observed) {
   const failures = [];
   const verdicts = [].concat(expected.verdict);
@@ -49,6 +59,9 @@ export function evaluateFixture(expected, observed) {
   }
   if (observed.verdict === 'small-gaps' && !observed.commentKinds.includes('assumptions')) {
     failures.push('small-gaps but no assumptions comment');
+  }
+  if (expected.contextFetched !== undefined && observed.contextFetched !== expected.contextFetched) {
+    failures.push(`${observed.contextFetched ?? 0} references fetched, expected ${expected.contextFetched}`);
   }
   failures.push(...evaluateWait(expected, observed));
   return { pass: failures.length === 0, failures };

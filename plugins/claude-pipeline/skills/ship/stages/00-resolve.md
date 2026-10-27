@@ -37,6 +37,7 @@ Work out what the source is, load the repo's pipeline config, check the issue ma
      4. Stop here. This is not the stop procedure: `needs-decision` and `claude-go` stay as they are.
    - In interactive mode, if `admitted` is false, tell the user "<n> runs are ahead and `maxParallel` is <M>; continuing because you started this run."
 12. `tracker:set-in-progress`. If the issue has `needs-decision`, `tracker:remove-labels` `needs-decision`: this run is the resume.
+13. Pre-hydrate context (§5.6): `node "$PIPELINE" hydrate --issue-file "$RUN_DIR/issue.json" --config-file "$RUN_DIR/config.json" --out "$RUN_DIR/context/" > "$RUN_DIR/hydrate.json"`. It fetches what the trusted issue text links to and writes `context/index.md`. A reference it can't fetch is a line in the index, never a stop; if the command itself fails, apply hard rule 7.
 
 ### Free text (interactive only)
 
@@ -47,7 +48,7 @@ Work out what the source is, load the repo's pipeline config, check the issue ma
 
 ## Outputs
 
-KEY, NUMBER, REPO, REPO_ROOT, BRANCH, BASE_REF, LANE; `$RUN_DIR/{source,config,issue,eligibility,existing-prs,active-runs}.json`; the lock on the issue.
+KEY, NUMBER, REPO, REPO_ROOT, BRANCH, BASE_REF, LANE; `$RUN_DIR/{source,config,issue,eligibility,existing-prs,active-runs,hydrate}.json`; `$RUN_DIR/context/` (fetched files and `index.md`); the lock on the issue.
 
 ## Automatic mode
 

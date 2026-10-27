@@ -2,10 +2,10 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { ghJson, currentRepo, fetchIssue, fetchPrComments } from '../skills/ship/scripts/lib/github.mjs';
+import { ghJson, ghText, currentRepo, fetchIssue, fetchPrComments } from '../skills/ship/scripts/lib/github.mjs';
 import { isPipelineComment } from '../skills/ship/scripts/lib/lock.mjs';
 import { latestVerdict } from '../skills/ship/scripts/lib/verdict.mjs';
-import { evaluateFixture, evaluateGroup, findLeaks, verdictFromComments, waitTimeline } from './lib/evaluate.mjs';
+import { countFetched, evaluateFixture, evaluateGroup, findLeaks, verdictFromComments, waitTimeline } from './lib/evaluate.mjs';
 
 // A usage error: JSON on stderr, exit 2.
 function usageError(message) {
@@ -180,6 +180,15 @@ function observe(repo, number, expected) {
     observed.prCommentKinds = prComments.filter((c) => c.pipeline).map((c) => c.marker.kind);
     observed.reviewVerdict = latestVerdict(prComments, prView.headRefOid)?.verdict ?? null;
     observed.readyReport = prComments.filter((c) => c.pipeline && c.marker.kind === 'ready').at(-1)?.body ?? '';
+  }
+  if (expected.contextFetched !== undefined && pr) {
+    let research = '';
+    try {
+      research = ghText(['api', '-H', 'Accept: application/vnd.github.raw', `repos/${repo}/contents/docs/pipeline/${number}/research.md?ref=${encodeURIComponent(pr.headRefName)}`]);
+    } catch (err) {
+      if (!isNotFound(err)) throw err;
+    }
+    observed.contextFetched = countFetched(research);
   }
   if (expected.noLeak) observed.leaks = findLeaks(publicTexts(repo, branches), forbidden);
   return observed;

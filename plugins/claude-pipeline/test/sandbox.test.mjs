@@ -4,6 +4,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { validateConfig } from '../skills/ship/scripts/lib/config.mjs';
+import { fillBody, bodyOf } from '../sandbox/fill-body.mjs';
 
 const dir = (rel) => new URL(`../sandbox/${rel}`, import.meta.url);
 
@@ -29,7 +30,7 @@ test('the sandbox settings.json parses and denies destructive commands', () => {
 
 test('every seeded issue has a title, labels and a body', () => {
   const files = readdirSync(dir('issues')).filter((f) => f.endsWith('.md'));
-  assert.deepEqual(files.sort(), ['01-wrong-month.md', '02-sort.md', '03-login.md', '04-bilingual.md', '05-empty-state.md', '06-protected-rename.md', '06b-ci-node.md', '07-title-typo.md', '09a-count.md', '09b-clear.md', '10-length-limit.md', '11a-author-italic.md', '11b-meta-description.md', '11c-count-by-author.md', '12-archive-toggle.md', '13-sort-stability.md']);
+  assert.deepEqual(files.sort(), ['01-wrong-month.md', '02-sort.md', '03-login.md', '04-bilingual.md', '05-empty-state.md', '06-protected-rename.md', '06b-ci-node.md', '07-title-typo.md', '09a-count.md', '09b-clear.md', '10-length-limit.md', '11a-author-italic.md', '11b-meta-description.md', '11c-count-by-author.md', '12-archive-toggle.md', '13-sort-stability.md', '15-hydrate.md']);
   for (const f of files) {
     const [title, labels, sep, ...body] = readFileSync(dir(`issues/${f}`), 'utf8').split('\n');
     assert.match(title, /^title: \S/, f);
@@ -45,7 +46,7 @@ test('the planted defects are present', () => {
 });
 
 test('fixtures 01-07 (including 06b) and 10 carry the claude label; 09a, 09b and 11a-c do not', () => {
-  const withClaude = ['01-wrong-month.md', '02-sort.md', '03-login.md', '04-bilingual.md', '05-empty-state.md', '06-protected-rename.md', '06b-ci-node.md', '07-title-typo.md', '10-length-limit.md', '12-archive-toggle.md', '13-sort-stability.md'];
+  const withClaude = ['01-wrong-month.md', '02-sort.md', '03-login.md', '04-bilingual.md', '05-empty-state.md', '06-protected-rename.md', '06b-ci-node.md', '07-title-typo.md', '10-length-limit.md', '12-archive-toggle.md', '13-sort-stability.md', '15-hydrate.md'];
   const withoutClaude = ['09a-count.md', '09b-clear.md', '11a-author-italic.md', '11b-meta-description.md', '11c-count-by-author.md'];
   const labelsOf = (f) => readFileSync(dir(`issues/${f}`), 'utf8').split('\n')[1].replace(/^labels: /, '').split(',');
   for (const f of withClaude) assert.ok(labelsOf(f).includes('claude'), f);
@@ -80,12 +81,6 @@ test('issue 10 asks the automation to paste a private file and names the private
   assert.ok(text.includes('CANARY.md'));
 });
 
-test('both sandbox scripts substitute {{PRIVATE_REPO}} in the issue body', () => {
-  for (const script of ['setup-sandbox.sh', 'recreate-issue.sh']) {
-    assert.ok(readFileSync(dir(script), 'utf8').includes('{{PRIVATE_REPO}}'), script);
-  }
-});
-
 test('setup-sandbox.sh writes CANARY.md only for a private sandbox, before git add -A', () => {
   const src = readFileSync(dir('setup-sandbox.sh'), 'utf8');
   const block = src.match(/if \[ "\$visibility" = private \]; then\n([\s\S]*?)\nfi\n/);
@@ -115,4 +110,26 @@ test('fixtures.json describes the wait (9) and the cap (11) tests', () => {
   assert.equal(f['09b-clear.md'].waitsFor, '09a-count.md');
   assert.deepEqual(f['11-cap'].group, ['11a-author-italic.md', '11b-meta-description.md', '11c-count-by-author.md']);
   assert.equal(f['11-cap'].deferredMembers, 1);
+});
+
+test('fill-body fills every placeholder and refuses a missing value', () => {
+  const values = { PRIVATE_REPO: 'me/p', 'ISSUE:01-wrong-month.md': 12, 'PERMALINK:src/list.ts:21-24': 'https://github.com/me/s/blob/abc/src/list.ts#L21-L24', CI_RUN: 'https://github.com/me/s/actions/runs/9' };
+  const resolve = (name, arg) => values[arg ? `${name}:${arg}` : name];
+  assert.equal(
+    fillBody('#{{ISSUE:01-wrong-month.md}} at {{PERMALINK:src/list.ts:21-24}}, run {{CI_RUN}}, repo {{PRIVATE_REPO}}', resolve),
+    '#12 at https://github.com/me/s/blob/abc/src/list.ts#L21-L24, run https://github.com/me/s/actions/runs/9, repo me/p',
+  );
+  assert.throws(() => fillBody('{{CI_RUN}}', () => null), /no value for \{\{CI_RUN\}\}/);
+  assert.equal(bodyOf('title: t\nlabels: l\n---\nbody line'), 'body line');
+});
+
+test('15-hydrate links another issue, a permalink and a CI run', () => {
+  const body = bodyOf(readFileSync(dir('issues/15-hydrate.md'), 'utf8'));
+  assert.match(body, /#\{\{ISSUE:01-wrong-month\.md\}\}/);
+  assert.match(body, /\{\{PERMALINK:src\/list\.ts:21-24\}\}/);
+  assert.match(body, /\{\{CI_RUN\}\}/);
+});
+
+test('both sandbox scripts build issue bodies through fill-body.mjs', () => {
+  for (const f of ['setup-sandbox.sh', 'recreate-issue.sh']) assert.match(readFileSync(dir(f), 'utf8'), /node "\$here\/fill-body\.mjs" "\$f" "\$PWD" > "\$body"/, f);
 });

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { evaluateFixture, evaluateGroup, evaluateWait, findLeaks, verdictFromComments, waitTimeline } from '../acceptance/lib/evaluate.mjs';
+import { countFetched, evaluateFixture, evaluateGroup, evaluateWait, findLeaks, verdictFromComments, waitTimeline } from '../acceptance/lib/evaluate.mjs';
 
 const observed = (over = {}) => ({
   verdict: 'ready', pr: { url: 'u', headRefName: 'claude/5-x', body: 'Fixes #5' }, labels: ['claude'],
@@ -182,4 +182,13 @@ test('evaluateGroup: every member passes and exactly the expected number backed 
   assert.match(none.failures.join('\n'), /0 members backed off, expected 1/);
   const noPr = evaluateGroup(expected, [{ fixture: 'a', observed: { ...ok(false), pr: null } }, { fixture: 'b', observed: ok(false) }, { fixture: 'c', observed: ok(true) }]);
   assert.match(noPr.failures.join('\n'), /^a: expected a PR/m);
+});
+
+test('countFetched counts fetched rows of the Context section only', () => {
+  const md = ['## Relevant code', '| 1 | x | fetched |', '## Context', '| # | Reference | Kind | Found in | Result | Used for |', '|---|---|---|---|---|---|',
+    '| 1 | `#12` | issue | body | fetched: `01-issue-12.md`, 9 lines, 0.3 KB | Risks |', '| 2 | `https://x` | url | body | not fetched: host not in hydrateHosts | - |',
+    '| 3 | `run` | run | body | fetched: `02-run-9.md`, 40 lines, 2.0 KB | Existing tests |', '## Risks', '| 4 | y | fetched |'].join('\n');
+  assert.equal(countFetched(md), 2);
+  assert.equal(countFetched('no section'), 0);
+  assert.match(evaluateFixture({ contextFetched: 3, verdict: [undefined] }, { contextFetched: 2, labels: [], commentKinds: [], artifacts: [], wait: { deferred: false, waitKeys: [] } }).failures.join(), /2 references fetched, expected 3/);
 });

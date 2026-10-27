@@ -13,20 +13,15 @@ old=$(node -e 'console.log(require(process.argv[1])[process.argv[2]] ?? "")' "$P
 [ -n "$old" ] || { echo "no issue recorded for $fixture" >&2; exit 2; }
 
 # Build the new issue first, so a failure here happens before anything is closed.
-# {{PRIVATE_REPO}} becomes $SANDBOX_PRIVATE_REPO, default <owner>/pipeline-sandbox-private
-# (the user lookup only happens for a fixture that uses the placeholder).
+# fill-body.mjs fills the placeholders: {{PRIVATE_REPO}} becomes $SANDBOX_PRIVATE_REPO, default
+# <owner>/pipeline-sandbox-private, and issue 15's {{ISSUE:..}}, {{PERMALINK:..}} and {{CI_RUN}}
+# become links into this sandbox. Lookups only happen for a fixture that uses the placeholder.
 f="$here/issues/$fixture"
 title=$(sed -n '1s/^title: //p' "$f")
 labels=$(sed -n '2s/^labels: //p' "$f")
 body=$(mktemp)
 trap 'rm -f "$body"' EXIT
-if grep -qF '{{PRIVATE_REPO}}' "$f"; then
-  owner=$(gh api user --jq .login)
-  private_repo=${SANDBOX_PRIVATE_REPO:-$owner/pipeline-sandbox-private}
-  sed '1,3d' "$f" | sed "s#{{PRIVATE_REPO}}#$private_repo#g" > "$body"
-else
-  sed '1,3d' "$f" > "$body"
-fi
+node "$here/fill-body.mjs" "$f" "$PWD" > "$body"
 
 prs=$(gh pr list --state open --limit 200 --json number,headRefName --jq ".[] | select(.headRefName | startswith(\"claude/$old-\") or . == \"claude/$old\") | .number")
 for pr in $prs; do

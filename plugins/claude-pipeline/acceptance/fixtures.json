@@ -164,5 +164,17 @@
     "prCommentKinds": ["verdict"],
     "reviewVerdict": "human-decision-needed",
     "issueFile": "01-wrong-month.md"
+  },
+  "15-hydrate.md": {
+    "verdict": ["ready", "small-gaps"],
+    "pr": true,
+    "prFixesIssue": true,
+    "labelsAbsent": ["claude-working", "needs-decision"],
+    "commentKinds": ["lock", "grade", "report"],
+    "artifacts": ["research.md", "grade.md", "spec.md", "plan.md", "progress.md", "evidence.md", "run.json"],
+    "prLabelsPresent": ["ready"],
+    "prCommentKinds": ["verdict", "ready"],
+    "reviewVerdict": "accepted",
+    "contextFetched": 3
   }
 }
