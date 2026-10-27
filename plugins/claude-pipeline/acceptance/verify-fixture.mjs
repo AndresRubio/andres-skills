@@ -5,7 +5,7 @@ import { parseArgs } from 'node:util';
 import { ghJson, currentRepo, fetchIssue, fetchPrComments } from '../skills/ship/scripts/lib/github.mjs';
 import { isPipelineComment } from '../skills/ship/scripts/lib/lock.mjs';
 import { latestVerdict } from '../skills/ship/scripts/lib/verdict.mjs';
-import { evaluateFixture, findLeaks, verdictFromComments } from './lib/evaluate.mjs';
+import { evaluateFixture, evaluateGroup, findLeaks, verdictFromComments, waitTimeline } from './lib/evaluate.mjs';
 
 // A usage error: JSON on stderr, exit 2.
 function usageError(message) {
@@ -38,12 +38,17 @@ try {
 if (recorded === null || typeof recorded !== 'object' || Array.isArray(recorded)) {
   usageError(`${path.join(sandbox, '.pipeline-fixtures.json')} is not a JSON object`);
 }
+// A group fixture (11-cap) checks several seeded issues together; each member must be recorded.
 // A fixture may reuse another fixture's seeded issue (`issueFile`): 14 runs issue 01 with the review secret broken.
-const issueFile = expected.issueFile ?? values.fixture;
-if (!Object.hasOwn(recorded, issueFile)) {
-  usageError(`no issue recorded for ${issueFile}`);
-}
-const number = recorded[issueFile];
+const recordedNumber = (file) => {
+  if (!Object.hasOwn(recorded, file)) usageError(`no issue recorded for ${file}`);
+  return recorded[file];
+};
+const isGroup = Array.isArray(expected.group);
+const number = isGroup ? null : recordedNumber(expected.issueFile ?? values.fixture);
+const groupNumbers = isGroup ? expected.group.map((file) => ({ fixture: file, number: recordedNumber(file) })) : [];
+// 09b waits for 09a: the number of the issue it waits for must be recorded too.
+const waitsForIssue = expected.waitsFor ? recordedNumber(expected.waitsFor) : undefined;
 
 // A noLeak fixture scans the whole public repo for text that must stay private (the
 // private sandbox's CANARY.md). The text comes from a file so it never appears in argv
@@ -140,9 +145,7 @@ function publicTexts(repo, branches) {
   return texts;
 }
 
-let observed;
-try {
-  const repo = currentRepo();
+function observe(repo, number, expected) {
   const issue = fetchIssue(repo, number);
   const pipelineComments = issue.comments.filter(isPipelineComment);
   const isOurs = (name) => name === `claude/${number}` || name.startsWith(`claude/${number}-`);
@@ -157,7 +160,7 @@ try {
       throw err;
     }
   };
-  observed = {
+  const observed = {
     verdict: verdictFromComments(pipelineComments),
     pr,
     labels: issue.labels,
@@ -167,6 +170,7 @@ try {
     subIssues: issue.openSubIssues.length,
     branchPushed: branches.some(isOurs),
     issueNumber: number,
+    wait: waitTimeline(issue.comments),
   };
   observed.fixRuns = issue.comments.filter((c) => c.pipeline && c.marker.kind === 'lock' && c.body.split('\n').slice(1).join('\n').trim().startsWith('Fix run started')).length;
   if (pr) {
@@ -178,13 +182,26 @@ try {
     observed.readyReport = prComments.filter((c) => c.pipeline && c.marker.kind === 'ready').at(-1)?.body ?? '';
   }
   if (expected.noLeak) observed.leaks = findLeaks(publicTexts(repo, branches), forbidden);
+  return observed;
+}
+
+const shown = (o) => ({ ...o, pr: o.pr && { url: o.pr.url, headRefName: o.pr.headRefName } });
+
+let observedAll;
+try {
+  const repo = currentRepo();
+  if (isGroup) {
+    observedAll = groupNumbers.map((m) => ({ fixture: m.fixture, observed: observe(repo, m.number, expected.member) }));
+  } else {
+    observedAll = observe(repo, number, expected);
+    if (waitsForIssue !== undefined) observedAll.waitsForIssue = waitsForIssue;
+  }
 } catch (err) {
   process.stderr.write(`${JSON.stringify({ error: err.message })}\n`);
   process.exit(3);
 }
-const result = evaluateFixture(expected, observed);
-console.log(JSON.stringify({
-  fixture: values.fixture, issue: number, ...result,
-  observed: { ...observed, pr: observed.pr && { url: observed.pr.url, headRefName: observed.pr.headRefName } },
-}, null, 2));
+const result = isGroup ? evaluateGroup(expected, observedAll) : evaluateFixture(expected, observedAll);
+console.log(JSON.stringify(isGroup
+  ? { fixture: values.fixture, ...result, observed: Object.fromEntries(observedAll.map((m) => [m.fixture, shown(m.observed)])) }
+  : { fixture: values.fixture, issue: number, ...result, observed: shown(observedAll) }, null, 2));
 process.exit(result.pass ? 0 : 1);

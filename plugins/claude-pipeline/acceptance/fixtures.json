@@ -64,6 +64,43 @@
     "prCommentKinds": ["verdict", "ready"],
     "reviewVerdict": "accepted"
   },
+  "09a-count.md": {
+    "verdict": ["ready", "small-gaps"],
+    "pr": true,
+    "prFixesIssue": true,
+    "labelsAbsent": ["claude-working", "needs-decision"],
+    "commentKinds": ["lock", "grade", "report"],
+    "artifacts": ["research.md", "grade.md", "spec.md", "plan.md", "progress.md", "evidence.md"],
+    "prLabelsPresent": ["ready"],
+    "prCommentKinds": ["verdict", "ready"],
+    "reviewVerdict": "accepted"
+  },
+  "09b-clear.md": {
+    "verdict": ["ready", "small-gaps"],
+    "pr": true,
+    "prFixesIssue": true,
+    "labelsAbsent": ["claude-working", "needs-decision"],
+    "commentKinds": ["lock", "grade", "report"],
+    "artifacts": ["research.md", "grade.md", "spec.md", "plan.md", "progress.md", "evidence.md"],
+    "prLabelsPresent": ["ready"],
+    "prCommentKinds": ["verdict", "ready"],
+    "reviewVerdict": "accepted",
+    "waitsFor": "09a-count.md",
+    "orConflictFix": true
+  },
+  "11-cap": {
+    "group": ["11a-author-italic.md", "11b-meta-description.md", "11c-count-by-author.md"],
+    "deferredMembers": 1,
+    "member": {
+      "verdict": ["ready", "small-gaps"],
+      "pr": true,
+      "prFixesIssue": true,
+      "labelsAbsent": ["claude-working", "needs-decision"],
+      "prLabelsPresent": ["ready"],
+      "prCommentKinds": ["verdict", "ready"],
+      "reviewVerdict": "accepted"
+    }
+  },
   "10-length-limit.md": {
     "verdict": ["ready", "small-gaps"],
     "pr": true,

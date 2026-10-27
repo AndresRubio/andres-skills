@@ -50,5 +50,49 @@ export function evaluateFixture(expected, observed) {
   if (observed.verdict === 'small-gaps' && !observed.commentKinds.includes('assumptions')) {
     failures.push('small-gaps but no assumptions comment');
   }
+  failures.push(...evaluateWait(expected, observed));
+  return { pass: failures.length === 0, failures };
+}
+
+const WAIT_LINE = /^Waiting for: (.+)$/;
+
+// The newest pipeline `deferred` on an issue and what followed it. A back-off (maxParallel) has no
+// Waiting for line. `humanBetween` counts trusted unmarked comments before the next lock: a restart
+// that needed the owner did not happen "without you" (spec §10, test issues 9 and 11).
+export function waitTimeline(comments) {
+  const ordered = [...comments].sort((a, b) => a.id - b.id);
+  const deferred = ordered.filter((c) => c.pipeline && c.marker?.kind === 'deferred').at(-1);
+  if (!deferred) return { deferred: false, waitKeys: [], relocked: false, humanBetween: 0 };
+  const last = deferred.body.trim().split(/\r?\n/).at(-1).trim();
+  const m = last.match(WAIT_LINE);
+  const after = ordered.filter((c) => c.id > deferred.id);
+  const relock = after.find((c) => c.pipeline && c.marker?.kind === 'lock');
+  const humanBetween = after.filter((c) => !c.marker && c.trusted && (!relock || c.id < relock.id)).length;
+  return { deferred: true, waitKeys: m ? m[1].split(',').map((k) => k.trim()) : [], relocked: Boolean(relock), humanBetween };
+}
+
+export function evaluateWait(expected, observed) {
+  if (!expected.waitsFor) return [];
+  const key = String(observed.waitsForIssue);
+  const w = observed.wait;
+  if (w.deferred && w.waitKeys.includes(key)) {
+    const failures = [];
+    if (!w.relocked) failures.push(`deferred for #${key} but never started again`);
+    if (w.humanBetween > 0) failures.push(`started again only after ${w.humanBetween} owner comment(s)`);
+    return failures;
+  }
+  if (expected.orConflictFix && !w.deferred && (observed.fixRuns ?? 0) >= 1) return [];
+  return [`did not wait for #${key}${expected.orConflictFix ? ' and took no conflict fix run' : ''}`];
+}
+
+export function evaluateGroup(expected, members) {
+  const failures = [];
+  for (const m of members) for (const f of evaluateFixture(expected.member, m.observed).failures) failures.push(`${m.fixture}: ${f}`);
+  const backedOff = members.filter((m) => m.observed.wait.deferred && m.observed.wait.waitKeys.length === 0);
+  if (backedOff.length !== expected.deferredMembers) failures.push(`${backedOff.length} members backed off, expected ${expected.deferredMembers}`);
+  for (const m of backedOff) {
+    if (!m.observed.wait.relocked) failures.push(`${m.fixture}: backed off and never started again`);
+    if (m.observed.wait.humanBetween > 0) failures.push(`${m.fixture}: started again only after an owner comment`);
+  }
   return { pass: failures.length === 0, failures };
 }

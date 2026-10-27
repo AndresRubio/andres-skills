@@ -431,3 +431,57 @@ test('a fixture with issueFile resolves the issue number through that file', () 
   const r = runVerify(['--sandbox', sandbox, '--fixture', '14-review-broken.md'], { PATH: `${dir}:${process.env.PATH}` });
   assert.equal(JSON.parse(r.stdout).issue, 5, r.stderr);
 });
+
+// The cap test (11): three issues, each with its own PR. `backoff` marks which one backed off and restarted.
+function groupRoutes(backoff) {
+  const issues = { 5: '11a-author-italic.md', 6: '11b-meta-description.md', 7: '11c-count-by-author.md' };
+  const ts = (n) => `2026-10-20T10:0${n}:00Z`;
+  const own = (id, body) => ({ id, user: { login: 'AndresRubio' }, author_association: 'OWNER', body, created_at: ts(id % 10) });
+  const routes = {
+    'repo view --json nameWithOwner': { nameWithOwner: 'o/r' },
+    'pr list --repo o/r --state all --limit 500 --json number,url,headRefName,body': Object.keys(issues).map((n) => ({ number: Number(n) + 20, url: `https://github.com/o/r/pull/${Number(n) + 20}`, headRefName: `claude/${n}-x`, body: `Fixes #${n}` })),
+    'api --paginate --slurp repos/o/r/branches': [Object.keys(issues).map((n) => ({ name: `claude/${n}-x` }))],
+  };
+  for (const n of Object.keys(issues)) {
+    const lock = own(Number(n) * 100 + 1, '**[claude-pipeline]** lock · 2026-10-20T10:00:00Z · local\n\nRun started.');
+    const grade = own(Number(n) * 100 + 4, '**[claude-pipeline]** grade · 2026-10-20T10:04:00Z · local\n\n**Verdict:** `ready`');
+    const comments = String(n) === backoff
+      ? [lock, own(Number(n) * 100 + 2, '**[claude-pipeline]** deferred · 2026-10-20T10:02:00Z · local\n\nDeferred: 2 runs are ahead of this one.'), own(Number(n) * 100 + 3, '**[claude-pipeline]** lock · 2026-10-20T10:03:00Z · local\n\nRun started.'), grade]
+      : [lock, grade];
+    routes[`api repos/o/r/issues/${n}`] = { ...fixture('gh-issue.json'), number: Number(n) };
+    routes[`api --paginate --slurp repos/o/r/issues/${n}/comments`] = [comments];
+    routes[`api repos/o/r/issues/${n}/dependencies/blocked_by`] = [];
+    routes[`api repos/o/r/issues/${n}/sub_issues`] = [];
+    routes[`pr view ${Number(n) + 20} --json labels,headRefOid`] = { labels: [{ name: 'ready' }], headRefOid: HEAD };
+    routes[`api --paginate --slurp repos/o/r/issues/${Number(n) + 20}/comments`] = acceptedComments;
+    routes[`api repos/o/r/contents/docs/pipeline/${n}?ref=claude%2F${n}-x`] = [];
+    routes[`api repos/o/r/contents/docs/pipeline/${n}/screenshots?ref=claude%2F${n}-x`] = [];
+  }
+  return routes;
+}
+const GROUP = { '11a-author-italic.md': 5, '11b-meta-description.md': 6, '11c-count-by-author.md': 7 };
+
+test('--fixture 11-cap checks the three issues together: one backed off and restarted on its own', () => {
+  const sandbox = makeSandbox(GROUP);
+  const dir = fakeGh(groupRoutes('7'));
+  const r = runVerify(['--sandbox', sandbox, '--fixture', '11-cap'], { PATH: `${dir}:${process.env.PATH}` });
+  assert.equal(r.code, 0, r.stderr + r.stdout);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.pass, true);
+  assert.equal(out.fixture, '11-cap');
+});
+
+test('--fixture 11-cap fails when no issue backed off', () => {
+  const sandbox = makeSandbox(GROUP);
+  const dir = fakeGh(groupRoutes(null));
+  const r = runVerify(['--sandbox', sandbox, '--fixture', '11-cap'], { PATH: `${dir}:${process.env.PATH}` });
+  assert.equal(r.code, 1, r.stderr + r.stdout);
+  assert.match(JSON.parse(r.stdout).failures.join('\n'), /0 members backed off/);
+});
+
+test('--fixture 11-cap is a usage error when a member is not recorded, before any gh call', () => {
+  const sandbox = makeSandbox({ '11a-author-italic.md': 5 });
+  const r = runVerify(['--sandbox', sandbox, '--fixture', '11-cap']);
+  assert.equal(r.code, 2, r.stderr);
+  assert.match(JSON.parse(r.stderr).error, /11b-meta-description\.md/);
+});

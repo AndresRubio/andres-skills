@@ -29,7 +29,7 @@ test('the sandbox settings.json parses and denies destructive commands', () => {
 
 test('every seeded issue has a title, labels and a body', () => {
   const files = readdirSync(dir('issues')).filter((f) => f.endsWith('.md'));
-  assert.deepEqual(files.sort(), ['01-wrong-month.md', '02-sort.md', '03-login.md', '04-bilingual.md', '05-empty-state.md', '06-protected-rename.md', '06b-ci-node.md', '07-title-typo.md', '09a-count.md', '09b-clear.md', '10-length-limit.md', '12-archive-toggle.md', '13-sort-stability.md']);
+  assert.deepEqual(files.sort(), ['01-wrong-month.md', '02-sort.md', '03-login.md', '04-bilingual.md', '05-empty-state.md', '06-protected-rename.md', '06b-ci-node.md', '07-title-typo.md', '09a-count.md', '09b-clear.md', '10-length-limit.md', '11a-author-italic.md', '11b-meta-description.md', '11c-count-by-author.md', '12-archive-toggle.md', '13-sort-stability.md']);
   for (const f of files) {
     const [title, labels, sep, ...body] = readFileSync(dir(`issues/${f}`), 'utf8').split('\n');
     assert.match(title, /^title: \S/, f);
@@ -44,9 +44,9 @@ test('the planted defects are present', () => {
   assert.match(readFileSync(dir('app/index.html'), 'utf8'), /<title>Readng List<\/title>/);
 });
 
-test('fixtures 01-07 (including 06b) and 10 carry the claude label; 09a and 09b do not', () => {
+test('fixtures 01-07 (including 06b) and 10 carry the claude label; 09a, 09b and 11a-c do not', () => {
   const withClaude = ['01-wrong-month.md', '02-sort.md', '03-login.md', '04-bilingual.md', '05-empty-state.md', '06-protected-rename.md', '06b-ci-node.md', '07-title-typo.md', '10-length-limit.md', '12-archive-toggle.md', '13-sort-stability.md'];
-  const withoutClaude = ['09a-count.md', '09b-clear.md'];
+  const withoutClaude = ['09a-count.md', '09b-clear.md', '11a-author-italic.md', '11b-meta-description.md', '11c-count-by-author.md'];
   const labelsOf = (f) => readFileSync(dir(`issues/${f}`), 'utf8').split('\n')[1].replace(/^labels: /, '').split(',');
   for (const f of withClaude) assert.ok(labelsOf(f).includes('claude'), f);
   for (const f of withoutClaude) assert.ok(!labelsOf(f).includes('claude'), f);
@@ -108,4 +108,11 @@ test('seeded PR fixtures carry the files a fix run needs and the planted defects
   assert.match(thirteen, /it\.only\(/);
   assert.match(readFileSync(dir('prs/12-archive-toggle/pr-body.md'), 'utf8'), /Decision needed/);
   assert.doesNotThrow(() => execFileSync('bash', ['-n', fileURLToPath(dir('seed-pr.sh'))]));
+});
+
+test('fixtures.json describes the wait (9) and the cap (11) tests', () => {
+  const f = JSON.parse(readFileSync(new URL('../acceptance/fixtures.json', import.meta.url), 'utf8'));
+  assert.equal(f['09b-clear.md'].waitsFor, '09a-count.md');
+  assert.deepEqual(f['11-cap'].group, ['11a-author-italic.md', '11b-meta-description.md', '11c-count-by-author.md']);
+  assert.equal(f['11-cap'].deferredMembers, 1);
 });

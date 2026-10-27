@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { evaluateFixture, findLeaks, verdictFromComments } from '../acceptance/lib/evaluate.mjs';
+import { evaluateFixture, evaluateGroup, evaluateWait, findLeaks, verdictFromComments, waitTimeline } from '../acceptance/lib/evaluate.mjs';
 
 const observed = (over = {}) => ({
   verdict: 'ready', pr: { url: 'u', headRefName: 'claude/5-x', body: 'Fixes #5' }, labels: ['claude'],
@@ -150,4 +150,36 @@ test('fixtures 12, 13 and 14 are defined with the Phase 2a outcomes', () => {
     assert.deepEqual(expectations[f].prLabelsPresent, ['ready'], f);
     assert.equal(expectations[f].reviewVerdict, 'accepted', f);
   }
+});
+
+let cid = 0;
+const c = (kind, text = '', extra = {}) => ({ id: ++cid, marker: kind ? { kind } : null, pipeline: Boolean(kind), trusted: true, createdAt: `2026-10-20T10:${String(cid).padStart(2, '0')}:00Z`, body: kind ? `**[claude-pipeline]** ${kind} · x · local\n\n${text}` : text, ...extra });
+
+test('waitTimeline reads the newest deferred, its wait keys, and what came after it', () => {
+  assert.deepEqual(waitTimeline([c('lock'), c('grade')]), { deferred: false, waitKeys: [], relocked: false, humanBetween: 0 });
+  assert.deepEqual(waitTimeline([c('lock'), c('deferred', 'Overlaps #7.\n\nWaiting for: 7'), c('lock'), c('grade')]), { deferred: true, waitKeys: ['7'], relocked: true, humanBetween: 0 });
+  assert.deepEqual(waitTimeline([c('lock'), c('deferred', 'Deferred: 2 runs are ahead of this one.'), c(null, 'any news?'), c('lock')]), { deferred: true, waitKeys: [], relocked: true, humanBetween: 1 });
+  assert.equal(waitTimeline([c('deferred', 'Waiting for: 7')]).relocked, false);
+});
+
+test('evaluateWait: waited for the named issue and restarted on its own, or took a conflict fix', () => {
+  const expected = { waitsFor: '09a-count.md', orConflictFix: true };
+  const waited = { waitsForIssue: 7, wait: { deferred: true, waitKeys: ['7'], relocked: true, humanBetween: 0 }, fixRuns: 0 };
+  assert.deepEqual(evaluateWait(expected, waited), []);
+  assert.match(evaluateWait(expected, { ...waited, wait: { ...waited.wait, relocked: false } })[0], /never started again/);
+  assert.match(evaluateWait(expected, { ...waited, wait: { ...waited.wait, humanBetween: 1 } })[0], /owner comment/);
+  assert.deepEqual(evaluateWait(expected, { waitsForIssue: 7, wait: { deferred: false, waitKeys: [], relocked: false, humanBetween: 0 }, fixRuns: 1 }), []);
+  assert.match(evaluateWait(expected, { waitsForIssue: 7, wait: { deferred: false, waitKeys: [], relocked: false, humanBetween: 0 }, fixRuns: 0 })[0], /did not wait for #7/);
+  assert.deepEqual(evaluateWait({}, waited), []);
+});
+
+test('evaluateGroup: every member passes and exactly the expected number backed off and restarted without the owner', () => {
+  const member = { pr: true, prLabelsPresent: ['ready'] };
+  const ok = (back) => ({ pr: { url: 'u', body: '' }, prLabels: ['ready'], labels: [], commentKinds: [], artifacts: [], wait: back ? { deferred: true, waitKeys: [], relocked: true, humanBetween: 0 } : { deferred: false, waitKeys: [], relocked: false, humanBetween: 0 } });
+  const expected = { group: ['a', 'b', 'c'], deferredMembers: 1, member };
+  assert.equal(evaluateGroup(expected, [{ fixture: 'a', observed: ok(false) }, { fixture: 'b', observed: ok(false) }, { fixture: 'c', observed: ok(true) }]).pass, true);
+  const none = evaluateGroup(expected, [{ fixture: 'a', observed: ok(false) }, { fixture: 'b', observed: ok(false) }, { fixture: 'c', observed: ok(false) }]);
+  assert.match(none.failures.join('\n'), /0 members backed off, expected 1/);
+  const noPr = evaluateGroup(expected, [{ fixture: 'a', observed: { ...ok(false), pr: null } }, { fixture: 'b', observed: ok(false) }, { fixture: 'c', observed: ok(true) }]);
+  assert.match(noPr.failures.join('\n'), /^a: expected a PR/m);
 });
