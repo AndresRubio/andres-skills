@@ -38,10 +38,15 @@ export function compareKeys(a, b) {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+// The issue's current decision: its newest pipeline comment of a DECISION_KINDS kind, by id.
+export function latestDecision(issue) {
+  return pipelineComments(issue, DECISION_KINDS).reduce((a, b) => (a === null || b.id > a.id ? b : a), null);
+}
+
 // The keys of the runs this issue waits for: the last line of its latest decision
 // comment, when that comment is a `deferred`.
 export function waitingFor(issue) {
-  const decision = pipelineComments(issue, DECISION_KINDS).reduce((a, b) => (a === null || b.id > a.id ? b : a), null);
+  const decision = latestDecision(issue);
   if (decision?.marker.kind !== 'deferred') return [];
   const last = decision.body.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).at(-1) ?? '';
   const m = last.match(WAIT_LINE_RE);
