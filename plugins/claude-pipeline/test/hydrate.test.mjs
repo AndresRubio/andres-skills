@@ -96,3 +96,20 @@ test('findReferences: 200 KB of references stays fast', () => {
   findReferences(issue('#1 '.repeat(66_000)), opts);
   assert.ok(performance.now() - t0 < 2000);
 });
+
+test('findReferences: a permalink path that escapes the repo or injects a query is listed, not fetched', () => {
+  const link = (path) => `https://github.com/o/r/blob/${SHA}/${path}#L1`;
+  const reasons = (path, comments = []) => findReferences(issue(link(path), comments), opts).map((r) => [r.kind, r.reason]);
+  const bad = [['permalink', 'not fetched: malformed path']];
+  assert.deepEqual(reasons('%2e%2e%2f%2e%2e%2fother%3Fx'), bad);
+  assert.deepEqual(reasons('../x'), bad);
+  assert.deepEqual(reasons('a/./x'), bad);
+  assert.deepEqual(reasons('a//x'), bad);
+  assert.deepEqual(reasons('a%3Fref=main'), bad);
+  assert.deepEqual(reasons('a%00b'), bad);
+  assert.deepEqual(reasons('a%5Cb'), bad);
+  assert.deepEqual(reasons('a%23b'), bad);
+  assert.deepEqual(reasons('../x', [comment(2, link('../y'), { trusted: false })]).map((r) => r[1]), ['not fetched: malformed path', 'not fetched: malformed path']);
+  assert.deepEqual(reasons('src/app.test.ts'), [['permalink', null]]);
+  assert.deepEqual(reasons('.github/workflows/ci.yml'), [['permalink', null]]);
+});

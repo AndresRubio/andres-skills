@@ -27,6 +27,13 @@ function decode(path) {
   try { return decodeURIComponent(path); } catch { return path; }
 }
 
+// A decoded permalink path must stay inside the repo and cannot add a query: no empty, "." or
+// ".." segment, no "?", "#", "\\" or control character. One pass over the path.
+function malformedPath(path) {
+  if (/[?#\\\x00-\x1f\x7f]/.test(path)) return true;
+  return path.split('/').some((seg) => seg === '' || seg === '.' || seg === '..');
+}
+
 function trimTrailingPunctuation(raw) {
   let end = raw.length;
   while (end > 0 && '.,;:!?'.includes(raw[end - 1])) end--;
@@ -120,7 +127,8 @@ function classify(hit, { owner, name, selfNumber, hydrateHosts }) {
     return { kind: 'issue', number: hit.number, target: `issue:${tag}${tag ? '#' : ''}${hit.number}`, ...(foreign ? other : {}) };
   }
   if (hit.kind === 'permalink') {
-    return { kind: 'permalink', sha: hit.sha, path: hit.path, start: hit.start, end: hit.end, target: `permalink:${tag}:${hit.sha}:${hit.path}:${hit.start}-${hit.end}`, ...(foreign ? other : {}) };
+    const bad = malformedPath(hit.path) ? { reason: 'not fetched: malformed path' } : foreign ? other : {};
+    return { kind: 'permalink', sha: hit.sha, path: hit.path, start: hit.start, end: hit.end, target: `permalink:${tag}:${hit.sha}:${hit.path}:${hit.start}-${hit.end}`, ...bad };
   }
   return { kind: 'run', runId: hit.runId, jobId: hit.jobId, target: `run:${tag}:${hit.runId}:${hit.jobId ?? ''}`, ...(foreign ? other : {}) };
 }
