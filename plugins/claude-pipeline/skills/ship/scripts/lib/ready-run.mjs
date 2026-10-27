@@ -3,6 +3,7 @@ import { latestVerdict } from './verdict.mjs';
 import { decideReady, readyReport, issueNumberFromBody } from './ready.mjs';
 import { formatMarker, defaultRun } from './marker.mjs';
 import { lockStatus } from './lock.mjs';
+import { isSampled } from './score.mjs';
 
 const LOCK_GATED = new Set(['fix', 'update', 'needs-decision']);
 
@@ -19,6 +20,7 @@ export function realDeps(repo) {
     addLabel: (kind, n, label) => ghText([kind, 'edit', String(n), '--repo', repo, '--add-label', label]),
     removeLabel: (kind, n, label) => ghText([kind, 'edit', String(n), '--repo', repo, '--remove-label', label]),
     updateBranch: (n) => ghText(['api', '-X', 'PUT', `repos/${repo}/pulls/${n}/update-branch`]),
+    dispatchScore: (n) => ghText(['workflow', 'run', 'claude-score.yml', '--repo', repo, '-f', `pr=${n}`]),
     comment: (kind, n, body) => (kind === 'pr' ? postPrComment(repo, n, body) : postIssueComment(repo, n, body)),
   };
 }
@@ -99,6 +101,14 @@ export async function runReady({ repo, config, now = new Date(), dryRun = false,
         if (!alreadyMarkedForHead(prComments, 'ready', sha7)) act(`comment on PR ${pr.number}`, () => deps.comment('pr', pr.number, report));
         if (issueNumber !== null) act(`comment on issue ${issueNumber}`, () => deps.comment('issue', issueNumber, report));
         act('add label ready', () => deps.addLabel('pr', pr.number, 'ready'));
+        // Sampled scoring (spec §7.5) runs in claude-score.yml: pipeline-ready has no AI and no OAuth token.
+        if (isSampled(issueNumber) && deps.dispatchScore) {
+          try {
+            act('dispatch claude-score', () => deps.dispatchScore(pr.number));
+          } catch (err) {
+            done.push(`score dispatch failed: ${String(err.stderr || err.message).trim()}`);
+          }
+        }
         actions.push({ pr: pr.number, action: 'ready', reason: null, done });
         break;
       }

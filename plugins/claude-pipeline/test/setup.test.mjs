@@ -25,19 +25,19 @@ test('defaultVars pins the plugin ref to the current version and points at andre
   assert.equal(v.CI_WORKFLOWS_WITH_REVIEW, '[CI, claude-review]');
 });
 
-test('installFiles writes three workflows and a config, never overwriting without --force', () => {
+test('installFiles writes four workflows and a config, never overwriting without --force', () => {
   const root = tempDir();
   const r = installFiles(root, defaultVars(), {});
-  assert.deepEqual(r.written.sort(), ['.claude/pipeline.json', '.github/workflows/claude-review.yml', '.github/workflows/claude-ship.yml', '.github/workflows/pipeline-ready.yml']);
+  assert.deepEqual(r.written.sort(), ['.claude/pipeline.json', '.github/workflows/claude-review.yml', '.github/workflows/claude-score.yml', '.github/workflows/claude-ship.yml', '.github/workflows/pipeline-ready.yml']);
   assert.ok(validateConfig(JSON.parse(readFileSync(path.join(root, '.claude/pipeline.json'), 'utf8'))));
   for (const f of r.written) assert.doesNotMatch(readFileSync(path.join(root, f), 'utf8'), /\{\{[A-Z_]+\}\}/, `${f} still has a placeholder`);
   writeFiles(root, { '.github/workflows/claude-ship.yml': 'custom\n' });
   const again = installFiles(root, defaultVars(), {});
   assert.deepEqual(again.written, []);
-  assert.equal(again.skipped.length, 4);
+  assert.equal(again.skipped.length, 5);
   assert.equal(readFileSync(path.join(root, '.github/workflows/claude-ship.yml'), 'utf8'), 'custom\n');
   const forced = installFiles(root, defaultVars(), { force: true });
-  assert.deepEqual(forced.written.sort(), ['.github/workflows/claude-review.yml', '.github/workflows/claude-ship.yml', '.github/workflows/pipeline-ready.yml']);
+  assert.deepEqual(forced.written.sort(), ['.github/workflows/claude-review.yml', '.github/workflows/claude-score.yml', '.github/workflows/claude-ship.yml', '.github/workflows/pipeline-ready.yml']);
   assert.deepEqual(forced.skipped, ['.claude/pipeline.json']);
   assert.notEqual(readFileSync(path.join(root, '.github/workflows/claude-ship.yml'), 'utf8'), 'custom\n');
   writeFiles(root, { '.claude/pipeline.json': '{"mine":true}\n' });

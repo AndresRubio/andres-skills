@@ -3,7 +3,7 @@ import path from 'node:path';
 
 const TEMPLATES = new URL('../../../../templates/', import.meta.url);
 const PLUGIN_JSON = new URL('../../../../.claude-plugin/plugin.json', import.meta.url);
-const WORKFLOWS = ['claude-ship.yml', 'claude-review.yml', 'pipeline-ready.yml'];
+const WORKFLOWS = ['claude-ship.yml', 'claude-review.yml', 'pipeline-ready.yml', 'claude-score.yml'];
 const PLACEHOLDERS = ['PLUGIN_REPO', 'PLUGIN_REPO_SLUG', 'PLUGIN_REF', 'PLUGIN_SUBDIR', 'MARKETPLACE', 'CI_WORKFLOWS', 'CI_WORKFLOWS_WITH_REVIEW'];
 
 export const LABELS = Object.freeze([

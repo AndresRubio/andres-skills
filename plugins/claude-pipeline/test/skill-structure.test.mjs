@@ -664,3 +664,13 @@ test('token leaks: context-hygiene.md has its five rules and no inlined copy liv
   assert.equal((hygiene.match(/^- /gm) ?? []).length, 5);
   assert.doesNotMatch(read('SKILL.md'), /\/claude-pipeline:ship <KEY>/);
 });
+
+test('the score skill reads trusted issue text, judges the diff and the verdict, posts one score comment, and edits nothing', () => {
+  const s = readFileSync(new URL('../skills/score/SKILL.md', import.meta.url), 'utf8');
+  assert.match(s, /^name: score$/m);
+  assert.match(s, /Adapted from warpdotdev\/warp-factory-examples \(MIT License, Copyright \(c\) 2026 Warp\)/);
+  assert.match(s, /never from the PR's description of itself/);
+  for (const v of ['compliant', 'partial', 'non_compliant', 'actionable', 'vague', 'empty_or_noise']) assert.match(s, new RegExp(`\`${v}\``));
+  assert.match(s, /node "\$PIPELINE" score --head/);
+  assert.match(s, /gh pr comment <PR> --repo "\$REPO" --body-file/);
+});

@@ -20,6 +20,7 @@ import { runReady } from './ready-run.mjs';
 import { runSweep, realSweepDeps } from './sweep-run.mjs';
 import { laneTarget } from './lane.mjs';
 import { defaultVars, installFiles } from './setup.mjs';
+import { formatScoreBody } from './score.mjs';
 
 export class UsageError extends Error {}
 
@@ -284,6 +285,13 @@ export const COMMANDS = {
     const result = await runReady({ repo: v.repo, config: loadConfig(v['repo-root']), now: v.now ? new Date(v.now) : new Date(), dryRun: Boolean(v['dry-run']) });
     if (result.actions.some((a) => a.action === 'error')) throw new ExitError(result);
     return result;
+  },
+  score: (argv) => {
+    const v = parse(argv, { head: { type: 'string' }, 'score-file': { type: 'string' }, model: { type: 'string' }, run: { type: 'string' }, now: { type: 'string' } });
+    required(v, 'head', 'score-file');
+    const head = headSha(v.head);
+    const marker = formatMarker('score', { run: v.run ?? defaultRun(), now: v.now ? new Date(v.now) : new Date() });
+    return { body: formatScoreBody({ marker, head, score: readJson(v['score-file']), model: v.model ?? null }) };
   },
   sweep: (argv) => {
     const v = parse(argv, { repo: { type: 'string' }, 'repo-root': { type: 'string' }, 'dry-run': { type: 'boolean' }, now: { type: 'string' } });

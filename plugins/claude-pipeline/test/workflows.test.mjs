@@ -113,3 +113,15 @@ test('pipeline-ready: the sweep runs on schedule, by hand and on a merged claude
   assert.match(t, /pipeline\.mjs sweep --repo-root \. --repo \$\{\{ github\.repository \}\}/);
   assert.ok(t.indexOf('pipeline.mjs ready') < t.indexOf('pipeline.mjs sweep'), 'the sweep runs after the readiness pass');
 });
+
+test('claude-score: dispatched only, validates its input, haiku at low effort, never merges or pushes', () => {
+  const t = rendered('claude-score.yml');
+  assert.match(t, /^on:\n  workflow_dispatch:\n    inputs:\n      pr:/m);
+  assert.doesNotMatch(t.slice(t.indexOf('\non:'), t.indexOf('\npermissions:')), /pull_request|issues|schedule/);
+  assert.match(t, /case "\$PR" in ''\|\*\[!0-9\]\*\) exit 1;; esac/);
+  assert.match(t, /prompt: "\/claude-pipeline:score \$\{\{ inputs\.pr \}\}"/);
+  assert.match(t, /--model haiku/);
+  assert.match(t, /--effort low/);
+  assert.match(t, /--disallowedTools .*Bash\(gh pr merge:\*\).*Bash\(git push:\*\)/);
+  assert.match(t, /contents: read\n\s+pull-requests: write/);
+});

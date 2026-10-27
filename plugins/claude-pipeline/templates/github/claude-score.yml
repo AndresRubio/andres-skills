@@ -1,0 +1,53 @@
+# claude-pipeline: sampled scoring (spec §7.5, D19). pipeline-ready dispatches it for 1 in 4 ready PRs.
+# It posts one score comment. It informs and blocks nothing; it is never a required check.
+name: claude-score
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to score
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: read
+  id-token: write
+
+concurrency:
+  group: claude-score-${{ inputs.pr }}
+  cancel-in-progress: false
+
+jobs:
+  claude-score:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check the input
+        env:
+          PR: ${{ inputs.pr }}
+        run: case "$PR" in ''|*[!0-9]*) exit 1;; esac
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: {{PLUGIN_REPO_SLUG}}
+          ref: {{PLUGIN_REF}}
+          path: .claude-pipeline-plugin
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Score
+        uses: anthropics/claude-code-action@v1
+        env:
+          CLAUDE_PIPELINE_GUARD: '1'
+          CLAUDE_PIPELINE_HOME: ${{ runner.temp }}/claude-pipeline
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: "/claude-pipeline:score ${{ inputs.pr }}"
+          claude_args: |
+            --plugin-dir .claude-pipeline-plugin/{{PLUGIN_SUBDIR}}
+            --model haiku
+            --effort low
+            --max-budget-usd 2
+            --disallowedTools Bash(gh pr merge:*),Bash(gh pr review:*),Bash(git push:*),Edit

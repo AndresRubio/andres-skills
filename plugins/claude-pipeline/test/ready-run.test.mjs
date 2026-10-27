@@ -255,3 +255,22 @@ test('a ready PR that is not behind stays ready; already-ready is checked too', 
   assert.equal(r.actions[0].action, 'already-ready');
   assert.deepEqual([current.compares, current.calls], [[[REPO, 'main', HEAD]], []]);
 });
+
+test('a sampled PR gets claude-score dispatched after the ready label; others do not; a failed dispatch changes nothing', async () => {
+  const sampled = basePr({ body: 'Fixes #8', headRefName: 'claude/8-x' });
+  const a = fakeDeps({ prs: [sampled], comments: verdictComment('accepted'), issue: { number: 8, labels: ['claude'], comments: [] } });
+  a.deps.dispatchScore = (n) => a.calls.push(['dispatchScore', n]);
+  await runReady({ repo: REPO, config, now: NOW }, a.deps);
+  assert.deepEqual(a.calls.slice(-2), [['addLabel', 'pr', 7, 'ready'], ['dispatchScore', 7]]);
+
+  const b = fakeDeps({ prs: [basePr()], comments: verdictComment('accepted') });
+  b.deps.dispatchScore = (n) => b.calls.push(['dispatchScore', n]);
+  await runReady({ repo: REPO, config, now: NOW }, b.deps);
+  assert.ok(!b.calls.some((c) => c[0] === 'dispatchScore'));
+
+  const c = fakeDeps({ prs: [sampled], comments: verdictComment('accepted'), issue: { number: 8, labels: ['claude'], comments: [] } });
+  c.deps.dispatchScore = () => { throw new Error('HTTP 403'); };
+  const r = await runReady({ repo: REPO, config, now: NOW }, c.deps);
+  assert.equal(r.actions[0].action, 'ready');
+  assert.ok(r.actions[0].done.includes('score dispatch failed: HTTP 403'));
+});
