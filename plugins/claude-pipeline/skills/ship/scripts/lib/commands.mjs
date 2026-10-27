@@ -21,6 +21,7 @@ import { runSweep, realSweepDeps } from './sweep-run.mjs';
 import { laneTarget } from './lane.mjs';
 import { defaultVars, installFiles } from './setup.mjs';
 import { formatScoreBody } from './score.mjs';
+import { hydrate } from './hydrate-run.mjs';
 
 export class UsageError extends Error {}
 
@@ -330,6 +331,14 @@ export const COMMANDS = {
       pidFile: v['pid-file'],
       timeoutMs: v['timeout-ms'] !== undefined ? Number(v['timeout-ms']) : undefined,
     });
+  },
+  hydrate: async (argv) => {
+    const v = parse(argv, { 'issue-file': { type: 'string' }, 'config-file': { type: 'string' }, out: { type: 'string' }, repo: { type: 'string' } });
+    required(v, 'issue-file', 'config-file', 'out');
+    const issue = readJson(v['issue-file']);
+    const repo = v.repo ?? String(issue.url ?? '').match(/github\.com\/([^/]+\/[^/]+)\/issues\//)?.[1];
+    if (!repo) throw new UsageError('--repo is required when the issue file has no GitHub issue URL');
+    return await hydrate({ issue, repo, config: readJson(v['config-file']), outDir: v.out });
   },
   'preview-stop': (argv) => {
     const v = parse(argv, { 'pid-file': { type: 'string' } });
