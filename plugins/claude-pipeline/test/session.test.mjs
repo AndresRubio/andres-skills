@@ -14,6 +14,13 @@ test('runDirFromCommand finds the sourced vars.sh, only under <home>/runs', () =
   assert.equal(runDirFromCommand('git status', home), null);
 });
 
+test('runDirFromCommand is linear on a long run of slashes (the guard must not time out)', () => {
+  const started = performance.now();
+  assert.equal(runDirFromCommand(`git push origin HEAD:main # ${'/'.repeat(200_000)}`, '/h/.claude-pipeline'), null);
+  assert.equal(runDirFromCommand(`${'/'.repeat(200_000)}`, '/h/.claude-pipeline'), null);
+  assert.ok(performance.now() - started < 500, `took ${performance.now() - started} ms`);
+});
+
 test('recordSession appends each session once and needs both fields', () => {
   const runDir = tempDir('run-');
   assert.equal(recordSession(runDir, { sessionId: 's1', transcriptPath: '/t/s1.jsonl', now: new Date('2026-10-20T10:00:00Z') }), true);

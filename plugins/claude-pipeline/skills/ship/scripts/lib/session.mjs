@@ -3,12 +3,19 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-const VARS = /(\/[^\s'"]*\/runs\/run-[A-Za-z0-9]+)\/vars\.sh/;
+// Linear: find the tail first, then walk back to the start of its token (a nested quantifier
+// before the tail backtracks quadratically on a long run of slashes).
+const VARS = /\/runs\/run-[A-Za-z0-9]+\/vars\.sh/;
+const TOKEN_BREAK = /[\s'"]/;
 
 export function runDirFromCommand(command, home) {
-  const m = String(command ?? '').match(VARS);
+  const text = String(command ?? '');
+  const m = VARS.exec(text);
   if (!m) return null;
-  const dir = path.resolve(m[1]);
+  let start = m.index;
+  while (start > 0 && !TOKEN_BREAK.test(text[start - 1])) start -= 1;
+  const first = text.indexOf('/', start);
+  const dir = path.resolve(text.slice(first, m.index + m[0].length - '/vars.sh'.length));
   const runs = path.join(path.resolve(home), 'runs') + path.sep;
   return dir.startsWith(runs) && !dir.slice(runs.length).includes(path.sep) ? dir : null;
 }
