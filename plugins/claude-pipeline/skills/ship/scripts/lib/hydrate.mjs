@@ -23,8 +23,9 @@ const PATTERNS = [
 const isNameChar = (c) => c !== undefined && /[A-Za-z0-9_.-]/.test(c);
 const isWordChar = (c) => c !== undefined && /\w/.test(c);
 
+// null when the path has a malformed escape: such a path is never trusted, even undecoded.
 function decode(path) {
-  try { return decodeURIComponent(path); } catch { return path; }
+  try { return decodeURIComponent(path); } catch { return null; }
 }
 
 // A decoded permalink path must stay inside the repo and cannot add a query: no empty, "." or
@@ -41,7 +42,10 @@ function trimTrailingPunctuation(raw) {
 }
 
 function fields(kind, m, raw) {
-  if (kind === 'permalink') return { kind, owner: m[1], repo: m[2], sha: m[3], path: decode(m[4]), start: Number(m[5]), end: Number(m[6] ?? m[5]) };
+  if (kind === 'permalink') {
+    const path = decode(m[4]);
+    return { kind, owner: m[1], repo: m[2], sha: m[3], path: path ?? m[4], ...(path === null ? { badEscape: true } : {}), start: Number(m[5]), end: Number(m[6] ?? m[5]) };
+  }
   if (kind === 'job') return { kind, owner: m[1], repo: m[2], runId: m[3], jobId: m[4] };
   if (kind === 'run') return { kind, owner: m[1], repo: m[2], runId: m[3], jobId: null };
   if (kind === 'issue') return { kind, owner: m[1], repo: m[2], number: Number(m[3]) };
@@ -127,7 +131,7 @@ function classify(hit, { owner, name, selfNumber, hydrateHosts }) {
     return { kind: 'issue', number: hit.number, target: `issue:${tag}${tag ? '#' : ''}${hit.number}`, ...(foreign ? other : {}) };
   }
   if (hit.kind === 'permalink') {
-    const bad = malformedPath(hit.path) ? { reason: 'not fetched: malformed path' } : foreign ? other : {};
+    const bad = hit.badEscape || malformedPath(hit.path) ? { reason: 'not fetched: malformed path' } : foreign ? other : {};
     return { kind: 'permalink', sha: hit.sha, path: hit.path, start: hit.start, end: hit.end, target: `permalink:${tag}:${hit.sha}:${hit.path}:${hit.start}-${hit.end}`, ...bad };
   }
   return { kind: 'run', runId: hit.runId, jobId: hit.jobId, target: `run:${tag}:${hit.runId}:${hit.jobId ?? ''}`, ...(foreign ? other : {}) };

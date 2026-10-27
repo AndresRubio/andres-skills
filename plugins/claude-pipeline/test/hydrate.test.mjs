@@ -25,6 +25,8 @@ test('scanText: a malformed percent escape in a permalink path does not throw', 
   const [hit] = scanText(`https://github.com/o/r/blob/${SHA}/a%E0%A4%A.ts#L3`);
   assert.equal(hit.kind, 'permalink');
   assert.equal(hit.path, 'a%E0%A4%A.ts');
+  const [ref] = findReferences(issue(`https://github.com/o/r/blob/${SHA}/a%E0%A4%A.ts#L3`), opts);
+  assert.equal(ref.reason, 'not fetched: malformed path');
 });
 
 test('scanText: pathological 200 KB inputs scan in linear time', () => {
@@ -110,6 +112,8 @@ test('findReferences: a permalink path that escapes the repo or injects a query 
   assert.deepEqual(reasons('a%5Cb'), bad);
   assert.deepEqual(reasons('a%23b'), bad);
   assert.deepEqual(reasons('../x', [comment(2, link('../y'), { trusted: false })]).map((r) => r[1]), ['not fetched: malformed path', 'not fetched: malformed path']);
+  assert.deepEqual(reasons('%2e%2e%2f%2e%2e%2fother%3Fx%E0'), bad);
+  assert.deepEqual(reasons('src/x%E0.ts'), bad);
   assert.deepEqual(reasons('src/app.test.ts'), [['permalink', null]]);
   assert.deepEqual(reasons('.github/workflows/ci.yml'), [['permalink', null]]);
 });
