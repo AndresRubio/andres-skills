@@ -5,7 +5,7 @@ Personal [Claude Code skills](https://code.claude.com/docs/en/skills).
 | Skill | What it does |
 |---|---|
 | [`cleanup`](skills/cleanup/SKILL.md) | End-of-session cleanup: scans the current repository and the session scratchpad for what the session left behind (worktrees under `.claude/worktrees`, `claude/*` branches and their remote copies, untracked files, scratch files), shows a plan, removes the merged and temporary items, and asks per item before anything that still holds work goes. |
-| [`confession-box`](skills/confession-box/SKILL.md) | Honest report of the shortcuts Claude took in a coding session: walks tests, type and lint suppressions, logic shortcuts, verification and scope drift, lists each confession with where it happened, and names the categories that came back clean. |
+| [`confession-box`](skills/confession-box/SKILL.md) | Honest report of the shortcuts Claude took in a coding session: reads the session log and git diff, walks tests, type and lint suppressions, logic shortcuts, verification and scope drift, lists each confession with its evidence, and suggests `/retro` when a lint rule, hook or CI job could have caught one. |
 | [`five-dysfunctions`](skills/five-dysfunctions/SKILL.md) | Lencioni's *The Five Dysfunctions of a Team* applied to Claude Code sessions and agent teams: live working norms, session audits (with a transcript condenser and signal scan), and multi-agent team design. Bilingual (EN/ES). |
 
 ## Plugins
