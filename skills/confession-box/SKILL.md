@@ -5,9 +5,9 @@ description: Use when the user asks Claude to confess, own up to, fess up, come 
 
 # Confession box
 
-The user wants an honest accounting of the shortcuts you took in this session, so they can decide whether each one is acceptable. Report every shortcut you find, including the small ones and the ones you think were justified. The user decides what is acceptable.
+The user wants an honest accounting of the shortcuts you took in this session, so they can decide whether each one is acceptable. Report every shortcut you find, including the small ones and the ones you think were justified.
 
-Every confession rests on evidence: a tool call in the session log, a line in the diff, or a command you ran. Evidence is what makes the list trustworthy, whether it holds five items or none. A complete walk that finds nothing is a valid result.
+Every confession rests on evidence: a tool call in the session log, a line in the diff, a command you ran, or something you told the user. Evidence is what makes the list trustworthy, whether it holds five items or none. A complete walk that finds nothing is a valid result.
 
 State what you did and where. When context is needed, give it in one short clause.
 
@@ -15,34 +15,46 @@ State what you did and where. When context is needed, give it in one short claus
 
 Work from the record. Your memory of a long or compacted session drops exactly the small details a confession needs.
 
-Run this block in a single shell call from the repo the session worked in, since variables don't carry over between calls and the git commands read the current directory. It picks the current session's log: the most recently modified `.jsonl` for this working directory. When the user names a session or a log file, set `LOG` to that file and `cd` into that session's repo first.
+Run this block in a single shell call from the repo the session worked in, since variables don't carry over between calls and the git commands read the current directory. It finds this session's log by its id and also reads the logs of any subagents the session started. To review a session the user names, start the block with `LOG=<that file>` and `cd` into that session's repo first.
 
 ```bash
-D="$HOME/.claude/projects/$(pwd | sed 's/[^a-zA-Z0-9]/-/g')"
-LOG="$D/$(ls -t "$D" | grep '\.jsonl$' | head -1)"
-PAT='type: ?ignore|@ts-(ignore|expect-error)|noqa|eslint-disable|nolint|#\[allow|pragma: no cover|istanbul ignore|[sS]kip\(|mark\.skip|xfail|\bxit\(|except\b[^:]*:|catch *(\([^)]*\))? *\{ *\}|unwrap_or|NotImplementedError|unimplemented|not implemented|TODO|FIXME|--no-verify|--no-gpg-sign|gpgsign=false|\bAny\b|cast\(|unsafeCast| as any\b'
-SINCE=$(jq -r '.timestamp // empty' "$LOG" | head -1)
+[ -n "$LOG" ] || LOG=$(find "$HOME/.claude/projects" -maxdepth 2 -name "${CLAUDE_CODE_SESSION_ID:-none}.jsonl" 2>/dev/null | head -1)
+if [ ! -s "$LOG" ]; then D="$HOME/.claude/projects/$(pwd | sed 's/[^a-zA-Z0-9]/-/g')"; LOG="$D/$(ls -t "$D" 2>/dev/null | grep '\.jsonl$' | head -1)"; fi
+if [ -s "$LOG" ]; then echo "LOG: $LOG"; else echo "NO LOG: work from memory and say so"; LOG=/dev/null; fi
+logs() { cat "$LOG"; find "${LOG%.jsonl}/subagents" -name '*.jsonl' -exec cat {} + 2>/dev/null; }
+PAT='type: ?ignore|pyright: *ignore|mypy: *ignore|@ts-(ignore|expect-error|nocheck)|noqa|nosec|pylint: *disable|eslint-disable|nolint|#\[allow|#\[ignore\]|@(Ignore|Disabled)\b|@SuppressWarnings|#pragma warning disable|pragma: no cover|(istanbul|c8|v8) ignore|\.(skip|only|todo)\(|\bx(it|describe)\(|\bfit\(|mark\.skip|pytest\.skip\(|t\.Skip\(|xfail|except\b[^:]*:|catch *(\([^)]*\))? *\{ *\}|unwrap_or|NotImplementedError|unimplemented|not implemented|TODO|FIXME|--no-verify|commit -n\b|--no-gpg-sign|gpgsign=false|\bSKIP=|HUSKY=0|\bAny\b|: *(any|unknown)\b|\bcast\(|unsafeCast| as any\b|as unknown as'
+SINCE=$(jq -r '.timestamp // empty' "$LOG" 2>/dev/null | head -1)
 
-# Tool calls, in order
-jq -r 'select(.type=="assistant") | .timestamp as $t | .message.content[]? | select(.type=="tool_use") | "\($t)\t\(.name)\t\(.input.file_path // .input.command // "")"' "$LOG"
+echo "== pattern hits in what you and your subagents wrote and ran"
+logs | jq -r --arg cwd "$PWD/" 'select(.type=="assistant") | .message.content[]? | select(.type=="tool_use") | .input as $i | (($i.new_string // $i.content // $i.command // "") | split("\n")[]) | "\($i.file_path // "(command)" | ltrimstr($cwd))\t\(.)"' | grep -E "$PAT" | grep -v "PAT='" | awk -F'\t' '{p=$1; sub(/^[^\t]*\t/, ""); print p "\t" substr($0, 1, 200)}'
 
-# Pattern hits in what you wrote and ran
-jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="tool_use") | .input as $i | (($i.new_string // $i.content // $i.command // "") | split("\n")[]) | "\($i.file_path // "(command)")\t\(.)"' "$LOG" | grep -E "$PAT"
+echo "== pattern hits in the session's added lines, then in untracked files"
+if git rev-parse --git-dir >/dev/null 2>&1; then
+  if git rev-parse --verify -q HEAD >/dev/null; then
+    { git diff HEAD; [ -n "$SINCE" ] && git log -p --since="$SINCE"; } | grep -E "^\+\+\+ |^\+.*($PAT)"
+  fi
+  git ls-files -z --others --exclude-standard | xargs -0 -r grep -HnE "$PAT"
+else echo "NOT A GIT REPO: skip the diff scans"; fi
 
-# In a git repo: pattern hits in the session's added lines, then in new untracked files
-{ git diff HEAD; git log -p --since="$SINCE"; } | grep -E "^\+\+\+ |^\+.*($PAT)"
-git ls-files -z --others --exclude-standard | xargs -0 -r grep -HnE "$PAT"
+echo "== what you told the user about results"
+jq -r 'select(.type=="assistant") | .timestamp as $t | .message.content[]? | select(.type=="text") | .text | split("\n")[] | select(test("tests? pass|all pass|passing|passes|should work|works now|verified|confirmed"; "i")) | "\($t)\t\(.[0:200])"' "$LOG"
+
+echo "== what the user asked for"
+jq -r '. as $e | if .type=="user" and (.isMeta | not) then (.message.content | (if type=="string" then [.] else map(select(.type=="text") | .text) end)[]) elif .type=="attachment" and .attachment.humanTurn==true then .attachment.prompt else empty end | select(startswith("<") | not) | "\($e.timestamp)\t\(gsub("\n";" ") | .[0:200])"' "$LOG"
+
+echo "== tool calls in order (sub = a subagent's)"
+logs | jq -r --arg cwd "$PWD/" 'select(.type=="assistant") | .timestamp as $t | (if .isSidechain then "sub" else "main" end) as $s | .message.content[]? | select(.type=="tool_use") | "\($t)\t\($s)\t\(.name)\t\((.input.file_path // .input.command // "") | ltrimstr($cwd) | gsub("\n";" ") | .[0:160])"' | sort
 ```
 
-The `+++` lines are file headers that label the hits under them. In a git repo, also read the full diff (`git diff HEAD` and `git log -p --since="$SINCE"`), because a weakened test often shows up only as removed lines, which the scan skips.
+The tool-call list prints last because it can be long. If the output gets cut off, rerun that last command on its own. The `+++` lines are file headers that label the diff hits under them. In a git repo, also read the full diff (`git diff HEAD` and `git log -p --since="$SINCE"`), because a weakened test often shows up only as removed lines, which the scan skips. The diff leaves out untracked files, so read in full every untracked file the tool-call list shows the session wrote. A hit in an untracked file the session never wrote predates the session.
 
 Read every hit in context. A hit is a lead, and it becomes a confession once the context shows a real shortcut. A pattern inside a string, a test fixture, documentation, or a pattern list like the one above is no shortcut.
 
-When no log exists, work from memory and say so at the top of the report. Step 1 is done when you have the tool-call list, both scans have run, and you have read the full diff, or you have noted which source was unavailable.
+When the block prints `NO LOG`, work from memory and say so at the top of the report. Step 1 is done when every part of the block has run and you have read the full diff, or you have noted which source was unavailable.
 
 ## 2. Walk the five categories
 
-Check each category below, in order, against the evidence from step 1 and against what you told the user. Walk all five, including the ones you expect to be clean: a checked category with nothing in it is how the user knows the review was thorough. Some shortcuts never match a pattern (a weakened assertion, a subset of tests reported as "all passing", a special-cased input), so read the edits themselves, beyond the scan hits. Step 2 is done when every category has either confessions with evidence or a clean result.
+Check each category below, in order, against the evidence from step 1, including what you told the user and what the user asked for. Walk all five, including the ones you expect to be clean: a checked category with nothing in it is how the user knows the review was thorough. Some shortcuts never match a pattern (a weakened assertion, a subset of tests reported as "all passing", a special-cased input), so read the edits themselves, beyond the scan hits. Step 2 is done when every category has either confessions with evidence or a clean result.
 
 ### 1. Tests
 
@@ -85,6 +97,7 @@ Check each category below, in order, against the evidence from step 1 and agains
 - Added abstractions, helpers, config knobs, or "for future use" hooks that weren't requested
 - Deleted code you judged unused without checking
 - Modified files outside what the user asked you to touch
+- Committed, pushed, or opened a pull request the user didn't ask for
 - Added comments, docstrings, or documentation the user didn't ask for
 
 ## 3. Report
@@ -93,7 +106,7 @@ Reply with these sections in this order.
 
 ### Confessions
 
-A bullet list. Each bullet: *what you did*, *where* (file:line, or the command you ran), and one short clause on *why*. Every bullet points at something in the evidence from step 1. Be specific: "I added `# type: ignore[arg-type]` at `foo.py:42` because the dict had mixed value types and I didn't want to introduce a TypedDict" is a real confession. When you can point at the evidence but aren't sure it counts as a shortcut, say so.
+A bullet list. Each bullet: *what you did*, *where* (file:line, or the command you ran), and one short clause on *why*. List each shortcut once, under the category it fits best, even when it touches several. Every bullet points at something in the evidence from step 1. Be specific: "I added `# type: ignore[arg-type]` at `foo.py:42` because the dict had mixed value types and I didn't want to introduce a TypedDict" is a real confession. When you can point at the evidence but aren't sure it counts as a shortcut, say so.
 
 ### Clean conscience
 
