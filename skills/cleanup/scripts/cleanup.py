@@ -17,20 +17,23 @@ Verdicts:
   ask   anything that would lose work: uncommitted changes, commits not on the
         base branch, remote branches, untracked files written this session.
   keep  never touched: the main checkout, the worktree this process runs in,
-        worktrees not made by a session, untracked files older than the
-        session.
+        worktrees outside .claude/worktrees (even when --branch names their
+        branch), worktrees an installed skill in ~/.claude/skills links into,
+        untracked files older than the session.
 """
 
 import argparse
 import datetime as dt
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 
 WORKTREE_DIR = os.path.join(".claude", "worktrees")
 SESSION_BRANCH_PREFIX = "claude/"
+SKILLS_DIR = os.path.join("~", ".claude", "skills")
 
 
 # ---------------------------------------------------------------- helpers
@@ -77,6 +80,48 @@ def real(path):
 def is_within(path, parent):
     path, parent = real(path), real(parent)
     return path == parent or path.startswith(parent + os.sep)
+
+
+ISO_TIME = re.compile(
+    r"(\d{4})-?(\d{2})-?(\d{2})"
+    r"(?:[T ](\d{2})(?::?(\d{2})(?::?(\d{2})(?:[.,](\d+))?)?)?)?"
+    r"\s*(Z|[+-]\d{2}(?::?\d{2})?)?",
+    re.IGNORECASE,
+)
+
+
+def parse_since(text):
+    """Session start as a POSIX timestamp. Reads ISO 8601 with a Z, a +HH:MM, +HHMM or +HH
+    offset, or none (local time). datetime.fromisoformat only reads a Z from Python 3.11 on."""
+    m = ISO_TIME.fullmatch(text.strip())
+    if not m:
+        raise argparse.ArgumentTypeError(f"not an ISO 8601 time: {text!r} (example: 2026-10-28T08:50:00Z)")
+    year, month, day, hour, minute, second, frac, zone = m.groups()
+    try:
+        tz = None
+        if zone and zone.upper() == "Z":
+            tz = dt.timezone.utc
+        elif zone:
+            digits = zone[1:].replace(":", "")
+            offset = dt.timedelta(hours=int(digits[:2]), minutes=int(digits[2:] or 0))
+            tz = dt.timezone(-offset if zone[0] == "-" else offset)
+        when = dt.datetime(int(year), int(month), int(day), int(hour or 0), int(minute or 0),
+                           int(second or 0), int((frac or "0")[:6].ljust(6, "0")), tzinfo=tz)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(f"not a valid time: {text!r} ({e})")
+    return when.timestamp()
+
+
+def skill_links(skills_dir):
+    """(link, target) for each symlink in the installed skills folder. Removing the folder a
+    link points into uninstalls that skill."""
+    folder = os.path.expanduser(skills_dir)
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return []
+    return [(os.path.join(folder, n), real(os.path.join(folder, n)))
+            for n in names if os.path.islink(os.path.join(folder, n))]
 
 
 # ---------------------------------------------------------------- git facts
@@ -212,7 +257,8 @@ def pr_state(repo, branch):
 def scan(args):
     items = []
     plan = {"scanned_at": dt.datetime.now().astimezone().isoformat(timespec="seconds"), "items": items}
-    since = dt.datetime.fromisoformat(args.since).timestamp() if args.since else None
+    since = args.since
+    links = skill_links(args.skills_dir)
     extra_branches = set(args.branch or [])
     cwd = real(os.getcwd())
 
@@ -252,15 +298,20 @@ def scan(args):
                 items.append(item)
                 continue
             item["bytes"] = dir_bytes(path)
-            session_made = is_within(path, wt_root) or (branch in extra_branches)
             if is_within(cwd, path):
                 item.update(verdict="keep", reason="this session is running inside it; leave it to "
                             "ExitWorktree or to the app when the session is archived")
                 items.append(item)
                 continue
-            if not session_made:
-                item.update(verdict="keep", reason="not under .claude/worktrees and not named with "
-                            "--branch, so no session made it")
+            linked = [link for link, target in links if is_within(target, path)]
+            if linked:
+                item.update(verdict="keep", reason=f"installed skill link(s) point into it ({', '.join(linked)}); "
+                            "removing it uninstalls them")
+                items.append(item)
+                continue
+            if not is_within(path, wt_root):
+                item.update(verdict="keep", reason=f"outside {WORKTREE_DIR}, which is out of scope"
+                            + (" even though --branch names its branch" if branch in extra_branches else ""))
                 items.append(item)
                 continue
             dirty = dirty_count(path)
@@ -313,11 +364,16 @@ def scan(args):
         for n, branch in enumerate(sorted(handled_branches), 1):
             if remote_branch_exists(main, branch):
                 owner = next((i for i in items if i.get("branch") == branch), None)
+                if owner and "merged" in owner:
+                    merged = owner["merged"]
+                else:
+                    # A kept worktree was never checked, so look at the remote copy itself.
+                    merged = merge_state(main, f"origin/{branch}", bref, None)[0]
                 items.append({
                     "id": f"rb{n}", "kind": "remote-branch", "branch": branch,
-                    "verdict": "ask", "merged": bool(owner and owner.get("merged")),
+                    "verdict": "ask", "merged": bool(merged),
                     "reason": ("origin/%s exists; merged, so deleting it is housekeeping" % branch)
-                    if owner and owner.get("merged") else
+                    if merged else
                     ("origin/%s exists and still holds unmerged work" % branch),
                     "actions": [["git", "-C", main, "push", "origin", "--delete", branch]],
                 })
@@ -470,9 +526,14 @@ def main(argv=None):
                    default=os.getcwd())
     s.add_argument("--no-repo", action="store_true", help="skip git entirely")
     s.add_argument("--scratchpad", help="the session's scratchpad directory")
-    s.add_argument("--since", help="session start, ISO 8601; older untracked files are kept")
+    s.add_argument("--since", type=parse_since,
+                   help="session start, ISO 8601 such as 2026-10-28T08:50:00Z or with a +01:00 "
+                   "offset (no offset means local time); older untracked files are kept")
     s.add_argument("--branch", action="append",
                    help="a branch this session created (besides claude/*); repeatable")
+    s.add_argument("--skills-dir", default=SKILLS_DIR,
+                   help="installed skills folder; a worktree one of its symlinks points into is "
+                   "kept (default: ~/.claude/skills)")
     s.add_argument("--no-fetch", action="store_true", help="do not fetch origin first")
     s.add_argument("--out", help="where to write the plan JSON")
     s.set_defaults(func=scan)
