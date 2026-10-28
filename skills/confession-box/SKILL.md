@@ -15,7 +15,7 @@ State what you did and where. When context is needed, give it in one short claus
 
 Work from the record. Your memory of a long or compacted session drops exactly the small details a confession needs.
 
-Run this block in a single shell call, since variables don't carry over between calls. It picks the current session's log: the most recently modified `.jsonl` for this working directory. When the user names a session or a log file, set `LOG` to that file instead.
+Run this block in a single shell call from the repo the session worked in, since variables don't carry over between calls and the git commands read the current directory. It picks the current session's log: the most recently modified `.jsonl` for this working directory. When the user names a session or a log file, set `LOG` to that file and `cd` into that session's repo first.
 
 ```bash
 D="$HOME/.claude/projects/$(pwd | sed 's/[^a-zA-Z0-9]/-/g')"
