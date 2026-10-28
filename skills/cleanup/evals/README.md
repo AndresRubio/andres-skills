@@ -29,3 +29,9 @@ A note on permissions: the apply step deletes things, and in auto mode the
 app's classifier may refuse it. A run that stops and reports the plan when
 refused is behaving as the skill asks; the state assertions will still fail
 for that run, so read the transcript before counting it against the skill.
+
+`test_scan.py` checks the script itself without a model: `--since` with a
+trailing `Z` and other ISO 8601 forms on Python 3.9, a worktree outside
+`.claude/worktrees/` staying KEEP even when `--branch` names its branch, and a
+worktree that an installed skill symlink points into staying KEEP. Run it with
+`python3 skills/cleanup/evals/test_scan.py`.
