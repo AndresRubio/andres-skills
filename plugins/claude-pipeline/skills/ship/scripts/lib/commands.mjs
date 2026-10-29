@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { parseSource } from './source.mjs';
 import { branchName, keyFromBranch, worktreePath } from './naming.mjs';
@@ -15,7 +16,8 @@ import { takeScreenshot } from './chrome.mjs';
 import { startPreview, stopPreview } from './preview.mjs';
 import { createWorktree, isolateInPlace, removeWorktreeIfEmpty } from './worktree.mjs';
 import { diffRisk } from './diff-risk.mjs';
-import { revertCheck } from './revert-check.mjs';
+import { revertCheck, changedTestFiles } from './revert-check.mjs';
+import { STAGE_POLICY, stageMark, readStages, stageTimings, loadUsage, buildRun, appendRun, readRunFile, summaryLine } from './run-record.mjs';
 import { runReady } from './ready-run.mjs';
 import { runSweep, realSweepDeps } from './sweep-run.mjs';
 import { laneTarget } from './lane.mjs';
@@ -79,6 +81,13 @@ function headSha(value) {
 function prNumber(value) {
   if (!/^\d+$/.test(value ?? '') || Number(value) < 1) throw new UsageError('--pr must be a positive integer');
   return Number(value);
+}
+
+function nowOption(value) {
+  if (value === undefined) return new Date();
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) throw new UsageError('--now must be an ISO date');
+  return d;
 }
 
 const PLUGIN_JSON = new URL('../../../../.claude-plugin/plugin.json', import.meta.url);
@@ -331,6 +340,50 @@ export const COMMANDS = {
       pidFile: v['pid-file'],
       timeoutMs: v['timeout-ms'] !== undefined ? Number(v['timeout-ms']) : undefined,
     });
+  },
+  'stage-mark': (argv) => {
+    const v = parse(argv, { 'run-dir': { type: 'string' }, stage: { type: 'string' }, model: { type: 'string' }, effort: { type: 'string' }, now: { type: 'string' } });
+    required(v, 'run-dir', 'stage');
+    if (!Object.hasOwn(STAGE_POLICY, v.stage)) throw new UsageError(`--stage must be one of ${Object.keys(STAGE_POLICY).join(', ')}`);
+    return stageMark(v['run-dir'], { stage: v.stage, model: v.model, effort: v.effort, now: nowOption(v.now) });
+  },
+  'run-record': (argv) => {
+    const v = parse(argv, {
+      'run-dir': { type: 'string' }, out: { type: 'string' }, key: { type: 'string' }, kind: { type: 'string' }, lane: { type: 'string' },
+      mode: { type: 'string' }, base: { type: 'string' }, cwd: { type: 'string' }, 'grade-file': { type: 'string' },
+      'verdict-file': { type: 'string' }, 'stopped-at': { type: 'string' }, now: { type: 'string' },
+    });
+    required(v, 'run-dir', 'out', 'key', 'kind', 'lane', 'mode', 'base');
+    if (!['ship', 'fix'].includes(v.kind)) throw new UsageError('--kind must be ship or fix');
+    if (!LANES.includes(v.lane)) throw new UsageError(`--lane must be one of ${LANES.join(', ')}`);
+    if (!['auto', 'interactive'].includes(v.mode)) throw new UsageError('--mode must be auto or interactive');
+    const now = nowOption(v.now);
+    const cwd = v.cwd ?? process.cwd();
+    const out = path.resolve(cwd, v.out);
+    // run.json is committed with the change, so it belongs inside the repository being recorded.
+    const rel = path.relative(path.resolve(cwd), out);
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) throw new UsageError('--out must be inside --cwd');
+    const stages = readStages(v['run-dir']);
+    const earlier = readRunFile(out).runs;
+    const run = buildRun({
+      key: v.key, kind: v.kind, lane: v.lane, mode: v.mode,
+      runId: process.env.GITHUB_RUN_ID ? defaultRun() : path.basename(v['run-dir']),
+      pluginVersion: readJson(PLUGIN_JSON).version,
+      sessionEffort: process.env.CLAUDE_PIPELINE_EFFORT || 'default',
+      stages, now,
+      usage: loadUsage(v['run-dir'], { from: stageTimings(stages, now)[0]?.startedAt, to: now.toISOString() }),
+      grade: v['grade-file'] ? (readJson(v['grade-file']).verdict ?? null) : null,
+      fixRunsBefore: earlier.filter((r) => r.kind === 'fix').length,
+      reviewVerdict: v['verdict-file'] ? (readJson(v['verdict-file']).verdict ?? null) : null,
+      stoppedAt: v['stopped-at'] ?? null,
+      size: { ...diffSize(cwd, v.base), testFiles: changedTestFiles(cwd, v.base).length },
+    });
+    return { file: out, summary: summaryLine(appendRun(out, run)) };
+  },
+  'run-summary': (argv) => {
+    const v = parse(argv, { file: { type: 'string' } });
+    required(v, 'file');
+    return { summary: existsSync(v.file) ? summaryLine(readRunFile(v.file)) : null };
   },
   hydrate: async (argv) => {
     const v = parse(argv, { 'issue-file': { type: 'string' }, 'config-file': { type: 'string' }, out: { type: 'string' }, repo: { type: 'string' } });
