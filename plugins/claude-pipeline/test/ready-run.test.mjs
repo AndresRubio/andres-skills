@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runReady } from '../skills/ship/scripts/lib/ready-run.mjs';
+import { runReady, runJsonPath } from '../skills/ship/scripts/lib/ready-run.mjs';
 import { formatVerdictBody } from '../skills/ship/scripts/lib/verdict.mjs';
 import { validateConfig } from '../skills/ship/scripts/lib/config.mjs';
 import { normalizeComments, PR_FIELDS } from '../skills/ship/scripts/lib/github.mjs';
@@ -273,4 +273,47 @@ test('a sampled PR gets claude-score dispatched after the ready label; others do
   const r = await runReady({ repo: REPO, config, now: NOW }, c.deps);
   assert.equal(r.actions[0].action, 'ready');
   assert.ok(r.actions[0].done.includes('score dispatch failed: HTTP 403'));
+});
+
+test('the ready report carries the run summary from run.json at the head SHA', async () => {
+  const bodies = [];
+  const runJsonCalls = [];
+  const { deps } = fakeDeps({ prs: [basePr()], comments: verdictComment('accepted') });
+  deps.comment = (kind, n, body) => bodies.push([kind, body]);
+  deps.runJson = (repo, sha, key) => { runJsonCalls.push([repo, sha, key]); return { version: 1, runs: [{ kind: 'ship', seconds: 1800, tokens: { input: 1000, output: 1000, cacheRead: 8000, cacheWrite: 0 }, usd: 2.5 }] }; };
+  await runReady({ repo: REPO, config, now: NOW }, deps);
+  assert.deepEqual(runJsonCalls, [[REPO, HEAD, '5']]);
+  assert.match(bodies[0][1], /\nRun: 1 run \(1 ship, 0 fix\), 30 min, 10k tokens \(80% cache reads\), \$2\.50\n/);
+});
+
+test('a missing or broken run.json leaves the report without a run line and the PR still ready', async () => {
+  for (const runJson of [() => null, () => { throw new Error('boom'); }, () => ({ version: 1, runs: 'nope' }), () => ({ runs: [null] })]) {
+    const bodies = [];
+    const { deps, calls } = fakeDeps({ prs: [basePr()], comments: verdictComment('accepted') });
+    deps.comment = (kind, n, body) => { bodies.push(body); calls.push(['comment', kind, n]); };
+    deps.runJson = runJson;
+    const r = await runReady({ repo: REPO, config, now: NOW }, deps);
+    assert.equal(r.actions[0].action, 'ready');
+    assert.doesNotMatch(bodies[0], /\nRun: /);
+    assert.ok(calls.some((c) => c[0] === 'addLabel' && c[3] === 'ready'));
+  }
+});
+
+test('runJsonPath encodes the key as one segment and rejects a hostile key', () => {
+  assert.equal(runJsonPath(REPO, HEAD, '5'), `repos/o/r/contents/docs/pipeline/5/run.json?ref=${HEAD}`);
+  assert.equal(runJsonPath(REPO, HEAD, 'ab-12'), `repos/o/r/contents/docs/pipeline/ab-12/run.json?ref=${HEAD}`);
+  for (const key of ['', '.', '..', '%2e%2e', '%2E', '../x', 'a/b', 'a%2fb', 'a\\b', 'a?b', 'a%3fb', 'a#b', 'a%23b', 'a\nb', 'a%00b', 'a%0ab', '%zz', '%e0%a4%a']) {
+    assert.equal(runJsonPath(REPO, HEAD, key), null, JSON.stringify(key));
+  }
+  assert.equal(runJsonPath(REPO, 'main?x=1', '5'), null);
+});
+
+test('a branch whose key is not a plain id is skipped before run.json is looked up', async () => {
+  const runJsonCalls = [];
+  const { deps, calls } = fakeDeps({ prs: [basePr({ headRefName: 'claude/../../secrets' }), basePr({ number: 8, headRefName: 'claude/5%2f..-x' })], comments: verdictComment('accepted') });
+  deps.runJson = (...args) => { runJsonCalls.push(args); return null; };
+  const r = await runReady({ repo: REPO, config, now: NOW }, deps);
+  assert.deepEqual(r.actions, []);
+  assert.deepEqual(runJsonCalls, []);
+  assert.deepEqual(calls, []);
 });

@@ -4,8 +4,21 @@ import { decideReady, readyReport, issueNumberFromBody } from './ready.mjs';
 import { formatMarker, defaultRun } from './marker.mjs';
 import { lockStatus } from './lock.mjs';
 import { isSampled } from './score.mjs';
+import { keyFromBranch } from './naming.mjs';
+import { summaryLine } from './run-record.mjs';
 
 const LOCK_GATED = new Set(['fix', 'update', 'needs-decision']);
+
+// API path of docs/pipeline/<key>/run.json at a commit. The key comes from a branch name, so it is
+// one percent-encoded segment: null when it fails to decode, decodes to "", "." or "..", or holds
+// "/", "\\", "?", "#" or a control character. The ref must be a hex SHA.
+export function runJsonPath(repo, sha, key) {
+  let decoded;
+  try { decoded = decodeURIComponent(String(key)); } catch { return null; }
+  if (decoded === '' || decoded === '.' || decoded === '..' || /[/\\?#\x00-\x1f\x7f]/.test(decoded)) return null;
+  if (!/^[0-9a-f]{7,40}$/i.test(String(sha))) return null;
+  return `repos/${repo}/contents/docs/pipeline/${encodeURIComponent(String(key))}/run.json?ref=${sha}`;
+}
 
 export function realDeps(repo) {
   return {
@@ -21,6 +34,17 @@ export function realDeps(repo) {
     removeLabel: (kind, n, label) => ghText([kind, 'edit', String(n), '--repo', repo, '--remove-label', label]),
     updateBranch: (n) => ghText(['api', '-X', 'PUT', `repos/${repo}/pulls/${n}/update-branch`]),
     dispatchScore: (n) => ghText(['workflow', 'run', 'claude-score.yml', '--repo', repo, '-f', `pr=${n}`]),
+    // run.json at the head SHA. Missing or unreadable is null: the report then has no run line (spec §9).
+    runJson: (r, sha, key) => {
+      try {
+        const apiPath = runJsonPath(r, sha, key);
+        if (!apiPath) return null;
+        const file = ghJson(['api', apiPath]);
+        return JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'));
+      } catch {
+        return null;
+      }
+    },
     comment: (kind, n, body) => (kind === 'pr' ? postPrComment(repo, n, body) : postIssueComment(repo, n, body)),
   };
 }
@@ -97,7 +121,14 @@ export async function runReady({ repo, config, now = new Date(), dryRun = false,
       } else if (decision.action === 'ready') {
         const changedFiles = deps.changedFiles(repo, pr.number);
         const marker = formatMarker('ready', { now, run });
-        const report = readyReport({ pr, config, verdict, changedFiles, marker, runSummary: null });
+        let runSummary = null;
+        try {
+          const data = deps.runJson ? deps.runJson(repo, pr.headRefOid, keyFromBranch(pr.headRefName)) : null;
+          runSummary = data ? summaryLine(data) : null;
+        } catch {
+          runSummary = null;
+        }
+        const report = readyReport({ pr, config, verdict, changedFiles, marker, runSummary });
         if (!alreadyMarkedForHead(prComments, 'ready', sha7)) act(`comment on PR ${pr.number}`, () => deps.comment('pr', pr.number, report));
         if (issueNumber !== null) act(`comment on issue ${issueNumber}`, () => deps.comment('issue', issueNumber, report));
         act('add label ready', () => deps.addLabel('pr', pr.number, 'ready'));
