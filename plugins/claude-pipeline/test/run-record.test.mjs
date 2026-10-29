@@ -212,6 +212,28 @@ test('CLI run-record without session.json still writes the run, with null usage'
   assert.match(r.json().summary, /cost not reported for 1 run$/);
 });
 
+test('CLI run-record with a missing grade or verdict file records null and names the file on stderr', () => {
+  const { root, base } = changedRepo();
+  const runDir = tempDir('run-');
+  const grade = path.join(runDir, 'grade.json');
+  const verdict = path.join(runDir, 'verdict.json');
+  const r = runCli(recordArgs(runDir, root, base, ['--grade-file', grade, '--verdict-file', verdict]), { env: { GITHUB_RUN_ID: '' } });
+  assert.equal(r.code, 0, r.stderr);
+  const run = JSON.parse(readFileSync(path.join(root, 'docs/pipeline/12/run.json'), 'utf8')).runs[0];
+  assert.equal(run.outcome.grade, null);
+  assert.equal(run.outcome.reviewVerdict, null);
+  assert.ok(r.stderr.includes(grade), r.stderr);
+  assert.ok(r.stderr.includes(verdict), r.stderr);
+});
+
+test('CLI run-record with a grade file that exists but does not parse still exits 1', () => {
+  const { root, base } = changedRepo();
+  const runDir = tempDir('run-');
+  writeFileSync(path.join(runDir, 'grade.json'), '{"verdict": ');
+  const r = runCli(recordArgs(runDir, root, base, ['--grade-file', path.join(runDir, 'grade.json')]), { env: { GITHUB_RUN_ID: '' } });
+  assert.equal(r.code, 1);
+});
+
 test('CLI run-record with a transcript that is gone writes null usage', () => {
   const { root, base } = changedRepo();
   const runDir = tempDir('run-');

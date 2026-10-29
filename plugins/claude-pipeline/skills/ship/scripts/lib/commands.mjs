@@ -39,6 +39,21 @@ export function readJson(file) {
   return JSON.parse(readFileSync(file, 'utf8'));
 }
 
+// A resumed run never regrades, so a missing grade or verdict file reads as null with one note on stderr.
+// A file that exists but does not parse still throws.
+function readVerdictFile(file) {
+  if (!file) return null;
+  let text;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (err) {
+    if (err?.code !== 'ENOENT') throw err;
+    process.stderr.write(`run-record: ${file} not found, recording null\n`);
+    return null;
+  }
+  return JSON.parse(text).verdict ?? null;
+}
+
 export function parse(argv, options = {}, positionals = 0) {
   let parsed;
   try {
@@ -404,9 +419,9 @@ export const COMMANDS = {
       sessionEffort: process.env.CLAUDE_PIPELINE_EFFORT || 'default',
       stages, now,
       usage: loadUsage(v['run-dir'], { from: stageTimings(stages, now)[0]?.startedAt, to: now.toISOString() }),
-      grade: v['grade-file'] ? (readJson(v['grade-file']).verdict ?? null) : null,
+      grade: readVerdictFile(v['grade-file']),
       fixRunsBefore: earlier.filter((r) => r.kind === 'fix').length,
-      reviewVerdict: v['verdict-file'] ? (readJson(v['verdict-file']).verdict ?? null) : null,
+      reviewVerdict: readVerdictFile(v['verdict-file']),
       stoppedAt: v['stopped-at'] ?? null,
       size: { ...diffSize(cwd, v.base), testFiles: changedTestFiles(cwd, v.base).length },
     });
