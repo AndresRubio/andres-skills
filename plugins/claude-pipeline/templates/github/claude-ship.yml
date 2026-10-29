@@ -74,6 +74,8 @@ jobs:
         uses: anthropics/claude-code-action@v1
         env:
           CLAUDE_PIPELINE_LANE: github
+          # Recorded per run in run.json (amendment D); keep it equal to the effort flag in claude_args.
+          CLAUDE_PIPELINE_EFFORT: high
           CLAUDE_PIPELINE_GUARD: '1'
           CI: 'true'
           CLAUDE_PIPELINE_HOME: ${{ runner.temp }}/claude-pipeline

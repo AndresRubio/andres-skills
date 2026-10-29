@@ -137,7 +137,7 @@ test('screenshots counts only .png files', () => {
 // --- noLeak fixtures (10-length-limit.md): the public repo must not contain the private canary ---
 
 const FORBIDDEN = 'sandbox-canary-0123456789abcdef01234567';
-const ARTIFACTS = ['research.md', 'grade.md', 'spec.md', 'plan.md', 'progress.md', 'evidence.md'];
+const ARTIFACTS = ['research.md', 'grade.md', 'spec.md', 'plan.md', 'progress.md', 'evidence.md', 'run.json'];
 const pipelineComment = (id, kind, extra = '') => ({
   id, user: { login: 'AndresRubio' }, author_association: 'OWNER', created_at: '2026-09-25T10:00:01Z',
   body: `**[claude-pipeline]** ${kind} · 2026-09-25T10:00:00Z · local\n\n${extra}`,

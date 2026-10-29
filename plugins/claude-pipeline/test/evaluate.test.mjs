@@ -5,7 +5,7 @@ import { countFetched, evaluateFixture, evaluateGroup, evaluateWait, findLeaks, 
 
 const observed = (over = {}) => ({
   verdict: 'ready', pr: { url: 'u', headRefName: 'claude/5-x', body: 'Fixes #5' }, labels: ['claude'],
-  commentKinds: ['lock', 'grade', 'report'], artifacts: ['research.md', 'grade.md', 'spec.md', 'plan.md', 'progress.md', 'evidence.md'],
+  commentKinds: ['lock', 'grade', 'report'], artifacts: ['research.md', 'grade.md', 'spec.md', 'plan.md', 'progress.md', 'evidence.md', 'run.json'],
   screenshots: 1, subIssues: 0, branchPushed: true, issueNumber: 5,
   prLabels: ['ready'], prCommentKinds: ['verdict', 'ready'], reviewVerdict: 'accepted', fixRuns: 0, ...over,
 });

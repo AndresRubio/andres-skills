@@ -125,3 +125,9 @@ test('claude-score: dispatched only, validates its input, haiku at low effort, n
   assert.match(t, /--disallowedTools .*Bash\(gh pr merge:\*\).*Bash\(git push:\*\)/);
   assert.match(t, /contents: read\n\s+pull-requests: write/);
 });
+
+test('claude-ship: the effort recorded in run.json matches the --effort it runs with', () => {
+  const t = rendered('claude-ship.yml');
+  const flag = t.match(/--effort (\w+)/)[1];
+  assert.match(t, new RegExp(`CLAUDE_PIPELINE_EFFORT: '?${flag}'?`));
+});

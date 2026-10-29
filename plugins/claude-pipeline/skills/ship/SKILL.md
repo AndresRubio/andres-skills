@@ -43,7 +43,7 @@ These apply in every mode and every stage.
 
 ## Stages
 
-Run them in order. Read each stage file only when you reach it, and tick the stage in `docs/pipeline/<KEY>/progress.md` when it's done.
+Run them in order. On reaching a stage, run `node "$PIPELINE" stage-mark --run-dir "$RUN_DIR" --stage <n>` (`--stage fix` in fix mode; add `--model` or `--effort` only when the dispatch departs from the Model policy), then read its file. Tick the stage in `docs/pipeline/<KEY>/progress.md` when it's done.
 
 | # | File | Produces |
 |---|---|---|
@@ -69,7 +69,7 @@ KEY, NUMBER, REPO, REPO_ROOT (the main checkout), BRANCH, WT (the worktree), BAS
 Use this whenever a stage says "stop procedure".
 
 1. **Never discard work.**
-   - If the worktree has uncommitted changes outside `docs/pipeline/`, commit them as `wip(pipeline): <KEY> stopped at stage <N>` (with the trailer) and push: `git push origin "$BRANCH"`.
+   - If BRANCH has been pushed (stage 4 or later), first run, in WT, `node "$PIPELINE" run-record --run-dir "$RUN_DIR" --out "docs/pipeline/$KEY/run.json" --key "$KEY" --kind <ship or fix> --lane "$LANE" --mode "$MODE" --base "$BASE_SHA" --stopped-at <N>`. Then if the worktree has uncommitted changes outside `docs/pipeline/`, or that run.json, commit them as `wip(pipeline): <KEY> stopped at stage <N>` (with the trailer) and push: `git push origin "$BRANCH"`.
    - If the stage says the worktree may be removed, run `. '<RUN_DIR>/vars.sh' && node "$PIPELINE" worktree-remove-if-empty --repo-root "$REPO_ROOT" --path "$WT" --branch "$BRANCH" --base "$BASE_REF"`.
 2. **Interactive mode:** explain what happened and what you need, then wait for the user. Label nothing unless the user asks you to park the issue. If the user ends the run here: `tracker:read-issue`, then `node "$PIPELINE" waiting-for --issue-file "$RUN_DIR/issue.json"`; if it lists keys, the issue's latest decision comment is a wait, so tell the user that ending the run here also ends that wait for those runs. Then `tracker:post-comment` kind `report` with "Run ended by the user at stage <N>.", then `tracker:remove-labels` `claude-working`. Without the report, this run's lock comment would look like the start of the next run.
 3. **Automatic mode:**

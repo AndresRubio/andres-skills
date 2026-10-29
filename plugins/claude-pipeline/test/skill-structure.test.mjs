@@ -686,3 +686,17 @@ test('hydrate: stage 0 fetches after the lock; stage 2 reads the index first, by
   assert.match(s2, /`## Context`/);
   assert.match(s2, /all six sections/);
 });
+
+test('measurement: stages are marked, run.json goes in the commit before each push, the report quotes the summary', () => {
+  const skill = read('SKILL.md');
+  assert.match(skill, /node "\$PIPELINE" stage-mark --run-dir "\$RUN_DIR" --stage <n>/);
+  assert.match(skill, /run-record [^\n]*--stopped-at <N>/);
+  assert.ok(skill.trimEnd().split('\n').length < 100, 'SKILL.md must stay under 100 lines');
+  const finish = read('stages/09-finish.md');
+  assert.ok(finish.includes('run-record') && finish.indexOf('run-record') < finish.indexOf('git push -u origin "$BRANCH"'), 'stage 9 records before it pushes');
+  assert.match(finish, /--kind ship [^\n]*--grade-file "\$RUN_DIR\/grade\.json"/);
+  const fix = read('stages/fix.md');
+  assert.ok(fix.includes('run-record') && fix.indexOf('run-record') < fix.indexOf('git push origin "$BRANCH"'), 'fix mode records before it pushes');
+  assert.match(fix, /--kind fix [^\n]*--verdict-file "\$RUN_DIR\/verdict\.json"/);
+  assert.match(read('stages/10-report.md'), /node "\$PIPELINE" run-summary --file "docs\/pipeline\/\$KEY\/run\.json"/);
+});
