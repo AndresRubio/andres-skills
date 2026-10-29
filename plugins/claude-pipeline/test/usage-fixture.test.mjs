@@ -5,6 +5,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { tokensFromResult, usageFromTranscripts, readJsonl } from '../skills/ship/scripts/lib/usage.mjs';
 
 const dir = new URL('./fixtures/usage/', import.meta.url);
 const lines = (file) => readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
@@ -21,9 +23,6 @@ test('the usage fixture is a matched -p result and transcript with a subagent', 
   const subFiles = existsSync(subDir) ? readdirSync(subDir).filter((f) => f.endsWith('.jsonl')) : [];
   assert.ok(main.some((e) => e.isSidechain === true) || subFiles.length > 0, 'subagent usage is somewhere');
 });
-
-import { tokensFromResult, usageFromTranscripts, readJsonl } from '../skills/ship/scripts/lib/usage.mjs';
-import { fileURLToPath } from 'node:url';
 
 test('the transcript sum equals the -p result, and the price table explains total_cost_usd', () => {
   const result = JSON.parse(readFileSync(new URL('result.json', dir), 'utf8'));

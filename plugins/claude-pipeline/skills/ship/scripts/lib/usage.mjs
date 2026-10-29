@@ -37,7 +37,10 @@ export function readJsonl(file) {
   const out = [];
   for (const line of readFileSync(file, 'utf8').split('\n')) {
     if (!line.trim()) continue;
-    try { out.push(JSON.parse(line)); } catch { /* a torn last line while the session writes */ }
+    try {
+      const v = JSON.parse(line);
+      if (v !== null && typeof v === 'object' && !Array.isArray(v)) out.push(v); // a bare `null` or number is no entry
+    } catch { /* a torn last line while the session writes */ }
   }
   return out;
 }
@@ -65,7 +68,9 @@ export function messageUsd(model, usage, prices = PRICES) {
   const rates = p.longContext && t.input + t.cacheRead + t.cacheWrite > p.longContext.over ? { ...p, ...p.longContext } : p;
   const split = usage?.cache_creation;
   const w1h = split?.ephemeral_1h_input_tokens ?? 0;
-  const w5m = split ? (split.ephemeral_5m_input_tokens ?? 0) : t.cacheWrite;
+  const split5m = split?.ephemeral_5m_input_tokens ?? 0;
+  // Writes the split does not account for are priced at the 5-minute rate, the API's default TTL.
+  const w5m = split5m + Math.max(0, t.cacheWrite - split5m - w1h);
   const parts = [[t.input, rates.input], [t.output, rates.output], [t.cacheRead, rates.cacheRead], [w5m, rates.cacheWrite5m], [w1h, rates.cacheWrite1h]];
   let usd = 0;
   for (const [tokens, rate] of parts) {
@@ -76,16 +81,26 @@ export function messageUsd(model, usage, prices = PRICES) {
   return usd;
 }
 
-const isStep = (e) => (e.type === 'user' || e.type === 'assistant') && e.isSidechain !== true;
+const isStep = (e) => e && (e.type === 'user' || e.type === 'assistant') && e.isSidechain !== true;
 
 export function usageFromTranscripts(sessions, { from, to, cacheTtlMinutes = 60, prices = PRICES } = {}) {
-  const inWindow = (e) => typeof e.timestamp === 'string' && (!from || e.timestamp >= from) && (!to || e.timestamp <= to);
+  // Bounds and entries are compared as parsed times: the pipeline's markers have second precision and
+  // transcripts carry milliseconds, and string order puts '.' before 'Z'. An entry whose timestamp does
+  // not parse is out of any window; with no window every entry is in.
+  const fromMs = from ? Date.parse(from) : null;
+  const toMs = to ? Date.parse(to) : null;
+  const inWindow = (e) => {
+    if (fromMs === null && toMs === null) return true;
+    const t = typeof e.timestamp === 'string' ? Date.parse(e.timestamp) : NaN;
+    return Number.isFinite(t) && (fromMs === null || t >= fromMs) && (toMs === null || t <= toMs);
+  };
   // One API message is written on several lines (same message.id) while it streams, and an early line
   // can carry a partial output_tokens. Collect per id and let the last line win.
   const byId = new Map();
   let anonymous = 0;
   const take = (e, fromSubagentFile) => {
-    if (e.type !== 'assistant' || !e.message?.usage || !inWindow(e)) return;
+    if (!e || e.type !== 'assistant' || !e.message?.usage || !inWindow(e)) return;
+    if (sum4(fromApiUsage(e.message.usage)) === 0) return; // synthetic entries carry no spend, and must not replace a real line
     const id = e.message.id ?? e.requestId ?? `anonymous:${anonymous++}`;
     byId.set(id, { e, subagent: fromSubagentFile || e.isSidechain === true });
   };
@@ -105,7 +120,6 @@ export function usageFromTranscripts(sessions, { from, to, cacheTtlMinutes = 60,
   const unpriced = new Set();
   for (const { e, subagent } of byId.values()) {
     const t = fromApiUsage(e.message.usage);
-    if (sum4(t) === 0) continue; // synthetic entries carry no spend
     tokens = add(tokens, t);
     if (subagent) sub = add(sub, t);
     else contextPeak = Math.max(contextPeak ?? 0, t.input + t.cacheRead + t.cacheWrite);

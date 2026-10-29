@@ -57,6 +57,23 @@ test('messageUsd prices cache reads and both write TTLs at their own rates, and 
   assert.equal(messageUsd('m-x', u(0, 0, 5, 0), partial), null);
 });
 
+test('messageUsd prices cache writes the split does not account for at the 5-minute rate', () => {
+  const R = { 'm-w': { input: 1, output: 1, cacheRead: 1, cacheWrite5m: 1, cacheWrite1h: 2 } };
+  const w = (split) => messageUsd('m-w', u(0, 0, 0, 1_000_000, split === undefined ? {} : { cache_creation: split }), R);
+  assert.equal(w({}), 1.0);
+  assert.equal(w({ ephemeral_1h_input_tokens: 400_000 }), 1.4);
+  assert.equal(w({ ephemeral_5m_input_tokens: 1_000_000 }), 1.0);
+  assert.equal(w({ ephemeral_1h_input_tokens: 1_000_000 }), 2.0);
+  assert.equal(w({ ephemeral_5m_input_tokens: 900_000, ephemeral_1h_input_tokens: 900_000 }), 0.9 + 1.8, 'a split that exceeds the total adds no remainder');
+  assert.equal(w(undefined), 1.0);
+});
+
+test('messageUsd switches Haiku 5.5 to the long-context rates above 100,000 prompt tokens, not at 100,000', () => {
+  assert.equal(messageUsd('m-small', u(100_000, 0, 0, 0), P), 0.01);
+  assert.equal(messageUsd('m-small', u(100_001, 0, 0, 0), P), (100_001 * 0.5) / 1e6);
+  assert.ok(Math.abs(messageUsd('m-small', u(50_000, 0, 50_001, 0), P) - (50_000 * 0.5 + 50_001 * 0.05) / 1e6) < 1e-12, 'cache reads count toward the prompt length');
+});
+
 test('usageFromTranscripts dedupes by message id, splits subagents, finds the context peak and the pauses', () => {
   const main = [
     user('2026-10-20T10:00:00Z'),
@@ -87,9 +104,39 @@ test('usageFromTranscripts: the last line per message id wins, because an early 
   const r = usageFromTranscripts([{ main, subagents: [] }], { prices: P });
   assert.deepEqual(r.tokens, { input: 10, output: 324, cacheRead: 5000, cacheWrite: 2000, subagents: 0 });
   assert.equal(r.contextPeak, 7010);
-  // the same id in a subagent file is a separate message from the main loop's id of that name only if ids differ
+  // the same id in main and a subagent file is one message; the later line wins
   const sub = [[msg('a', '2026-10-20T10:00:07Z', 'm-big', u(10, 400, 5000, 2000))]];
   assert.equal(usageFromTranscripts([{ main, subagents: sub }], { prices: P }).tokens.output, 400);
+});
+
+test('usageFromTranscripts: a zero-token line never replaces a real line of the same id', () => {
+  const main = [msg('a', '2026-10-20T10:00:00Z', 'm-big', u(5, 0, 0, 0)), msg('a', '2026-10-20T10:00:01Z', 'm-big', u(0, 0, 0, 0))];
+  assert.equal(usageFromTranscripts([{ main, subagents: [] }], { prices: P }).tokens.input, 5);
+  const outside = [msg('a', '2026-10-20T10:00:00Z', 'm-big', u(5, 1, 0, 0)), msg('a', '2026-10-20T12:00:00Z', 'm-big', u(5, 9, 0, 0))];
+  assert.equal(usageFromTranscripts([{ main: outside, subagents: [] }], { to: '2026-10-20T11:00:00Z', prices: P }).tokens.output, 1);
+});
+
+test('usageFromTranscripts: with no window an entry without a timestamp is counted; with a window it is not', () => {
+  const main = [{ type: 'assistant', message: { id: 'a', model: 'm-big', usage: u(7, 0, 0, 0) } }];
+  assert.equal(usageFromTranscripts([{ main, subagents: [] }], { prices: P }).tokens.input, 7);
+  assert.equal(usageFromTranscripts([{ main, subagents: [] }], { from: '2026-10-20T00:00:00Z', prices: P }), null);
+});
+
+test('usageFromTranscripts: window bounds are parsed times, so second and millisecond precision and offsets compare correctly', () => {
+  const main = [
+    msg('a', '2026-10-20T10:00:00.500Z', 'm-big', u(1, 0, 0, 0)),
+    msg('b', '2026-10-20T10:00:00.000Z', 'm-big', u(10, 0, 0, 0)),
+    msg('c', '2026-10-20T11:00:00.500Z', 'm-big', u(100, 0, 0, 0)),
+    msg('d', '2026-10-20T12:30:00+02:00', 'm-big', u(1000, 0, 0, 0)), // 10:30:00Z
+    msg('e', 'not a time', 'm-big', u(10000, 0, 0, 0)),
+  ];
+  const run = (w) => usageFromTranscripts([{ main, subagents: [] }], { ...w, prices: P }).tokens.input;
+  assert.equal(run({ from: '2026-10-20T10:00:00Z' }), 1111, 'from is inclusive, and .500Z is after :00Z; an unparseable time is out of the window');
+  assert.equal(run({ to: '2026-10-20T11:00:00Z' }), 1011, 'to excludes 11:00:00.500Z');
+  assert.equal(run({ from: '2026-10-20T10:00:00Z', to: '2026-10-20T11:00:00Z' }), 1011);
+  assert.equal(run({ from: '2026-10-20T10:15:00Z', to: '2026-10-20T10:45:00Z' }), 1000, 'the +02:00 entry is 10:30Z');
+  assert.equal(run({ from: '2026-10-20T10:00:00Z', to: '2026-10-20T10:00:00Z' }), 10);
+  assert.equal(run({}), 11111);
 });
 
 test('usageFromTranscripts: entries with neither message.id nor requestId are each counted', () => {
@@ -105,6 +152,11 @@ test('usageFromTranscripts: entries with neither message.id nor requestId are ea
   ];
   const r = usageFromTranscripts([{ main: byRequest, subagents: [] }], { prices: P });
   assert.deepEqual([r.tokens.input, r.tokens.output], [1, 9]);
+});
+
+test('usageFromTranscripts ignores null entries', () => {
+  const main = [null, msg('a', '2026-10-20T10:00:00Z', 'm-big', u(1, 0, 0, 0))];
+  assert.equal(usageFromTranscripts([{ main, subagents: [[null]] }], { prices: P }).tokens.input, 1);
 });
 
 test('usageFromTranscripts: a main transcript with no entries still counts its subagent files', () => {
@@ -148,6 +200,15 @@ test('readJsonl skips a torn line and a blank line without throwing', () => {
     const f = path.join(dir, 'a.jsonl');
     writeFileSync(f, '{"a":1}\n\n{"b":2}\n{"torn":');
     assert.deepEqual(readJsonl(f), [{ a: 1 }, { b: 2 }]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('readJsonl keeps only objects: a line reading null, a number or an array is no entry', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'usage-'));
+  try {
+    const f = path.join(dir, 'a.jsonl');
+    writeFileSync(f, 'null\n5\n"x"\n[1]\n{"a":1}\n');
+    assert.deepEqual(readJsonl(f), [{ a: 1 }]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
