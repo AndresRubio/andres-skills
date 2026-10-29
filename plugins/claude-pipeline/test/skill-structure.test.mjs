@@ -699,4 +699,7 @@ test('measurement: stages are marked, run.json goes in the commit before each pu
   assert.ok(fix.includes('run-record') && fix.indexOf('run-record') < fix.indexOf('git push origin "$BRANCH"'), 'fix mode records before it pushes');
   assert.match(fix, /--kind fix [^\n]*--verdict-file "\$RUN_DIR\/verdict\.json"/);
   assert.match(read('stages/10-report.md'), /node "\$PIPELINE" run-summary --file "docs\/pipeline\/\$KEY\/run\.json"/);
+  for (const f of ['SKILL.md', 'stages/09-finish.md', 'stages/10-report.md', 'stages/fix.md']) {
+    assert.match(read(f), /`run-(record|summary)` exits non-zero/, `${f} says what to do when run-record or run-summary fails`);
+  }
 });

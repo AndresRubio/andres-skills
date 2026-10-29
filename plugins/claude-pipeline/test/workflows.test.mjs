@@ -128,6 +128,7 @@ test('claude-score: dispatched only, validates its input, haiku at low effort, n
 
 test('claude-ship: the effort recorded in run.json matches the --effort it runs with', () => {
   const t = rendered('claude-ship.yml');
-  const flag = t.match(/--effort (\w+)/)[1];
-  assert.match(t, new RegExp(`CLAUDE_PIPELINE_EFFORT: '?${flag}'?`));
+  const flag = t.match(/claude_args: \|[\s\S]*?--effort (\w+)/)[1];
+  const step = t.match(/- name: Run the pipeline\n[\s\S]*?\n {8}env:\n((?: {10}.*\n|\s*\n)+)/)[1];
+  assert.match(step, new RegExp(`^ {10}CLAUDE_PIPELINE_EFFORT: '?${flag}'?$`, 'm'));
 });
