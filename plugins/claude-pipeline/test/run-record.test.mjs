@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { STAGE_POLICY, stageMark, readStages, stageTimings, buildRun, appendRun, summaryLine, loadUsage } from '../skills/ship/scripts/lib/run-record.mjs';
 import { runCli } from './helpers/cli.mjs';
@@ -17,18 +17,43 @@ test('stageMark appends the policy tier and effort unless the caller names other
 });
 
 test('STAGE_POLICY follows the Model policy table in SKILL.md', () => {
-  const skill = readFileSync(new URL('../skills/ship/SKILL.md', import.meta.url), 'utf8');
-  const rows = skill.split('\n').filter((l) => l.startsWith('| ') && !l.startsWith('| Work') && !l.startsWith('|---'));
-  assert.ok(rows.length >= 4, 'the table has its rows');
-  // Stages named by a row of that table. 1, 9 and fix have no row of their own.
-  const expected = { 0: ['haiku', 'low'], 2: ['sonnet', 'medium'], 3: ['strongest', 'high'], 4: ['strongest', 'high'], 5: ['strongest', 'high'], 6: ['sonnet', 'medium'], 7: ['sonnet', 'medium'], 8: ['strongest', 'high'] };
-  for (const [stage, [model, effort]] of Object.entries(expected)) assert.deepEqual([STAGE_POLICY[stage].model, STAGE_POLICY[stage].effort], [model, effort], `stage ${stage}`);
-  assert.match(skill, /Tracker queries, labels, resolve and lock \| haiku \| low/);
-  assert.match(skill, /Research, implementers, evidence write-up \| sonnet \| medium/);
-  assert.match(skill, /Grade, spec, plan \| strongest available \| high/);
-  assert.match(skill, /Stage 8 review[^|]*\| strongest available \| high/);
-  assert.deepEqual(STAGE_POLICY[1], { model: 'session', effort: 'session' });
-  assert.deepEqual(STAGE_POLICY[9], { model: 'session', effort: 'session' });
+  const lines = readFileSync(new URL('../skills/ship/SKILL.md', import.meta.url), 'utf8').split('\n');
+  const start = lines.findIndex((l) => l.startsWith('## Model policy'));
+  assert.ok(start >= 0, 'SKILL.md has a Model policy section');
+  const afterHeader = lines.slice(start + 1);
+  const sep = afterHeader.findIndex((l) => /^\|[\s|:-]+\|\s*$/.test(l));
+  assert.ok(sep >= 0, 'the section has a table');
+  const rows = [];
+  for (const l of afterHeader.slice(sep + 1)) {
+    if (!l.startsWith('|')) break;
+    rows.push(l.split('|').slice(1, -1).map((c) => c.trim()));
+  }
+  // A keyword in a row's first cell names the stages that row governs. Stages 1, 9 and fix have no row.
+  const byKeyword = { lock: [0], research: [2], grade: [3, 4, 5], implementers: [6, 7], review: [8], labels: [10] };
+  const mapped = new Set();
+  assert.ok(rows.length > 0);
+  for (const [work, model, effort] of rows) {
+    const stages = [...new Set(Object.entries(byKeyword).filter(([k]) => work.toLowerCase().includes(k)).flatMap(([, v]) => v))];
+    assert.ok(stages.length > 0, `row "${work}" maps to a stage`);
+    for (const stage of stages) {
+      mapped.add(stage);
+      assert.equal(STAGE_POLICY[stage].model, model.split(/\s+/)[0], `stage ${stage} model`);
+      assert.equal(STAGE_POLICY[stage].effort, effort.split(/[\s;,]+/)[0], `stage ${stage} effort`);
+    }
+  }
+  assert.deepEqual([...mapped].sort((a, b) => a - b), [0, 2, 3, 4, 5, 6, 7, 8, 10]);
+  for (const stage of ['1', '9', 'fix']) assert.deepEqual(STAGE_POLICY[stage], { model: 'session', effort: 'session' });
+});
+
+test('stageMark treats an empty --model or --effort as absent, and starts a fresh line after a torn one', () => {
+  const runDir = tempDir('run-');
+  assert.deepEqual(stageMark(runDir, { stage: '2', model: '', effort: '', now: new Date('2026-10-20T10:00:00Z') }), { stage: '2', at: '2026-10-20T10:00:00Z', model: 'sonnet', effort: 'medium' });
+  const r = runCli(['stage-mark', '--run-dir', runDir, '--stage', '3', '--model', '', '--effort', '', '--now', '2026-10-20T10:01:00Z']);
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual([r.json().model, r.json().effort], ['strongest', 'high']);
+  appendFileSync(path.join(runDir, 'stages.jsonl'), '{"stage":"4","at":"2026-10-2');
+  stageMark(runDir, { stage: '5', now: new Date('2026-10-20T10:05:00Z') });
+  assert.deepEqual(readStages(runDir).map((e) => e.stage), ['2', '3', '5']);
 });
 
 test('stageTimings: each stage lasts until the next mark, the last until finishedAt', () => {
@@ -107,6 +132,36 @@ test('loadUsage is null without session.json, with an unreadable one, or when no
   assert.equal(loadUsage(runDir, {}), null);
   writeFileSync(path.join(runDir, 'session.json'), JSON.stringify({ sessions: [null, { sessionId: 's' }] }));
   assert.equal(loadUsage(runDir, {}), null);
+});
+
+test('loadUsage returns null when a transcript cannot be read', () => {
+  const runDir = tempDir('run-');
+  const dir = path.join(runDir, 'a-directory.jsonl');
+  mkdirSync(dir);
+  writeFileSync(path.join(runDir, 'session.json'), JSON.stringify({ sessions: [{ sessionId: 's', transcriptPath: dir }] }));
+  assert.equal(loadUsage(runDir, {}), null);
+});
+
+test('appendRun refuses a runs entry that is not an object; summaryLine never sees it', () => {
+  const dir = tempDir('rj-');
+  for (const content of ['{"runs":[null]}', '{"runs":[1]}', '{"runs":[[]]}', '{"runs":["x"]}']) {
+    const file = path.join(dir, 'run.json');
+    writeFileSync(file, content);
+    assert.throws(() => appendRun(file, { kind: 'ship' }), /run\.json.*fix or remove it/, content);
+    assert.equal(readFileSync(file, 'utf8'), content);
+  }
+});
+
+test('appendRun leaves no .tmp file and replaces the entry of a retried run', () => {
+  const dir = tempDir('rj-');
+  const file = path.join(dir, 'x', 'run.json');
+  const ship = { runId: 'run-a', kind: 'ship', n: 1 };
+  appendRun(file, ship);
+  assert.deepEqual(readdirSync(path.dirname(file)), ['run.json']);
+  assert.deepEqual(appendRun(file, { ...ship, n: 2 }).runs, [{ ...ship, n: 2 }]);
+  assert.equal(appendRun(file, { runId: 'run-a', kind: 'fix' }).runs.length, 2);
+  assert.equal(appendRun(file, { runId: 'run-b', kind: 'fix' }).runs.length, 3);
+  assert.deepEqual(readdirSync(path.dirname(file)), ['run.json']);
 });
 
 function changedRepo() {
@@ -195,4 +250,70 @@ test('CLI run-record refuses an --out outside --cwd and a bad --now', () => {
   assert.equal(runCli(withOut(path.join(root, 'docs/pipeline/12/run.json'))).code, 0);
   assert.equal(runCli(recordArgs(runDir, root, base, ['--now', 'soon'])).code, 2);
   assert.equal(runCli(['stage-mark', '--run-dir', runDir, '--stage', '0', '--now', 'soon']).code, 2);
+});
+
+test('CLI run-record never aborts on an unreadable transcript', () => {
+  const { root, base } = changedRepo();
+  const runDir = tempDir('run-');
+  const dir = path.join(runDir, 'a-directory.jsonl');
+  mkdirSync(dir);
+  writeFileSync(path.join(runDir, 'session.json'), JSON.stringify({ sessions: [{ sessionId: 's1', transcriptPath: dir, firstSeen: '2026-10-20T10:00:00Z' }] }));
+  const r = runCli(recordArgs(runDir, root, base), { env: { GITHUB_RUN_ID: '' } });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(JSON.parse(readFileSync(path.join(root, 'docs/pipeline/12/run.json'), 'utf8')).runs[0].usd, null);
+});
+
+test('CLI run-record and run-summary refuse a run.json whose runs hold a null, and leave it alone', () => {
+  const { root, base } = changedRepo();
+  const file = path.join(root, 'docs/pipeline/12/run.json');
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, '{"version":1,"runs":[null]}');
+  const record = runCli(recordArgs(tempDir('run-'), root, base), { env: { GITHUB_RUN_ID: '' } });
+  assert.equal(record.code, 1);
+  assert.match(record.stderr, /docs\/pipeline\/12\/run\.json.*fix or remove it/);
+  const summary = runCli(['run-summary', '--file', file]);
+  assert.equal(summary.code, 1);
+  assert.match(summary.stderr, /run\.json.*fix or remove it/);
+  assert.equal(readFileSync(file, 'utf8'), '{"version":1,"runs":[null]}');
+});
+
+test('CLI run-record refuses an --out that leaves --cwd through a symlinked directory', () => {
+  const { root, base } = makeRepoWithOrigin({ 'src/a.ts': 'export const a = 1;\n' });
+  const outside = tempDir('outside-');
+  symlinkSync(outside, path.join(root, 'docs'), 'dir');
+  const dangling = path.join(tempDir('gone-'), 'missing');
+  symlinkSync(dangling, path.join(root, 'ghost'), 'dir');
+  const runDir = tempDir('run-');
+  const env = { GITHUB_RUN_ID: '' };
+  for (const out of ['docs/pipeline/12/run.json', 'docs/run.json', 'ghost/run.json']) {
+    const args = recordArgs(runDir, root, base);
+    const r = runCli(args.map((a, i) => (args[i - 1] === '--out' ? out : a)), { env });
+    assert.equal(r.code, 2, out);
+    assert.match(r.stderr, /--out must be inside --cwd/);
+  }
+  assert.deepEqual(readdirSync(outside), []);
+  assert.equal(readdirSync(path.dirname(dangling)).length, 0);
+});
+
+test('CLI run-record accepts a directory whose name starts with two dots', () => {
+  const { root, base } = changedRepo();
+  const args = recordArgs(tempDir('run-'), root, base);
+  const r = runCli(args.map((a, i) => (args[i - 1] === '--out' ? '..foo/run.json' : a)), { env: { GITHUB_RUN_ID: '' } });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(JSON.parse(readFileSync(path.join(root, '..foo/run.json'), 'utf8')).runs.length, 1);
+});
+
+test('CLI run-record twice for one run dir gives one run; a different kind appends; a fix retry does not count itself', () => {
+  const { root, base } = changedRepo();
+  const runDir = tempDir('run-');
+  const env = { GITHUB_RUN_ID: '' };
+  const file = path.join(root, 'docs/pipeline/12/run.json');
+  const runs = () => JSON.parse(readFileSync(file, 'utf8')).runs;
+  assert.equal(runCli(recordArgs(runDir, root, base), { env }).code, 0);
+  assert.equal(runCli(recordArgs(runDir, root, base), { env }).code, 0);
+  assert.deepEqual(runs().map((r) => r.kind), ['ship']);
+  assert.equal(runCli(recordArgs(runDir, root, base, ['--kind', 'fix']), { env }).code, 0);
+  assert.equal(runCli(recordArgs(runDir, root, base, ['--kind', 'fix']), { env }).code, 0);
+  assert.deepEqual(runs().map((r) => [r.kind, r.outcome.fixRunsBefore]), [['ship', 0], ['fix', 0]]);
+  assert.deepEqual(readdirSync(path.dirname(file)).filter((f) => f.endsWith('.tmp')), []);
 });

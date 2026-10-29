@@ -1,12 +1,16 @@
 // run.json (spec §7.5, D19; cost fields from amendment I). Written by the run itself, in the last
 // commit before a push, so writing it never re-runs a PR's checks.
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { readJsonl, sessionFiles, usageFromTranscripts } from './usage.mjs';
 
 const S = Object.freeze({ model: 'session', effort: 'session' });
 // The Model policy table in skills/ship/SKILL.md, one row per stage. "session": the orchestrating
-// session does the stage itself. Stage 10 posts the report comment, a tracker operation.
+// session does the stage itself. Stage 10 posts the report comment and clears labels, which the
+// table's "Tracker queries, labels" row covers. Fix mode marks its inline steps as `fix`; stages 7 and
+// 8 inside fix mode are marked on their own.
+// The policy for a dispatch, not a measurement: `models` and `usd` come from the transcript, and
+// `effort` here is the table's value while `sessionEffort` is what the run was started with.
 export const STAGE_POLICY = Object.freeze({
   0: Object.freeze({ model: 'haiku', effort: 'low' }),
   1: S,
@@ -19,7 +23,7 @@ export const STAGE_POLICY = Object.freeze({
   8: Object.freeze({ model: 'strongest', effort: 'high' }),
   9: S,
   10: Object.freeze({ model: 'haiku', effort: 'low' }),
-  fix: Object.freeze({ model: 'sonnet', effort: 'medium' }),
+  fix: S,
 });
 
 const iso = (d) => new Date(d).toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -28,8 +32,12 @@ const seconds = (a, b) => Math.max(0, Math.round((Date.parse(b) - Date.parse(a))
 export function stageMark(runDir, { stage, model, effort, now = new Date() }) {
   const key = String(stage);
   if (!Object.hasOwn(STAGE_POLICY, key)) throw new Error(`unknown stage ${key}`);
-  const entry = { stage: key, at: iso(now), model: model ?? STAGE_POLICY[key].model, effort: effort ?? STAGE_POLICY[key].effort };
-  appendFileSync(path.join(runDir, 'stages.jsonl'), `${JSON.stringify(entry)}\n`);
+  const entry = { stage: key, at: iso(now), model: model || STAGE_POLICY[key].model, effort: effort || STAGE_POLICY[key].effort };
+  const file = path.join(runDir, 'stages.jsonl');
+  // A torn last line (a killed write) must not swallow this mark: start a fresh line.
+  const text = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  const torn = text !== '' && !text.endsWith('\n');
+  appendFileSync(file, `${torn ? '\n' : ''}${JSON.stringify(entry)}\n`);
   return entry;
 }
 
@@ -49,15 +57,19 @@ export function stageTimings(entries, finishedAt) {
   return marks.map((e, i) => ({ stage: e.stage, model: e.model, effort: e.effort, startedAt: e.at, seconds: seconds(e.at, marks[i + 1]?.at ?? finishedAt) }));
 }
 
+// Recording must never stop a push: any failure reading the transcripts means "usage not reported".
 export function loadUsage(runDir, { from, to } = {}) {
-  let sessions;
-  try { sessions = JSON.parse(readFileSync(path.join(runDir, 'session.json'), 'utf8')).sessions; } catch { return null; }
-  if (!Array.isArray(sessions)) return null;
-  const parsed = sessions.filter((s) => typeof s?.transcriptPath === 'string' && existsSync(s.transcriptPath)).map((s) => {
-    const files = sessionFiles(s.transcriptPath);
-    return { main: readJsonl(files.main), subagents: files.subagents.map(readJsonl) };
-  });
-  return parsed.length ? usageFromTranscripts(parsed, { from, to }) : null;
+  try {
+    const sessions = JSON.parse(readFileSync(path.join(runDir, 'session.json'), 'utf8')).sessions;
+    if (!Array.isArray(sessions)) return null;
+    const parsed = sessions.filter((s) => typeof s?.transcriptPath === 'string' && existsSync(s.transcriptPath)).map((s) => {
+      const files = sessionFiles(s.transcriptPath);
+      return { main: readJsonl(files.main), subagents: files.subagents.map(readJsonl) };
+    });
+    return parsed.length ? usageFromTranscripts(parsed, { from, to }) : null;
+  } catch {
+    return null;
+  }
 }
 
 const NULL_TOKENS = Object.freeze({ input: null, output: null, cacheRead: null, cacheWrite: null, subagents: null });
@@ -90,14 +102,24 @@ export function readRunFile(file) {
   let data;
   try { data = JSON.parse(readFileSync(file, 'utf8')); } catch (err) { throw new Error(`${file} is not valid JSON (${err.message}); fix or remove it`); }
   if (data === null || typeof data !== 'object' || !Array.isArray(data.runs)) throw new Error(`${file} has no runs array; fix or remove it`);
+  if (!data.runs.every((r) => r !== null && typeof r === 'object' && !Array.isArray(r))) throw new Error(`${file} has a runs entry that is not an object; fix or remove it`);
   return data;
+}
+
+// The same run recorded twice (a retried push) replaces its entry. The file is written beside the target
+// and renamed over it, so a killed write never leaves torn JSON for the next `git add`.
+export function sameRun(a, b) {
+  return Boolean(a) && a.runId === b.runId && a.kind === b.kind;
 }
 
 export function appendRun(file, run) {
   const data = readRunFile(file);
-  data.runs.push(run);
+  if (sameRun(data.runs.at(-1), run)) data.runs[data.runs.length - 1] = run;
+  else data.runs.push(run);
   mkdirSync(path.dirname(file), { recursive: true });
-  writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);
+  const tmp = `${file}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`);
+  renameSync(tmp, file);
   return data;
 }
 

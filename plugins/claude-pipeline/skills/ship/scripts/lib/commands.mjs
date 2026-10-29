@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { parseSource } from './source.mjs';
@@ -17,7 +17,7 @@ import { startPreview, stopPreview } from './preview.mjs';
 import { createWorktree, isolateInPlace, removeWorktreeIfEmpty } from './worktree.mjs';
 import { diffRisk } from './diff-risk.mjs';
 import { revertCheck, changedTestFiles } from './revert-check.mjs';
-import { STAGE_POLICY, stageMark, readStages, stageTimings, loadUsage, buildRun, appendRun, readRunFile, summaryLine } from './run-record.mjs';
+import { STAGE_POLICY, stageMark, readStages, stageTimings, loadUsage, buildRun, appendRun, readRunFile, sameRun, summaryLine } from './run-record.mjs';
 import { runReady } from './ready-run.mjs';
 import { runSweep, realSweepDeps } from './sweep-run.mjs';
 import { laneTarget } from './lane.mjs';
@@ -81,6 +81,34 @@ function headSha(value) {
 function prNumber(value) {
   if (!/^\d+$/.test(value ?? '') || Number(value) < 1) throw new UsageError('--pr must be a positive integer');
   return Number(value);
+}
+
+function isInside(root, target) {
+  const rel = path.relative(root, target);
+  return rel !== '' && rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
+}
+
+// The path with symlinks resolved through its deepest existing ancestor; the parts below that do not
+// exist yet, so they cannot be links. A link that does not resolve (dangling, a loop) is refused.
+function realTarget(target) {
+  const rest = [];
+  let at = target;
+  for (;;) {
+    try {
+      lstatSync(at);
+      break;
+    } catch {
+      const up = path.dirname(at);
+      if (up === at) return null;
+      rest.unshift(path.basename(at));
+      at = up;
+    }
+  }
+  try {
+    return path.join(realpathSync(at), ...rest);
+  } catch {
+    return null;
+  }
 }
 
 function nowOption(value) {
@@ -361,13 +389,17 @@ export const COMMANDS = {
     const cwd = v.cwd ?? process.cwd();
     const out = path.resolve(cwd, v.out);
     // run.json is committed with the change, so it belongs inside the repository being recorded.
-    const rel = path.relative(path.resolve(cwd), out);
-    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) throw new UsageError('--out must be inside --cwd');
+    // A symlinked directory inside the repo must not lead out of it, so the check also runs on real paths.
+    const realOut = realTarget(out);
+    const realCwd = realTarget(path.resolve(cwd));
+    if (!isInside(path.resolve(cwd), out) || realOut === null || realCwd === null || !isInside(realCwd, realOut)) throw new UsageError('--out must be inside --cwd');
     const stages = readStages(v['run-dir']);
-    const earlier = readRunFile(out).runs;
+    const runId = process.env.GITHUB_RUN_ID ? defaultRun() : path.basename(v['run-dir']);
+    // A retry of the same run replaces its entry (appendRun), so it must not count itself as an earlier run.
+    const recorded = readRunFile(out).runs;
+    const earlier = sameRun(recorded.at(-1), { runId, kind: v.kind }) ? recorded.slice(0, -1) : recorded;
     const run = buildRun({
-      key: v.key, kind: v.kind, lane: v.lane, mode: v.mode,
-      runId: process.env.GITHUB_RUN_ID ? defaultRun() : path.basename(v['run-dir']),
+      key: v.key, kind: v.kind, lane: v.lane, mode: v.mode, runId,
       pluginVersion: readJson(PLUGIN_JSON).version,
       sessionEffort: process.env.CLAUDE_PIPELINE_EFFORT || 'default',
       stages, now,
