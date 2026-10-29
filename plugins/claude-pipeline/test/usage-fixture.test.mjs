@@ -25,7 +25,7 @@ test('the usage fixture is a matched -p result and transcript with a subagent', 
 import { tokensFromResult, usageFromTranscripts, readJsonl } from '../skills/ship/scripts/lib/usage.mjs';
 import { fileURLToPath } from 'node:url';
 
-test('the transcript sum equals the -p result, and the price table lands within 1% of total_cost_usd', () => {
+test('the transcript sum equals the -p result, and the price table explains total_cost_usd', () => {
   const result = JSON.parse(readFileSync(new URL('result.json', dir), 'utf8'));
   const subDir = new URL('subagents/', dir);
   const subagents = existsSync(subDir) ? readdirSync(subDir).filter((f) => f.endsWith('.jsonl')).sort().map((f) => readJsonl(fileURLToPath(new URL(f, subDir)))) : [];
@@ -39,5 +39,17 @@ test('the transcript sum equals the -p result, and the price table lands within 
   const h = result.modelUsage['claude-haiku-4-5-20251001'];
   assert.equal(fromTranscriptSubagents, h.inputTokens + h.outputTokens + h.cacheReadInputTokens + h.cacheCreationInputTokens);
   assert.deepEqual(fromTranscript.unpriced, [], `add these models to prices.mjs: ${fromTranscript.unpriced.join(', ')}`);
-  assert.ok(Math.abs(fromTranscript.usd - result.total_cost_usd) <= 0.01 * result.total_cost_usd, `estimated ${fromTranscript.usd}, actual ${result.total_cost_usd}`);
+  // (a) The deduplicated per-model tokens of this fixture, priced by hand at the table's rates (USD per million).
+  // sonnet 5.5: in 6, out 366, cache read 109383, 1h write 23688. haiku 4.5: in 18, out 456, cache read 23785, 5m write 25803.
+  const sonnetUsd = (6 * 2 + 366 * 10 + 109383 * 0.1 + 23688 * 4) / 1e6;
+  const haikuUsd = (18 * 1 + 456 * 5 + 23785 * 0.1 + 25803 * 1.25) / 1e6;
+  assert.ok(Math.abs(fromTranscript.usd - (sonnetUsd + haikuUsd)) <= 1e-6, `estimated ${fromTranscript.usd}, by hand ${sonnetUsd + haikuUsd}`);
+  // (b) Claude Code's total_cost_usd is its own estimate and still bills Sonnet 5.5 cache reads at 0.20; the page says 0.10.
+  // The gap is that difference alone. If this breaks, Claude Code's table or the pricing page changed: re-read both.
+  const lastPerId = new Map();
+  for (const e of readJsonl(fileURLToPath(new URL('main.jsonl', dir)))) if (e.type === 'assistant' && e.message?.usage) lastPerId.set(e.message.id, e.message);
+  const sonnetCacheReadTokens = [...lastPerId.values()].filter((m) => m.model === 'claude-sonnet-5-5').reduce((n, m) => n + m.usage.cache_read_input_tokens, 0);
+  assert.equal(sonnetCacheReadTokens, 109383);
+  const adjusted = fromTranscript.usd + (sonnetCacheReadTokens * (0.20 - 0.10)) / 1e6;
+  assert.ok(Math.abs(adjusted - result.total_cost_usd) <= 0.01 * result.total_cost_usd, `adjusted ${adjusted}, actual ${result.total_cost_usd}`);
 });
