@@ -27,7 +27,7 @@
 - Who counts as the pipeline: unchanged from Phase 2a (OWNER, MEMBER, COLLABORATOR, `claude[bot]`, `github-actions[bot]`).
 - `skills/ship/SKILL.md` stays under 100 lines (it is 97 now). Edits to it replace lines; they don't add any.
 - Models: haiku for scoring; the Phase 2a tiers otherwise (amendment D table).
-- Commits in the plugin repo (`andres-skills`, branch `claude-pipeline-phase2b` off `main`, subtree `plugins/claude-pipeline/`): author `AndresRubio <2109109+AndresRubio@users.noreply.github.com>`. Every commit message ends with `Co-Authored-By: Claude <model running this session> <noreply@anthropic.com>`; the commit steps below write Opus 5.5, so change the name when another model runs the task. Commit messages go through `-F <file>`, never `-m` with free text containing "push" or "merge". Run git from `plugins/claude-pipeline/`.
+- Commits in the plugin repo (`andres-skills`, branch `claude-pipeline-phase2b` off `main`, subtree `plugins/claude-pipeline/`): author `AndresRubio <2109109+AndresRubio@users.noreply.github.com>`. Trailers follow the running session's attribution instructions; the commit steps below add none. Commit messages go through `-F "$CM"`, never `-m` with free text containing "push" or "merge", where `CM` is a file in the session's scratchpad directory (`CM=<scratchpad>/cm.txt`). Run git from `plugins/claude-pipeline/`. Before any step that runs `claude` (Tasks 6 and 18), check the login with `claude auth status | jq -e .loggedIn`; a logged-out CLI fails the session in milliseconds and spends the user's approval, so ask for `claude auth login` and stop.
 - Other sessions may be editing `skills/ship/SKILL.md`, `skills/ship/stages/*.md` and `templates/github/*.yml`. Before a task edits one of them, `git pull --rebase` (or rebase the branch onto `main`) and apply the edit to the current text at the anchor this plan names, never by replacing the whole file.
 - Anything that publishes or changes things outside this machine needs the user's explicit yes at that step: pushing `andres-skills`, tagging, creating or changing GitHub repos, labels, secrets or workflows on a sandbox, merging sandbox PRs, and every headless or Actions run (it spends money).
 - Text copied from Warp's factory examples carries: "Adapted from warpdotdev/warp-factory-examples (MIT License, Copyright (c) 2026 Warp)".
@@ -163,8 +163,8 @@ Expected: `# fail 0`. If a test compares a whole normalized issue with `deepEqua
 
 ```bash
 git add skills/ship/scripts/lib/marker.mjs skills/ship/scripts/lib/github.mjs .claude-plugin/plugin.json test/marker.test.mjs test/github.test.mjs test/cli.test.mjs
-printf 'feat(pipeline): score marker kind, issue createdAt, v0.3.0\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' > /tmp/claude-501/cm.txt
-git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F /tmp/claude-501/cm.txt
+printf 'feat(pipeline): score marker kind, issue createdAt, v0.3.0\n' > "$CM"
+git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F "$CM"
 ```
 
 ---
@@ -364,8 +364,8 @@ Expected: `# fail 0`.
 
 ```bash
 git add skills/ship/scripts/lib/runs.mjs skills/ship/scripts/lib/sweep.mjs test/sweep.test.mjs
-printf 'feat(sweep): pick deferred, new and stale-lock issues up to the free slots\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' > /tmp/claude-501/cm.txt
-git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F /tmp/claude-501/cm.txt
+printf 'feat(sweep): pick deferred, new and stale-lock issues up to the free slots\n' > "$CM"
+git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F "$CM"
 ```
 
 ---
@@ -533,8 +533,8 @@ Expected: `# fail 0`.
 
 ```bash
 git add skills/ship/scripts/lib/sweep-run.mjs skills/ship/scripts/lib/commands.mjs test/sweep-run.test.mjs
-printf 'feat(sweep): sweep command dispatches claude-ship per candidate issue\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' > /tmp/claude-501/cm.txt
-git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F /tmp/claude-501/cm.txt
+printf 'feat(sweep): sweep command dispatches claude-ship per candidate issue\n' > "$CM"
+git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F "$CM"
 ```
 
 ---
@@ -637,8 +637,8 @@ Expected: `# fail 0`.
 
 ```bash
 git add skills/ship/scripts/lib/lane.mjs templates/github/claude-ship.yml templates/github/pipeline-ready.yml skills/setup/SKILL.md test/lane.test.mjs test/workflows.test.mjs
-printf 'feat(sweep): pipeline-ready sweeps on schedule and merge; claude-ship takes workflow_dispatch\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' > /tmp/claude-501/cm.txt
-git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F /tmp/claude-501/cm.txt
+printf 'feat(sweep): pipeline-ready sweeps on schedule and merge; claude-ship takes workflow_dispatch\n' > "$CM"
+git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F "$CM"
 ```
 
 ---
@@ -866,8 +866,8 @@ Expected: `# fail 0`.
 
 ```bash
 git add sandbox/issues/11a-author-italic.md sandbox/issues/11b-meta-description.md sandbox/issues/11c-count-by-author.md acceptance/fixtures.json acceptance/lib/evaluate.mjs acceptance/verify-fixture.mjs test/evaluate.test.mjs test/sandbox.test.mjs test/verify-fixture.test.mjs
-printf 'test(acceptance): wait (9) and cap (11) fixtures with timeline and group checks\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' > /tmp/claude-501/cm.txt
-git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F /tmp/claude-501/cm.txt
+printf 'test(acceptance): wait (9) and cap (11) fixtures with timeline and group checks\n' > "$CM"
+git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F "$CM"
 ```
 
 ---
@@ -914,6 +914,8 @@ test('the usage fixture is a matched -p result and transcript with a subagent', 
 ```
 
 - [ ] **Step 2: Run one session (user yes first)**
+
+Check the login first: `claude auth status | jq -e .loggedIn` exits 0 when logged in. If it does not, ask the user to run `claude auth login` and stop; do not start the session.
 
 ```bash
 SPIKE=$(mktemp -d /private/tmp/claude-501/usage-spike-XXXXXX)
@@ -966,8 +968,8 @@ Expected: `# fail 0`.
 
 ```bash
 git add test/fixtures/usage test/usage-fixture.test.mjs
-printf 'test(usage): real -p result and matching transcript, scrubbed\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' > /tmp/claude-501/cm.txt
-git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F /tmp/claude-501/cm.txt
+printf 'test(usage): real -p result and matching transcript, scrubbed\n' > "$CM"
+git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F "$CM"
 ```
 
 ---
@@ -1244,8 +1246,8 @@ Expected: `# fail 0`. If the fixture test's token equality fails, the transcript
 
 ```bash
 git add skills/ship/scripts/lib/prices.mjs skills/ship/scripts/lib/usage.mjs test/usage.test.mjs test/usage-fixture.test.mjs
-printf 'feat(usage): tokens and cost from -p results and session transcripts, priced per model\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' > /tmp/claude-501/cm.txt
-git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F /tmp/claude-501/cm.txt
+printf 'feat(usage): tokens and cost from -p results and session transcripts, priced per model\n' > "$CM"
+git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F "$CM"
 ```
 
 ---
@@ -1425,8 +1427,8 @@ Expected: `# fail 0`, including every existing guard test.
 
 ```bash
 git add skills/ship/scripts/lib/session.mjs hooks/guard.mjs test/session.test.mjs test/guard.test.mjs
-printf 'feat(usage): run guard records the session transcript and the run folder\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' > /tmp/claude-501/cm.txt
-git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F /tmp/claude-501/cm.txt
+printf 'feat(usage): run guard records the session transcript and the run folder\n' > "$CM"
+git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F "$CM"
 ```
 
 ---
@@ -1717,8 +1719,8 @@ Expected: `# fail 0`.
 
 ```bash
 git add skills/ship/scripts/lib/run-record.mjs skills/ship/scripts/lib/commands.mjs test/run-record.test.mjs
-printf 'feat(measure): stage-mark, run-record and run-summary write and read run.json\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' > /tmp/claude-501/cm.txt
-git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F /tmp/claude-501/cm.txt
+printf 'feat(measure): stage-mark, run-record and run-summary write and read run.json\n' > "$CM"
+git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F "$CM"
 ```
 
 ---
@@ -1825,8 +1827,8 @@ Expected: `# fail 0`. Check `wc -l skills/ship/SKILL.md` prints 97 or fewer.
 
 ```bash
 git add skills/ship/SKILL.md skills/ship/stages/09-finish.md skills/ship/stages/10-report.md skills/ship/stages/fix.md templates/github/claude-ship.yml acceptance/fixtures.json test/skill-structure.test.mjs test/workflows.test.mjs
-printf 'feat(measure): mark every stage; run.json in the last commit before each push; summary in the report\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' > /tmp/claude-501/cm.txt
-git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F /tmp/claude-501/cm.txt
+printf 'feat(measure): mark every stage; run.json in the last commit before each push; summary in the report\n' > "$CM"
+git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F "$CM"
 ```
 
 ---
@@ -1914,8 +1916,8 @@ Expected: `# fail 0`.
 
 ```bash
 git add skills/ship/scripts/lib/ready-run.mjs test/ready-run.test.mjs
-printf 'feat(ready): run summary from run.json in the ready report\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' > /tmp/claude-501/cm.txt
-git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F /tmp/claude-501/cm.txt
+printf 'feat(ready): run summary from run.json in the ready report\n' > "$CM"
+git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F "$CM"
 ```
 
 ---
@@ -2254,8 +2256,8 @@ Expected: `# fail 0`. Also `claude plugin validate . --strict` passes with the n
 
 ```bash
 git add skills/ship/scripts/lib/score.mjs skills/ship/scripts/lib/commands.mjs skills/ship/scripts/lib/ready-run.mjs skills/ship/scripts/lib/setup.mjs skills/score/SKILL.md skills/setup/SKILL.md templates/github/claude-score.yml test/score.test.mjs test/ready-run.test.mjs test/setup.test.mjs test/workflows.test.mjs test/skill-structure.test.mjs
-printf 'feat(score): sampled haiku scoring in claude-score.yml, dispatched by pipeline-ready\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' > /tmp/claude-501/cm.txt
-git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F /tmp/claude-501/cm.txt
+printf 'feat(score): sampled haiku scoring in claude-score.yml, dispatched by pipeline-ready\n' > "$CM"
+git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F "$CM"
 ```
 
 ---
@@ -2498,8 +2500,8 @@ Expected: `# fail 0`.
 
 ```bash
 git add skills/ship/scripts/lib/metrics.mjs skills/ship/scripts/lib/metrics-run.mjs skills/ship/scripts/lib/commands.mjs test/metrics.test.mjs
-printf 'feat(measure): metrics command, one table per repo from run.json and GitHub\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' > /tmp/claude-501/cm.txt
-git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F /tmp/claude-501/cm.txt
+printf 'feat(measure): metrics command, one table per repo from run.json and GitHub\n' > "$CM"
+git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F "$CM"
 ```
 
 ---
@@ -2693,8 +2695,8 @@ Expected: `# fail 0`.
 
 ```bash
 git add skills/ship/scripts/lib/hydrate.mjs test/hydrate.test.mjs
-printf 'feat(hydrate): find the references in trusted issue text, bounded and this repo only\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' > /tmp/claude-501/cm.txt
-git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F /tmp/claude-501/cm.txt
+printf 'feat(hydrate): find the references in trusted issue text, bounded and this repo only\n' > "$CM"
+git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F "$CM"
 ```
 
 ---
@@ -3042,8 +3044,8 @@ Expected: `# fail 0` (the real-PDF test is skipped where `pdftotext` is missing;
 
 ```bash
 git add skills/ship/scripts/lib/hydrate-run.mjs skills/ship/scripts/lib/commands.mjs test/hydrate-run.test.mjs
-printf 'feat(hydrate): fetch issues, permalinks, runs and allow-listed URLs within the amendment E bounds\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' > /tmp/claude-501/cm.txt
-git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F /tmp/claude-501/cm.txt
+printf 'feat(hydrate): fetch issues, permalinks, runs and allow-listed URLs within the amendment E bounds\n' > "$CM"
+git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F "$CM"
 ```
 
 ---
@@ -3282,8 +3284,8 @@ Expected: `# fail 0`.
 
 ```bash
 git add skills/ship/stages/00-resolve.md skills/ship/stages/02-research.md sandbox/fill-body.mjs sandbox/issues/15-hydrate.md sandbox/setup-sandbox.sh sandbox/recreate-issue.sh acceptance/fixtures.json acceptance/lib/evaluate.mjs acceptance/verify-fixture.mjs test/skill-structure.test.mjs test/sandbox.test.mjs test/evaluate.test.mjs
-printf 'feat(hydrate): stage 0 hydrates, stage 2 reads the index first; test issue 15\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' > /tmp/claude-501/cm.txt
-git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F /tmp/claude-501/cm.txt
+printf 'feat(hydrate): stage 0 hydrates, stage 2 reads the index first; test issue 15\n' > "$CM"
+git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F "$CM"
 ```
 
 ---
@@ -3502,8 +3504,8 @@ Expected: `# fail 0`; the plugin validates with both hooks.
 
 ```bash
 git add skills/ship/scripts/lib/trim.mjs hooks/trim.mjs hooks/hooks.json test/trim.test.mjs
-printf 'feat(hooks): opt-in output trim, a PostToolUse hook that logs long Bash output and keeps the useful lines\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' > /tmp/claude-501/cm.txt
-git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F /tmp/claude-501/cm.txt
+printf 'feat(hooks): opt-in output trim, a PostToolUse hook that logs long Bash output and keeps the useful lines\n' > "$CM"
+git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F "$CM"
 ```
 
 ---
@@ -3641,8 +3643,8 @@ Turned on for headless lanes: yes (0.3.1) / no, because …
 npm test
 claude plugin validate . --strict
 git add docs/phase2b-results.md
-printf 'docs: Phase 2b acceptance results\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n' > /tmp/claude-501/cm.txt
-git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F /tmp/claude-501/cm.txt
+printf 'docs: Phase 2b acceptance results\n' > "$CM"
+git -c user.name=AndresRubio -c user.email=2109109+AndresRubio@users.noreply.github.com commit -F "$CM"
 ```
 
 Then, on the user's yes: merge to `main`, tag the final version, push `main` and the tag.
