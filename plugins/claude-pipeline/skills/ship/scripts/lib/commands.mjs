@@ -7,7 +7,7 @@ import { loadConfig } from './config.mjs';
 import { formatMarker, parseMarker, defaultRun } from './marker.mjs';
 import { lockStatus } from './lock.mjs';
 import { checkEligibility, LANES } from './eligibility.mjs';
-import { ghJson, fetchIssue, fetchPr, currentRepo, fetchActiveRuns, fetchPrComments, postPrComment } from './github.mjs';
+import { ghJson, isRepoSlug, fetchIssue, fetchPr, currentRepo, fetchActiveRuns, fetchPrComments, postPrComment } from './github.mjs';
 import { computeVerdict, formatVerdictBody, latestVerdict } from './verdict.mjs';
 import { waitingFor, KEY_RE } from './runs.mjs';
 import { gradeVerdict } from './grade.mjs';
@@ -24,6 +24,8 @@ import { laneTarget } from './lane.mjs';
 import { defaultVars, installFiles } from './setup.mjs';
 import { formatScoreBody } from './score.mjs';
 import { hydrate } from './hydrate-run.mjs';
+import { aggregate, formatTable } from './metrics.mjs';
+import { collectRows } from './metrics-run.mjs';
 
 export class UsageError extends Error {}
 
@@ -426,6 +428,15 @@ export const COMMANDS = {
       size: { ...diffSize(cwd, v.base), testFiles: changedTestFiles(cwd, v.base).length },
     });
     return { file: out, summary: summaryLine(appendRun(out, run)) };
+  },
+  metrics: (argv) => {
+    const v = parse(argv, { repo: { type: 'string', multiple: true }, since: { type: 'string' }, table: { type: 'boolean' } });
+    if (v.since !== undefined && Number.isNaN(Date.parse(v.since))) throw new UsageError('--since must be an ISO date');
+    const bad = (v.repo ?? []).find((r) => !isRepoSlug(r));
+    if (bad !== undefined) throw new UsageError(`--repo must be owner/name, got ${JSON.stringify(bad)}`);
+    const repos = v.repo?.length ? v.repo : [currentRepo()];
+    const results = repos.map((repo) => ({ repo, since: v.since ?? null, ...aggregate(collectRows(repo, { since: v.since })) }));
+    return v.table ? results.map((r) => formatTable(r.repo, r)).join('\n\n') : { repos: results };
   },
   'run-summary': (argv) => {
     const v = parse(argv, { file: { type: 'string' } });
