@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runReady, runJsonPath } from '../skills/ship/scripts/lib/ready-run.mjs';
+import { runReady } from '../skills/ship/scripts/lib/ready-run.mjs';
 import { formatVerdictBody } from '../skills/ship/scripts/lib/verdict.mjs';
 import { validateConfig } from '../skills/ship/scripts/lib/config.mjs';
 import { normalizeComments, PR_FIELDS } from '../skills/ship/scripts/lib/github.mjs';
@@ -297,15 +297,6 @@ test('a missing or broken run.json leaves the report without a run line and the 
     assert.doesNotMatch(bodies[0], /\nRun: /);
     assert.ok(calls.some((c) => c[0] === 'addLabel' && c[3] === 'ready'));
   }
-});
-
-test('runJsonPath encodes the key as one segment and rejects a hostile key', () => {
-  assert.equal(runJsonPath(REPO, HEAD, '5'), `repos/o/r/contents/docs/pipeline/5/run.json?ref=${HEAD}`);
-  assert.equal(runJsonPath(REPO, HEAD, 'ab-12'), `repos/o/r/contents/docs/pipeline/ab-12/run.json?ref=${HEAD}`);
-  for (const key of ['', '.', '..', '%2e%2e', '%2E', '../x', 'a/b', 'a%2fb', 'a\\b', 'a?b', 'a%3fb', 'a#b', 'a%23b', 'a\nb', 'a%00b', 'a%0ab', '%zz', '%e0%a4%a']) {
-    assert.equal(runJsonPath(REPO, HEAD, key), null, JSON.stringify(key));
-  }
-  assert.equal(runJsonPath(REPO, 'main?x=1', '5'), null);
 });
 
 test('a branch whose key is not a plain id is skipped before run.json is looked up', async () => {

@@ -125,17 +125,20 @@ export function appendRun(file, run) {
 
 const formatTokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
 
+// run.json can be edited by anyone who can push to the branch, so a field counts only when it is a finite number.
+const num = (x) => (Number.isFinite(x) ? x : 0);
+
 export function summaryLine({ runs = [] } = {}) {
   if (!runs.length) return null;
   const ship = runs.filter((r) => r.kind === 'ship').length;
-  const parts = [`${runs.length} run${runs.length === 1 ? '' : 's'} (${ship} ship, ${runs.length - ship} fix)`, `${Math.round(runs.reduce((s, r) => s + (r.seconds ?? 0), 0) / 60)} min`];
+  const parts = [`${runs.length} run${runs.length === 1 ? '' : 's'} (${ship} ship, ${runs.length - ship} fix)`, `${Math.round(runs.reduce((s, r) => s + num(r.seconds), 0) / 60)} min`];
   const reported = runs.filter((r) => Number.isFinite(r.tokens?.input));
   if (reported.length) {
-    const total = reported.reduce((s, r) => s + r.tokens.input + r.tokens.output + r.tokens.cacheRead + r.tokens.cacheWrite, 0);
-    const reads = reported.reduce((s, r) => s + r.tokens.cacheRead, 0);
+    const total = reported.reduce((s, r) => s + num(r.tokens.input) + num(r.tokens.output) + num(r.tokens.cacheRead) + num(r.tokens.cacheWrite), 0);
+    const reads = reported.reduce((s, r) => s + num(r.tokens.cacheRead), 0);
     parts.push(`${formatTokens(total)} tokens (${total ? Math.round((100 * reads) / total) : 0}% cache reads)`);
   }
-  const priced = runs.filter((r) => typeof r.usd === 'number');
+  const priced = runs.filter((r) => Number.isFinite(r.usd));
   if (priced.length) parts.push(`$${priced.reduce((s, r) => s + r.usd, 0).toFixed(2)}`);
   const missing = runs.length - priced.length;
   if (missing) parts.push(`cost not reported for ${missing} run${missing === 1 ? '' : 's'}`);

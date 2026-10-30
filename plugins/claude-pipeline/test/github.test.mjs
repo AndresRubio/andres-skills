@@ -257,3 +257,48 @@ test('normalizeIssue keeps the creation time, which orders the sweep', () => {
   }, []);
   assert.equal(issue.createdAt, '2026-10-20T08:00:00Z');
 });
+
+const SHA = 'a'.repeat(40);
+
+test('runJsonPath accepts only a plain single-segment key and a 7 to 40 character hex sha', () => {
+  assert.equal(github.runJsonPath('o/r', SHA, '5'), `repos/o/r/contents/docs/pipeline/5/run.json?ref=${SHA}`);
+  assert.equal(github.runJsonPath('o/r', SHA, 'ab-12'), `repos/o/r/contents/docs/pipeline/ab-12/run.json?ref=${SHA}`);
+  assert.equal(github.runJsonPath('o/r', SHA, 'a.b_c-1'), `repos/o/r/contents/docs/pipeline/a.b_c-1/run.json?ref=${SHA}`);
+  // The raw key is checked by shape and never decoded: a space and a percent escape are both refused.
+  for (const key of ['a b', 'a%41', 'a%2541', '', '.', '..', '%2e%2e', '%2E', '../x', 'a/b', 'a%2fb', 'a\\b', 'a?b', 'a%3fb', 'a#b', 'a%23b', 'a\nb', 'a%00b', 'a%0ab', '%zz', '%e0%a4%a', '-x', '.x', '\ud800']) {
+    assert.equal(github.runJsonPath('o/r', SHA, key), null, JSON.stringify(key));
+  }
+  assert.equal(github.runJsonPath('o/r', 'a'.repeat(6), '5'), null);
+  assert.equal(github.runJsonPath('o/r', 'a'.repeat(41), '5'), null);
+  assert.ok(github.runJsonPath('o/r', 'a'.repeat(7), '5'));
+  assert.ok(github.runJsonPath('o/r', 'a'.repeat(40), '5'));
+  assert.equal(github.runJsonPath('o/r', 'main?x=1', '5'), null);
+});
+
+test('fetchRunJson decodes a base64 run.json and gives null for a failed call, an empty content or a bad key', () => {
+  const route = (key) => `api ${github.runJsonPath('o/r', SHA, key)}`;
+  const dir = fakeGh({
+    [route('1')]: { content: Buffer.from(JSON.stringify({ version: 1, runs: [{ kind: 'ship' }] })).toString('base64') },
+    [route('2')]: { __ghError: 'HTTP 404: Not Found' },
+    // The contents API answers a file over 1 MB with an empty content.
+    [route('3')]: { content: '' },
+    [route('4')]: { content: Buffer.from('not json').toString('base64') },
+  });
+  const saved = process.env.PATH;
+  process.env.PATH = `${dir}:${saved}`;
+  try {
+    assert.deepEqual(github.fetchRunJson('o/r', SHA, '1'), { version: 1, runs: [{ kind: 'ship' }] });
+    assert.equal(github.fetchRunJson('o/r', SHA, '2'), null);
+    assert.equal(github.fetchRunJson('o/r', SHA, '3'), null);
+    assert.equal(github.fetchRunJson('o/r', SHA, '4'), null);
+    assert.equal(github.fetchRunJson('o/r', SHA, '../x'), null);
+    assert.equal(github.fetchRunJson('o/r', 'zz', '1'), null);
+  } finally {
+    process.env.PATH = saved;
+  }
+});
+
+test('isRepoSlug accepts owner/name and refuses anything else', () => {
+  for (const ok of ['o/r', 'AndresRubio/andres-skills', 'a-b/c.d_e']) assert.equal(github.isRepoSlug(ok), true, ok);
+  for (const bad of ['', 'o', 'o/', '/r', 'o/r/x', 'o/..', '-o/r', 'o r/x', 'o/r;x', '--flag', 'o/r\n', 'o/r?x', undefined, 5]) assert.equal(github.isRepoSlug(bad), false, JSON.stringify(bad));
+});

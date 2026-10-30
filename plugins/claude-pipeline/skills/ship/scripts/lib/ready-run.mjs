@@ -1,4 +1,4 @@
-import { ghJson, ghText, fetchPr, fetchPrComments, fetchIssue, postPrComment, postIssueComment } from './github.mjs';
+import { ghJson, ghText, fetchRunJson, fetchPr, fetchPrComments, fetchIssue, postPrComment, postIssueComment } from './github.mjs';
 import { latestVerdict } from './verdict.mjs';
 import { decideReady, readyReport, issueNumberFromBody } from './ready.mjs';
 import { formatMarker, defaultRun } from './marker.mjs';
@@ -8,17 +8,6 @@ import { keyFromBranch } from './naming.mjs';
 import { summaryLine } from './run-record.mjs';
 
 const LOCK_GATED = new Set(['fix', 'update', 'needs-decision']);
-
-// API path of docs/pipeline/<key>/run.json at a commit. The key comes from a branch name, so it is
-// one percent-encoded segment: null when it fails to decode, decodes to "", "." or "..", or holds
-// "/", "\\", "?", "#" or a control character. The ref must be a hex SHA.
-export function runJsonPath(repo, sha, key) {
-  let decoded;
-  try { decoded = decodeURIComponent(String(key)); } catch { return null; }
-  if (decoded === '' || decoded === '.' || decoded === '..' || /[/\\?#\x00-\x1f\x7f]/.test(decoded)) return null;
-  if (!/^[0-9a-f]{7,40}$/i.test(String(sha))) return null;
-  return `repos/${repo}/contents/docs/pipeline/${encodeURIComponent(String(key))}/run.json?ref=${sha}`;
-}
 
 export function realDeps(repo) {
   return {
@@ -35,16 +24,7 @@ export function realDeps(repo) {
     updateBranch: (n) => ghText(['api', '-X', 'PUT', `repos/${repo}/pulls/${n}/update-branch`]),
     dispatchScore: (n) => ghText(['workflow', 'run', 'claude-score.yml', '--repo', repo, '-f', `pr=${n}`]),
     // run.json at the head SHA. Missing or unreadable is null: the report then has no run line (spec §9).
-    runJson: (r, sha, key) => {
-      try {
-        const apiPath = runJsonPath(r, sha, key);
-        if (!apiPath) return null;
-        const file = ghJson(['api', apiPath]);
-        return JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'));
-      } catch {
-        return null;
-      }
-    },
+    runJson: (r, sha, key) => fetchRunJson(r, sha, key),
     comment: (kind, n, body) => (kind === 'pr' ? postPrComment(repo, n, body) : postIssueComment(repo, n, body)),
   };
 }

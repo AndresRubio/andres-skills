@@ -31,6 +31,38 @@ export function fetchPrComments(repo, number, gh = ghJson) {
   return normalizeComments(gh(['api', '--paginate', '--slurp', `repos/${repo}/issues/${number}/comments`]).flat());
 }
 
+// API path of docs/pipeline/<key>/run.json at a commit. The key comes from a branch name or a PR, so it
+// is checked as a raw single segment (letters, digits, ".", "_", "-", starting with a letter or digit,
+// and not "." or "..") and then percent-encoded. The ref must be a hex SHA. Anything else is null.
+export function runJsonPath(repo, sha, key) {
+  try {
+    const segment = String(key);
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(segment) || segment === '.' || segment === '..') return null;
+    if (!/^[0-9a-f]{7,40}$/i.test(String(sha))) return null;
+    return `repos/${repo}/contents/docs/pipeline/${encodeURIComponent(segment)}/run.json?ref=${sha}`;
+  } catch {
+    return null;
+  }
+}
+
+// run.json at a commit, parsed. Null on a bad path, a failed call, a file over 1 MB (the contents API
+// then returns an empty content) or text that is not JSON: callers treat a run with no record as normal.
+export function fetchRunJson(repo, sha, key, gh = ghJson) {
+  try {
+    const apiPath = runJsonPath(repo, sha, key);
+    if (!apiPath) return null;
+    const file = gh(['api', apiPath]);
+    return JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
+// owner/name as GitHub spells it. Checked before a --repo value reaches a gh argument or an API path.
+export function isRepoSlug(repo) {
+  return typeof repo === 'string' && /^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9._-]+$/.test(repo) && !repo.endsWith('/.') && !repo.endsWith('/..');
+}
+
 export const PR_FIELDS = 'number,url,title,body,headRefName,headRefOid,baseRefName,isDraft,isCrossRepository,labels,mergeable,mergeStateStatus,statusCheckRollup,author';
 
 export function fetchPr(repo, number, gh = ghJson) {

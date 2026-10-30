@@ -97,6 +97,17 @@ test('buildRun without usage writes nulls; appendRun keeps earlier runs; summary
   assert.equal(summaryLine({ runs: [] }), null);
 });
 
+test('summaryLine counts only finite numbers, so a hand-edited run.json cannot put text or NaN in the ready comment', () => {
+  const tokens = (output) => ({ input: 1000, output, cacheRead: 7000, cacheWrite: 0, subagents: 0 });
+  const line = summaryLine({ runs: [
+    { kind: 'ship', seconds: 'x', tokens: tokens('\n\nINJECT'), usd: '\n\nINJECT' },
+    { kind: 'fix', seconds: 600, tokens: tokens(2000), usd: 1.5 },
+    { kind: 'fix', seconds: NaN, tokens: { input: 'y' }, usd: NaN },
+  ] });
+  assert.equal(line, '3 runs (1 ship, 2 fix), 10 min, 18k tokens (78% cache reads), $1.50, cost not reported for 2 runs');
+  assert.doesNotMatch(line, /NaN|INJECT/);
+});
+
 test('summaryLine with a reported run first and an unreported one after totals only the reported run', () => {
   const base = { key: '12', runId: 'r', lane: 'github', mode: 'auto', pluginVersion: '0.3.0', sessionEffort: 'default', size: { files: 1, lines: 1, testFiles: 0 }, fixRunsBefore: 0 };
   const usage = { tokens: { input: 1000, output: 2000, cacheRead: 7000, cacheWrite: 0, subagents: 0 }, contextPeak: 1, pausesOverCacheTtl: 0, usd: 1.25, usdSubagents: 0, models: ['m'] };
