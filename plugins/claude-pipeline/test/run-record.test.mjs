@@ -1,8 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFileSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { STAGE_POLICY, stageMark, readStages, stageTimings, buildRun, appendRun, summaryLine, loadUsage } from '../skills/ship/scripts/lib/run-record.mjs';
+import { renameSync as renameSyncReal } from 'node:fs';
+import { isIsoDate } from '../skills/ship/scripts/lib/commands.mjs';
+import { STAGE_POLICY, stageMark, readStages, stageTimings, buildRun, appendRun, tempPathFor, summaryLine, loadUsage } from '../skills/ship/scripts/lib/run-record.mjs';
 import { runCli } from './helpers/cli.mjs';
 import { git, makeRepoWithOrigin, tempDir, writeFiles } from './helpers/git.mjs';
 
@@ -311,7 +313,11 @@ test('CLI run-record and run-summary refuse a run.json whose runs hold a null, a
 });
 
 test('CLI run-record refuses an --out that leaves --cwd through a symlinked directory', () => {
-  const { root, base } = makeRepoWithOrigin({ 'src/a.ts': 'export const a = 1;\n' });
+  const made = makeRepoWithOrigin({ 'src/a.ts': 'export const a = 1;\n' });
+  // The real path of the repo (/private/var on macOS), so the dangling link below is refused by the
+  // unresolvable-link branch alone and not by a /var versus /private/var mismatch.
+  const root = realpathSync(made.root);
+  const { base } = made;
   const outside = tempDir('outside-');
   symlinkSync(outside, path.join(root, 'docs'), 'dir');
   const dangling = path.join(tempDir('gone-'), 'missing');
@@ -349,4 +355,258 @@ test('CLI run-record twice for one run dir gives one run; a different kind appen
   assert.equal(runCli(recordArgs(runDir, root, base, ['--kind', 'fix']), { env }).code, 0);
   assert.deepEqual(runs().map((r) => [r.kind, r.outcome.fixRunsBefore]), [['ship', 0], ['fix', 0]]);
   assert.deepEqual(readdirSync(path.dirname(file)).filter((f) => f.endsWith('.tmp')), []);
+});
+
+// --- run.json is written through a temp file in the run dir and never through a link in the repo
+
+const OUTSIDE_BODY = 'outside the worktree, must stay as it is\n';
+function outsideFile() {
+  const file = path.join(tempDir('outside-'), 'victim.txt');
+  writeFileSync(file, OUTSIDE_BODY);
+  return file;
+}
+const noTmp = (dir) => readdirSync(dir).filter((f) => f.endsWith('.tmp'));
+
+test('CLI run-record with run.json.tmp committed as a symlink exits 1 and writes nothing outside the worktree', () => {
+  const { root, base } = changedRepo();
+  const runDir = tempDir('run-');
+  const victim = outsideFile();
+  const out = path.join(root, 'docs/pipeline/12/run.json');
+  symlinkSync(victim, `${out}.tmp`);
+  const r = runCli(recordArgs(runDir, root, base), { env: { GITHUB_RUN_ID: '' } });
+  assert.equal(r.code, 1, r.stderr);
+  assert.match(r.stderr, /run\.json\.tmp is a symlink/);
+  assert.equal(readFileSync(victim, 'utf8'), OUTSIDE_BODY);
+  assert.deepEqual(noTmp(runDir), []);
+  assert.throws(() => readFileSync(out), /ENOENT/, 'no run.json was written either');
+});
+
+test('appendRun without a tmpDir refuses a run.json.tmp that is a symlink, dangling or not, and leaves the target alone', () => {
+  for (const make of [() => outsideFile(), () => path.join(tempDir('gone-'), 'missing')]) {
+    const dir = tempDir('rj-');
+    const file = path.join(dir, 'run.json');
+    const victim = make();
+    symlinkSync(victim, `${file}.tmp`);
+    assert.throws(() => appendRun(file, { runId: 'a', kind: 'ship' }), /run\.json\.tmp is a symlink/);
+    assert.ok(lstatSync(`${file}.tmp`).isSymbolicLink());
+    assert.throws(() => readFileSync(file), /ENOENT/);
+    if (victim.endsWith('victim.txt')) assert.equal(readFileSync(victim, 'utf8'), OUTSIDE_BODY);
+    else assert.throws(() => lstatSync(victim), /ENOENT/, 'the dangling target was not created');
+  }
+});
+
+test('appendRun without a tmpDir replaces a regular leftover .tmp and removes it after the rename', () => {
+  const dir = tempDir('rj-');
+  const file = path.join(dir, 'run.json');
+  writeFileSync(`${file}.tmp`, 'torn');
+  appendRun(file, { runId: 'a', kind: 'ship' });
+  assert.deepEqual(readdirSync(dir), ['run.json']);
+  assert.equal(JSON.parse(readFileSync(file, 'utf8')).runs.length, 1);
+});
+
+test('CLI run-record refuses an --out that is itself a symlink and writes nothing through it', () => {
+  const { root, base } = changedRepo();
+  // The link stays inside the repo, so the --out path check passes and the symlink refusal is what stops it.
+  const victim = path.join(root, 'src', 'victim.json');
+  const body = '{"version":1,"runs":[]}\n';
+  writeFileSync(victim, body);
+  const out = path.join(root, 'docs/pipeline/12/run.json');
+  mkdirSync(path.dirname(out), { recursive: true });
+  symlinkSync(victim, out);
+  const runDir = tempDir('run-');
+  const r = runCli(recordArgs(runDir, root, base), { env: { GITHUB_RUN_ID: '' } });
+  assert.equal(r.code, 1, r.stderr);
+  assert.match(r.stderr, /docs\/pipeline\/12\/run\.json is a symlink/);
+  assert.equal(readFileSync(victim, 'utf8'), body);
+  assert.ok(lstatSync(out).isSymbolicLink());
+  assert.deepEqual(noTmp(runDir), []);
+  assert.deepEqual(noTmp(path.dirname(out)), []);
+  assert.throws(() => appendRun(out, { runId: 'a', kind: 'ship' }, { tmpDir: runDir }), /is a symlink/);
+  // A link that leaves the repo is refused earlier by the --out check.
+  const away = path.join(root, 'docs/pipeline/13/run.json');
+  mkdirSync(path.dirname(away), { recursive: true });
+  const farFile = outsideFile();
+  symlinkSync(farFile, away);
+  const args = recordArgs(runDir, root, base);
+  assert.equal(runCli(args.map((a, i) => (args[i - 1] === '--out' ? 'docs/pipeline/13/run.json' : a)), { env: { GITHUB_RUN_ID: '' } }).code, 2);
+  assert.equal(readFileSync(farFile, 'utf8'), OUTSIDE_BODY);
+});
+
+test('appendRun writes only { version, runs }: unknown top-level keys of a hand-edited run.json are dropped', () => {
+  const dir = tempDir('rj-');
+  const file = path.join(dir, 'run.json');
+  writeFileSync(file, JSON.stringify({ version: 7, evil: 'x', runs: [{ runId: 'a', kind: 'ship' }], __proto__x: 1 }));
+  const data = appendRun(file, { runId: 'b', kind: 'fix' });
+  assert.deepEqual(Object.keys(data), ['version', 'runs']);
+  const onDisk = JSON.parse(readFileSync(file, 'utf8'));
+  assert.deepEqual(Object.keys(onDisk), ['version', 'runs']);
+  assert.equal(onDisk.version, 1);
+  assert.equal(onDisk.runs.length, 2);
+});
+
+test('CLI run-record leaves no .tmp in the run dir or beside run.json', () => {
+  const { root, base } = changedRepo();
+  const runDir = tempDir('run-');
+  assert.equal(runCli(recordArgs(runDir, root, base), { env: { GITHUB_RUN_ID: '' } }).code, 0);
+  assert.deepEqual(noTmp(runDir), []);
+  assert.deepEqual(noTmp(path.join(root, 'docs/pipeline/12')), []);
+});
+
+test('appendRun replaces run.json by rename: a hard link to the old file keeps the old content and the inode changes', () => {
+  for (const withTmpDir of [false, true]) {
+    const dir = tempDir('rj-');
+    const tmpDir = tempDir('tmp-');
+    const file = path.join(dir, 'run.json');
+    appendRun(file, { runId: 'a', kind: 'ship' }, withTmpDir ? { tmpDir } : {});
+    const before = readFileSync(file, 'utf8');
+    const inode = statSync(file).ino;
+    linkSync(file, path.join(dir, 'old-link'));
+    appendRun(file, { runId: 'b', kind: 'fix' }, withTmpDir ? { tmpDir } : {});
+    // An in-place writeFileSync would rewrite the shared inode, so the link would show the new content.
+    assert.equal(readFileSync(path.join(dir, 'old-link'), 'utf8'), before, `tmpDir ${withTmpDir}`);
+    assert.notEqual(statSync(file).ino, inode);
+    assert.equal(JSON.parse(readFileSync(file, 'utf8')).runs.length, 2);
+  }
+});
+
+test('appendRun puts the temp file in tmpDir, outside the target directory, and falls back beside the target on another device or EXDEV', () => {
+  const dir = tempDir('rj-');
+  const tmpDir = tempDir('tmp-');
+  const file = path.join(dir, 'run.json');
+  const seen = [];
+  const rename = (from, to) => { seen.push(from); renameSyncReal(from, to); };
+  appendRun(file, { runId: 'a', kind: 'ship' }, { tmpDir, rename });
+  assert.deepEqual(seen, [path.join(tmpDir, 'run.json.tmp')]);
+  // Different devices: the chooser puts the temp file beside the target.
+  const dev = (p) => (p === tmpDir ? 1 : 2);
+  assert.equal(tempPathFor(file, tmpDir, dev), `${file}.tmp`);
+  assert.equal(tempPathFor(file, tmpDir, () => 5), path.join(tmpDir, 'run.json.tmp'));
+  assert.equal(tempPathFor(file, undefined), `${file}.tmp`);
+  assert.equal(tempPathFor(file, path.join(tmpDir, 'missing')), `${file}.tmp`);
+  // The devices look equal but the kernel says EXDEV: write again beside the target and clean both.
+  const calls = [];
+  const exdev = (from, to) => {
+    calls.push(from);
+    if (from.startsWith(tmpDir)) throw Object.assign(new Error('cross-device'), { code: 'EXDEV' });
+    renameSyncReal(from, to);
+  };
+  const data = appendRun(file, { runId: 'b', kind: 'fix' }, { tmpDir, rename: exdev });
+  assert.deepEqual(calls, [path.join(tmpDir, 'run.json.tmp'), `${file}.tmp`]);
+  assert.equal(data.runs.length, 2);
+  assert.deepEqual(noTmp(dir), []);
+  assert.deepEqual(noTmp(tmpDir), []);
+  // Any other rename failure is thrown, and no temp file stays behind.
+  assert.throws(() => appendRun(file, { runId: 'c', kind: 'fix' }, { tmpDir, rename: () => { throw Object.assign(new Error('nope'), { code: 'EACCES' }); } }), /nope/);
+  assert.deepEqual(noTmp(tmpDir), []);
+});
+
+test('buildRun records the models that had no price and a run.json entry keeps the documented key order', () => {
+  const base = { key: '1', runId: 'r', lane: 'github', mode: 'auto', kind: 'ship', pluginVersion: '0.3.0', sessionEffort: 'default', stages: [], now: new Date('2026-10-20T10:40:00Z'), fixRunsBefore: 0, size: { files: 0, lines: 0, testFiles: 0 } };
+  const usage = { tokens: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, subagents: 0 }, contextPeak: 5, pausesOverCacheTtl: 0, usd: null, usdSubagents: null, models: ['claude-new', 'claude-sonnet-5-5'], unpriced: ['claude-new'] };
+  const run = buildRun({ ...base, usage });
+  assert.deepEqual(run.unpriced, ['claude-new']);
+  assert.deepEqual(Object.keys(run), ['key', 'runId', 'lane', 'mode', 'kind', 'pluginVersion', 'sessionEffort', 'stages', 'startedAt', 'finishedAt', 'seconds', 'tokens', 'contextPeak', 'pausesOverCacheTtl', 'usd', 'usdSubagents', 'models', 'unpriced', 'outcome', 'size', 'scores']);
+  assert.deepEqual(buildRun({ ...base, usage: null }).unpriced, []);
+  assert.deepEqual(buildRun({ ...base, usage: { ...usage, unpriced: undefined } }).unpriced, []);
+});
+
+test('buildRun never finishes before its last stage mark, so startedAt does not exceed finishedAt', () => {
+  const base = { key: '1', runId: 'r', lane: 'github', mode: 'auto', kind: 'ship', pluginVersion: '0.3.0', sessionEffort: 'default', usage: null, fixRunsBefore: 0, size: { files: 0, lines: 0, testFiles: 0 } };
+  const stages = [{ stage: '0', at: '2026-10-20T10:00:00Z', model: 'haiku', effort: 'low' }, { stage: '3', at: '2026-10-20T11:00:00Z', model: 'strongest', effort: 'high' }];
+  const run = buildRun({ ...base, stages, now: new Date('2026-10-20T10:30:00Z') });
+  assert.equal(run.finishedAt, '2026-10-20T11:00:00Z');
+  assert.ok(Date.parse(run.startedAt) <= Date.parse(run.finishedAt));
+  assert.deepEqual(run.stages.map((s) => s.seconds), [3600, 0]);
+  assert.equal(run.seconds, 3600);
+  // A mark before now leaves finishedAt at now.
+  assert.equal(buildRun({ ...base, stages, now: new Date('2026-10-20T12:00:00Z') }).finishedAt, '2026-10-20T12:00:00Z');
+  // The same through the CLI with --now before the mark.
+  const { root, base: ref } = changedRepo();
+  const runDir = tempDir('run-');
+  stageMark(runDir, { stage: '0', now: new Date('2026-10-20T11:00:00Z') });
+  const r = runCli(recordArgs(runDir, root, ref), { env: { GITHUB_RUN_ID: '' } });
+  assert.equal(r.code, 0, r.stderr);
+  const rec = JSON.parse(readFileSync(path.join(root, 'docs/pipeline/12/run.json'), 'utf8')).runs[0];
+  assert.deepEqual([rec.startedAt, rec.finishedAt, rec.seconds], ['2026-10-20T11:00:00Z', '2026-10-20T11:00:00Z', 0]);
+});
+
+// --- grade and verdict files
+
+test('CLI run-record warns about a missing grade or verdict file with one JSON line per file on stderr', () => {
+  const { root, base } = changedRepo();
+  const runDir = tempDir('run-');
+  const grade = path.join(runDir, 'grade.json');
+  const verdict = path.join(runDir, 'verdict.json');
+  const r = runCli(recordArgs(runDir, root, base, ['--grade-file', grade, '--verdict-file', verdict]), { env: { GITHUB_RUN_ID: '' } });
+  assert.equal(r.code, 0, r.stderr);
+  const lines = r.stderr.trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(lines, [{ warning: `${grade} not found, recorded null` }, { warning: `${verdict} not found, recorded null` }]);
+});
+
+test('CLI run-record with a directory as --grade-file exits 1: only ENOENT means missing', () => {
+  const { root, base } = changedRepo();
+  const runDir = tempDir('run-');
+  const dir = path.join(runDir, 'grade.json');
+  mkdirSync(dir);
+  const r = runCli(recordArgs(runDir, root, base, ['--grade-file', dir]), { env: { GITHUB_RUN_ID: '' } });
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /EISDIR/);
+  assert.throws(() => readFileSync(path.join(root, 'docs/pipeline/12/run.json')), /ENOENT/);
+});
+
+test('CLI run-record with a grade or verdict file that is not a JSON object exits 1 and names the file', () => {
+  const { root, base } = changedRepo();
+  const runDir = tempDir('run-');
+  for (const content of ['{"verdict": ', '[]', 'null', '7', '"ready"', '']) {
+    const file = path.join(runDir, 'g.json');
+    writeFileSync(file, content);
+    for (const flag of ['--grade-file', '--verdict-file']) {
+      const r = runCli(recordArgs(runDir, root, base, [flag, file]), { env: { GITHUB_RUN_ID: '' } });
+      assert.equal(r.code, 1, `${flag} ${content}`);
+      assert.equal(JSON.parse(r.stderr.trim().split('\n').at(-1)).error, `${file} is not a JSON object with a verdict`);
+    }
+  }
+  // An object without a verdict key still reads as null.
+  const file = path.join(runDir, 'ok.json');
+  writeFileSync(file, '{}');
+  assert.equal(runCli(recordArgs(runDir, root, base, ['--grade-file', file]), { env: { GITHUB_RUN_ID: '' } }).code, 0);
+});
+
+// --- metrics --since
+
+test('metrics --since takes a full ISO date or date-time and refuses what Date.parse alone would take', () => {
+  for (const since of ['5', '2026', '2026-10', 'Oct 5 2026', '2026-10-05T', '2026-13-45', '2026-10-05T10:00', '']) {
+    const r = runCli(['metrics', '--repo', 'o/r', '--since', since]);
+    assert.equal(r.code, 2, `--since ${JSON.stringify(since)}: ${r.stderr}`);
+    assert.match(r.stderr, /--since must be an ISO date/);
+  }
+  for (const since of ['2026-10-05', '2026-10-05T10:00:00Z', '2026-10-05T10:00:00.250Z', '2026-10-05T10:00:00+02:00']) assert.equal(isIsoDate(since), true, since);
+  for (const since of ['5', '2026', '2026-13-45', '2026-10-05T10:00:00']) assert.equal(isIsoDate(since), false, since);
+});
+
+test('appendRun refuses a symlink where the temp file would go in tmpDir, and never follows it', () => {
+  const dir = tempDir('rj-');
+  const tmpDir = tempDir('tmp-');
+  const file = path.join(dir, 'run.json');
+  const victim = outsideFile();
+  symlinkSync(victim, path.join(tmpDir, 'run.json.tmp'));
+  assert.throws(() => appendRun(file, { runId: 'a', kind: 'ship' }, { tmpDir }), /run\.json\.tmp is a symlink/);
+  assert.equal(readFileSync(victim, 'utf8'), OUTSIDE_BODY);
+  assert.deepEqual(readdirSync(dir), []);
+  // A regular leftover in tmpDir is replaced.
+  const other = tempDir('tmp-');
+  writeFileSync(path.join(other, 'run.json.tmp'), 'torn');
+  appendRun(file, { runId: 'a', kind: 'ship' }, { tmpDir: other });
+  assert.deepEqual(readdirSync(other), []);
+});
+
+test('CLI run-record writes its temp file in --run-dir: a regular run.json.tmp in the repo is left untouched', () => {
+  const { root, base } = changedRepo();
+  const out = path.join(root, 'docs/pipeline/12/run.json');
+  mkdirSync(path.dirname(out), { recursive: true });
+  writeFileSync(`${out}.tmp`, 'keep');
+  const r = runCli(recordArgs(tempDir('run-'), root, base), { env: { GITHUB_RUN_ID: '' } });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(readFileSync(`${out}.tmp`, 'utf8'), 'keep');
+  assert.equal(JSON.parse(readFileSync(out, 'utf8')).runs.length, 1);
 });

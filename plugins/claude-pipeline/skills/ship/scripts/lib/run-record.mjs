@@ -1,6 +1,6 @@
 // run.json (spec §7.5, D19; cost fields from amendment I). Written by the run itself, in the last
 // commit before a push, so writing it never re-runs a PR's checks.
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { readJsonl, sessionFiles, usageFromTranscripts } from './usage.mjs';
 
@@ -75,7 +75,9 @@ export function loadUsage(runDir, { from, to } = {}) {
 const NULL_TOKENS = Object.freeze({ input: null, output: null, cacheRead: null, cacheWrite: null, subagents: null });
 
 export function buildRun({ key, runId, lane, mode, kind, pluginVersion, sessionEffort, stages, now = new Date(), usage, grade = null, fixRunsBefore, reviewVerdict = null, stoppedAt = null, size }) {
-  const finishedAt = iso(now);
+  // A mark can be dated after --now (a hand-set clock, a skewed host): the run never finishes before its last mark.
+  const lastMark = Math.max(...stageTimings(stages, iso(now)).map((t) => Date.parse(t.startedAt)), -Infinity);
+  const finishedAt = iso(Math.max(new Date(now).getTime(), lastMark));
   const timings = stageTimings(stages, finishedAt);
   const startedAt = timings[0]?.startedAt ?? finishedAt;
   return {
@@ -88,6 +90,7 @@ export function buildRun({ key, runId, lane, mode, kind, pluginVersion, sessionE
     usd: usage?.usd ?? null,
     usdSubagents: usage?.usdSubagents ?? null,
     models: usage?.models ?? [],
+    unpriced: usage?.unpriced ?? [],
     // readyAt, mergedAt and closedAt happen after the PR opens; metrics reads them from GitHub.
     outcome: { grade, fixRunsBefore, reviewVerdict, stoppedAt, readyAt: null, mergedAt: null, closedAt: null },
     size,
@@ -106,20 +109,67 @@ export function readRunFile(file) {
   return data;
 }
 
-// The same run recorded twice (a retried push) replaces its entry. The file is written beside the target
-// and renamed over it, so a killed write never leaves torn JSON for the next `git add`.
 export function sameRun(a, b) {
   return Boolean(a) && a.runId === b.runId && a.kind === b.kind;
 }
 
-export function appendRun(file, run) {
-  const data = readRunFile(file);
-  if (sameRun(data.runs.at(-1), run)) data.runs[data.runs.length - 1] = run;
-  else data.runs.push(run);
+// A path in the repo can be a symlink a pusher committed. Nothing is written through one.
+export function refuseSymlink(file) {
+  let st = null;
+  try { st = lstatSync(file); } catch { /* absent */ }
+  if (st?.isSymbolicLink()) throw new Error(`${file} is a symlink; remove it`);
+}
+
+// Where the temp file goes: the run dir when it is on the same device as the target (a rename across
+// devices fails with EXDEV), else beside the target. `dev` is a seam for the test.
+export function tempPathFor(file, tmpDir, dev = (p) => statSync(p).dev) {
+  const beside = `${file}.tmp`;
+  if (!tmpDir) return beside;
+  try {
+    if (dev(tmpDir) === dev(path.dirname(file))) return path.join(tmpDir, `${path.basename(file)}.tmp`);
+  } catch { /* an unreadable run dir: fall back */ }
+  return beside;
+}
+
+// Creates `tmp` fresh: a symlink there is refused, a leftover regular file is removed, and 'wx' fails
+// rather than follow a link that appears in between.
+function writeFresh(tmp, text) {
+  let st = null;
+  try { st = lstatSync(tmp); } catch { /* absent */ }
+  if (st?.isSymbolicLink()) throw new Error(`${tmp} is a symlink; remove it`);
+  if (st) unlinkSync(tmp);
+  writeFileSync(tmp, text, { flag: 'wx' });
+}
+
+// The same run recorded twice (a retried push) replaces its entry. The file is written to a temp file
+// in `tmpDir` (the run dir, outside the repo) and renamed over the target, so a killed write never
+// leaves torn JSON for the next `git add` and a link planted in the repo is never followed. Only
+// { version, runs } is written: unknown keys of a hand-edited file are dropped.
+export function appendRun(file, run, { tmpDir, rename = renameSync } = {}) {
+  refuseSymlink(file);
+  refuseSymlink(`${file}.tmp`);
+  const runs = readRunFile(file).runs;
+  if (sameRun(runs.at(-1), run)) runs[runs.length - 1] = run;
+  else runs.push(run);
+  const data = { version: 1, runs };
+  const text = `${JSON.stringify(data, null, 2)}\n`;
   mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`);
-  renameSync(tmp, file);
+  let tmp = tempPathFor(file, tmpDir);
+  try {
+    writeFresh(tmp, text);
+    try {
+      rename(tmp, file);
+    } catch (err) {
+      if (err?.code !== 'EXDEV' || tmp === `${file}.tmp`) throw err;
+      unlinkSync(tmp);
+      tmp = `${file}.tmp`;
+      writeFresh(tmp, text);
+      rename(tmp, file);
+    }
+  } catch (err) {
+    try { unlinkSync(tmp); } catch { /* not created */ }
+    throw err;
+  }
   return data;
 }
 

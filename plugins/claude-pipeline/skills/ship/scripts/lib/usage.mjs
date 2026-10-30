@@ -26,7 +26,9 @@ function fromModelUsage(m) {
 // cannot say how much of the tree was subagents: `subagents` is null, and the transcripts supply it.
 // A resumed session's result includes its earlier spend: never sum results across resumes.
 export function tokensFromResult(result) {
-  const tree = Object.values(result.modelUsage ?? {}).map(fromModelUsage).reduce(add, zero());
+  const models = Object.values(result?.modelUsage ?? {});
+  // No modelUsage means the tokens are unknown, which zeros would claim to know.
+  const tree = models.length ? models.map(fromModelUsage).reduce(add, zero()) : { input: null, output: null, cacheRead: null, cacheWrite: null };
   return {
     tokens: { ...tree, subagents: null },
     usd: typeof result.total_cost_usd === 'number' ? result.total_cost_usd : null,
@@ -87,8 +89,11 @@ export function usageFromTranscripts(sessions, { from, to, cacheTtlMinutes = 60,
   // Bounds and entries are compared as parsed times: the pipeline's markers have second precision and
   // transcripts carry milliseconds, and string order puts '.' before 'Z'. An entry whose timestamp does
   // not parse is out of any window; with no window every entry is in.
-  const fromMs = from ? Date.parse(from) : null;
-  const toMs = to ? Date.parse(to) : null;
+  // A bound that does not parse is absent: the caller passes machine-written marks, so a bad one is
+  // not worth discarding the whole run's usage for.
+  const bound = (x) => { const t = x ? Date.parse(x) : NaN; return Number.isFinite(t) ? t : null; };
+  const fromMs = bound(from);
+  const toMs = bound(to);
   const inWindow = (e) => {
     if (fromMs === null && toMs === null) return true;
     const t = typeof e.timestamp === 'string' ? Date.parse(e.timestamp) : NaN;

@@ -17,7 +17,7 @@ import { startPreview, stopPreview } from './preview.mjs';
 import { createWorktree, isolateInPlace, removeWorktreeIfEmpty } from './worktree.mjs';
 import { diffRisk } from './diff-risk.mjs';
 import { revertCheck, changedTestFiles } from './revert-check.mjs';
-import { STAGE_POLICY, stageMark, readStages, stageTimings, loadUsage, buildRun, appendRun, readRunFile, sameRun, summaryLine } from './run-record.mjs';
+import { STAGE_POLICY, stageMark, readStages, stageTimings, loadUsage, buildRun, appendRun, refuseSymlink, readRunFile, sameRun, summaryLine } from './run-record.mjs';
 import { runReady } from './ready-run.mjs';
 import { runSweep, realSweepDeps } from './sweep-run.mjs';
 import { laneTarget } from './lane.mjs';
@@ -41,8 +41,9 @@ export function readJson(file) {
   return JSON.parse(readFileSync(file, 'utf8'));
 }
 
-// A resumed run never regrades, so a missing grade or verdict file reads as null with one note on stderr.
-// A file that exists but does not parse still throws.
+// A resumed run never regrades, so a missing grade or verdict file reads as null with one JSON line on
+// stderr. Only ENOENT counts as missing. A file that exists but is not a JSON object with a verdict key
+// reads as an error (exit 1).
 function readVerdictFile(file) {
   if (!file) return null;
   let text;
@@ -50,11 +51,17 @@ function readVerdictFile(file) {
     text = readFileSync(file, 'utf8');
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
-    process.stderr.write(`run-record: ${file} not found, recording null\n`);
+    process.stderr.write(`${JSON.stringify({ warning: `${file} not found, recorded null` })}\n`);
     return null;
   }
-  return JSON.parse(text).verdict ?? null;
+  let data;
+  try { data = JSON.parse(text); } catch { data = null; }
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) throw new Error(`${file} is not a JSON object with a verdict`);
+  return data.verdict ?? null;
 }
+
+// A full ISO 8601 date or date-time. Date.parse alone takes '5' or '2026'.
+export const isIsoDate = (text) => /^\d{4}-\d{2}-\d{2}(T[\d:.]+(Z|[+-]\d{2}:\d{2}))?$/.test(text) && Number.isFinite(Date.parse(text));
 
 export function parse(argv, options = {}, positionals = 0) {
   let parsed;
@@ -413,6 +420,7 @@ export const COMMANDS = {
     const stages = readStages(v['run-dir']);
     const runId = process.env.GITHUB_RUN_ID ? defaultRun() : path.basename(v['run-dir']);
     // A retry of the same run replaces its entry (appendRun), so it must not count itself as an earlier run.
+    refuseSymlink(out);
     const recorded = readRunFile(out).runs;
     const earlier = sameRun(recorded.at(-1), { runId, kind: v.kind }) ? recorded.slice(0, -1) : recorded;
     const run = buildRun({
@@ -427,11 +435,11 @@ export const COMMANDS = {
       stoppedAt: v['stopped-at'] ?? null,
       size: { ...diffSize(cwd, v.base), testFiles: changedTestFiles(cwd, v.base).length },
     });
-    return { file: out, summary: summaryLine(appendRun(out, run)) };
+    return { file: out, summary: summaryLine(appendRun(out, run, { tmpDir: v['run-dir'] })) };
   },
   metrics: (argv) => {
     const v = parse(argv, { repo: { type: 'string', multiple: true }, since: { type: 'string' }, table: { type: 'boolean' } });
-    if (v.since !== undefined && Number.isNaN(Date.parse(v.since))) throw new UsageError('--since must be an ISO date');
+    if (v.since !== undefined && !isIsoDate(v.since)) throw new UsageError('--since must be an ISO date');
     const bad = (v.repo ?? []).find((r) => !isRepoSlug(r));
     if (bad !== undefined) throw new UsageError(`--repo must be owner/name, got ${JSON.stringify(bad)}`);
     const repos = v.repo?.length ? v.repo : [currentRepo()];

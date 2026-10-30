@@ -22,6 +22,15 @@ test('tokensFromResult: tokens are the whole tree; subagents are unknown because
   assert.equal(tokensFromResult({ usage: u(1, 1, 0, 0), modelUsage: {} }).usd, null);
 });
 
+// Changed from the first version, which only checked usd: with no modelUsage the tokens are unknown,
+// so they are the null shape of a run without usage and never zeros.
+test('tokensFromResult without modelUsage gives the null token shape, not zeros', () => {
+  const none = { tokens: { input: null, output: null, cacheRead: null, cacheWrite: null, subagents: null }, usd: null };
+  assert.deepEqual(tokensFromResult({ usage: u(1, 1, 0, 0) }), none);
+  assert.deepEqual(tokensFromResult({ usage: u(1, 1, 0, 0), modelUsage: {} }), none);
+  assert.deepEqual(tokensFromResult({ modelUsage: null, total_cost_usd: 0.25 }), { ...none, usd: 0.25 });
+});
+
 test('tokensFromResult reads snake_case modelUsage', () => {
   const r = tokensFromResult({
     usage: u(10, 20, 300, 40),
@@ -222,4 +231,15 @@ test('sessionFiles finds <session>/subagents/*.jsonl next to the main transcript
     for (const n of ['agent-b.jsonl', 'agent-a.jsonl', 'note.txt']) writeFileSync(path.join(dir, 'sess-1', 'subagents', n), '');
     assert.deepEqual(sessionFiles(main).subagents, ['agent-a.jsonl', 'agent-b.jsonl'].map((n) => path.join(dir, 'sess-1', 'subagents', n)));
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('usageFromTranscripts treats a bound that does not parse as absent, not as an empty window', () => {
+  const s = [{ main: [msg('a', '2026-10-20T10:00:00Z', 'm-big', u(1, 1, 0, 0)), msg('b', '2026-10-20T11:00:00Z', 'm-big', u(2, 2, 0, 0))], subagents: [] }];
+  const both = usageFromTranscripts(s, { prices: P });
+  for (const bad of ['soon', 'NaN', '2026-99-99', {}]) {
+    assert.deepEqual(usageFromTranscripts(s, { from: bad, to: bad, prices: P }), both, JSON.stringify(bad));
+  }
+  // The other bound still applies.
+  assert.equal(usageFromTranscripts(s, { from: 'soon', to: '2026-10-20T10:30:00Z', prices: P }).tokens.input, 1);
+  assert.equal(usageFromTranscripts(s, { from: '2026-10-20T10:30:00Z', to: 'soon', prices: P }).tokens.input, 2);
 });

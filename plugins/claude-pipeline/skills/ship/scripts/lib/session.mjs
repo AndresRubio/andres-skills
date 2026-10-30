@@ -1,6 +1,6 @@
 // What the run guard hook records for measurement (spec §7.5, amendment I): the session's transcript
 // path in $RUN_DIR/session.json, and the run folder in the guard marker for the trim hook.
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 // Linear: find the tail first, then walk back to the start of its token (a nested quantifier
@@ -26,10 +26,21 @@ export function recordSession(runDir, { sessionId, transcriptPath, now = new Dat
   const file = path.join(runDir, 'session.json');
   let data = { sessions: [] };
   try { data = JSON.parse(readFileSync(file, 'utf8')); } catch { /* first record */ }
-  if (!Array.isArray(data.sessions)) data = { sessions: [] };
-  if (data.sessions.some((s) => s.sessionId === sessionId)) return false;
-  data.sessions.push({ sessionId, transcriptPath, firstSeen: new Date(now).toISOString() });
-  writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);
+  if (data === null || typeof data !== 'object' || !Array.isArray(data.sessions)) data = { sessions: [] };
+  // An entry that is not an object (a hand-edited null) is dropped rather than failing the whole record.
+  const sessions = data.sessions.filter((s) => s !== null && typeof s === 'object' && !Array.isArray(s));
+  if (sessions.some((s) => s.sessionId === sessionId)) return false;
+  sessions.push({ sessionId, transcriptPath, firstSeen: new Date(now).toISOString() });
+  // Written inside runDir (a folder under the pipeline home) and renamed over, so a killed hook leaves no torn file.
+  const tmp = path.join(runDir, `session.json.${process.pid}.tmp`);
+  try {
+    try { unlinkSync(tmp); } catch { /* none left over */ }
+    writeFileSync(tmp, `${JSON.stringify({ ...data, sessions }, null, 2)}\n`, { flag: 'wx' });
+    renameSync(tmp, file);
+  } catch (err) {
+    try { unlinkSync(tmp); } catch { /* not created */ }
+    throw err;
+  }
   return true;
 }
 
