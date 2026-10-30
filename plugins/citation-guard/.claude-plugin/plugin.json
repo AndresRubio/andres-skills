@@ -1,0 +1,7 @@
+{
+  "name": "citation-guard",
+  "version": "0.1.0",
+  "author": { "name": "AndresRubio" },
+  "description": "In the warhammer repo, tells the model when an edit changes a game value in the army data and CITATIONS.md needs a book page, and warns at turn end if it was not cited.",
+  "types": "./types/index.d.ts"
+}

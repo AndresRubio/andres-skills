@@ -1,0 +1,6 @@
+{
+  "name": "boe-guard",
+  "version": "0.1.0",
+  "author": { "name": "AndresRubio" },
+  "description": "In the boe-agent repo only: refuses whole reads of PROGRESS.md and docs/superpowers/plans/, and asks the person before a BDNS or BOE load for a month."
+}

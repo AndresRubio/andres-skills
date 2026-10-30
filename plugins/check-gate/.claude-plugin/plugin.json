@@ -1,0 +1,7 @@
+{
+  "name": "check-gate",
+  "version": "0.1.0",
+  "author": { "name": "AndresRubio" },
+  "description": "Runs each repo's check command after code changes, shows the result above the prompt, and stops git commit while the checks fail.",
+  "types": "./types/index.d.ts"
+}

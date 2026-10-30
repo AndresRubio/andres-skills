@@ -7,6 +7,46 @@
       "name": "claude-pipeline",
       "source": "./plugins/claude-pipeline",
       "description": "Issue-to-PR pipeline: ship, review, pipeline-setup."
+    },
+    {
+      "name": "check-gate",
+      "source": "./plugins/check-gate",
+      "description": "Mod: reruns the repo's check after code changes and stops git commit while it fails."
+    },
+    {
+      "name": "citation-guard",
+      "source": "./plugins/citation-guard",
+      "description": "Mod for warhammer: asks for a CITATIONS.md entry when an edit changes a game value."
+    },
+    {
+      "name": "boe-guard",
+      "source": "./plugins/boe-guard",
+      "description": "Mod for boe-agent: refuses whole reads of the long docs and asks before a BDNS or BOE month load."
+    },
+    {
+      "name": "forja-cost-guard",
+      "source": "./plugins/forja-cost-guard",
+      "description": "Mod for forja: asks before a GPU rental, shows the running cost, reminds to clean up."
+    },
+    {
+      "name": "digest-guard",
+      "source": "./plugins/digest-guard",
+      "description": "Mod for ai-digest: keeps mailbox identifiers out of site/ and Gmail tools read-only."
+    },
+    {
+      "name": "mcp-inspector",
+      "source": "./plugins/mcp-inspector",
+      "description": "Mod for mcp-lab: a pane of MCP tool calls with error codes and a personal-data flag."
+    },
+    {
+      "name": "jev-status",
+      "source": "./plugins/jev-status",
+      "description": "Mod: local-jev up or down in the status line, and /jev-start."
+    },
+    {
+      "name": "pipeline-pane",
+      "source": "./plugins/pipeline-pane",
+      "description": "Mod: a pane showing where a claude-pipeline /ship run stands."
     }
   ]
 }
