@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { hydrate, fetchLimited, realHydrateDeps } from '../skills/ship/scripts/lib/hydrate-run.mjs';
+import { hydrate, fetchLimited, realHydrateDeps, pdfToText as pdfToTextSync } from '../skills/ship/scripts/lib/hydrate-run.mjs';
 import { runCli } from './helpers/cli.mjs';
 import { fakeGh } from './helpers/fake-gh.mjs';
 import { tempDir } from './helpers/git.mjs';
@@ -101,7 +101,6 @@ test('fetchLimited reads at most 64 KB plus one byte, times out, and reports the
     const big = await fetchLimited(`${base}/big`);
     assert.equal(big.overLimit, true);
     assert.ok(big.body.length <= 64 * 1024 + 1);
-    assert.match((await fetchLimited(`${base}/redirect`)).finalUrl, /\/text\?moved=1$/);
     await assert.rejects(fetchLimited(`${base}/slow`, { timeoutMs: 100 }));
     await assert.rejects(fetchLimited(`${base}/missing`), /HTTP 404/);
   } finally {
@@ -232,4 +231,113 @@ test('a relative redirect and a redirect to another listed host are followed; th
   const r = await fetchLimited('https://docs.example.com/start', { hydrateHosts: config.hydrateHosts, fetchFn: stub.fetchFn });
   assert.equal(r.finalUrl, 'https://github.com/o/r/readme');
   assert.equal(r.body.toString(), 'ok');
+});
+
+test('fetchLimited without an allow-list follows no redirect: the second server gets no request', async () => {
+  let targetHits = 0;
+  const target = await listen((req, res) => { targetHits += 1; res.setHeader('content-type', 'text/plain'); res.end('elsewhere'); });
+  const start = await listen((req, res) => { res.statusCode = 302; res.setHeader('location', `http://${target.host}/x`); res.end(); });
+  try {
+    for (const opts of [{}, { hydrateHosts: undefined }, { hydrateHosts: null }, { hydrateHosts: 'docs.example.com' }]) {
+      await assert.rejects(fetchLimited(`http://${start.host}/moved`, opts), /redirected without an allow-list/);
+    }
+    assert.equal(targetHits, 0, 'the second server never received a request');
+    // Through hydrate the reason lands in the index.
+    const out = tempDir('ctx-');
+    const deps = { ...fakeDeps(), fetchUrl: (u) => fetchLimited(`http://${start.host}/moved`) };
+    await hydrate({ issue: issue('https://docs.example.com/moved'), repo: 'o/r', config, outDir: out }, deps);
+    assert.match(readFileSync(path.join(out, 'index.md'), 'utf8'), /\| not fetched: redirected without an allow-list \|/);
+    assert.equal(targetHits, 0);
+  } finally {
+    start.server.close();
+    target.server.close();
+  }
+});
+
+test('nextHop refuses a hop without an array allow-list, and a hop that carries credentials', async () => {
+  const { nextHop } = await import('../skills/ship/scripts/lib/hydrate-run.mjs');
+  assert.throws(() => nextHop('https://docs.example.com/a', '/b', undefined), /without an allow-list/);
+  assert.throws(() => nextHop('https://docs.example.com/a', 'https://u:p@docs.example.com/b', ['docs.example.com']), /credentials/);
+  assert.equal(nextHop('https://docs.example.com/a', '/b', ['docs.example.com']), 'https://docs.example.com/b');
+});
+
+test('a 5,000-URL comment flood makes an index of about 21 rows, and the count is right', async () => {
+  const out = tempDir('ctx-');
+  const urls = Array.from({ length: 5000 }, (_, i) => `https://docs.example.com/p${i}`).join(' ');
+  const comments = [1, 2, 3, 4, 5].map((id) => ({ id, body: urls.split(' ').slice((id - 1) * 1000, id * 1000).join(' '), trusted: false, pipeline: false }));
+  const r = await hydrate({ issue: issue('see #12', comments), repo: 'o/r', config, outDir: out }, fakeDeps({ 'api repos/o/r/issues/12': { number: 12, title: 't', state: 'open', labels: [], body: 'b' } }));
+  const index = readFileSync(path.join(out, 'index.md'), 'utf8');
+  assert.equal(r.fetched, 1);
+  assert.equal(r.notFetched, 5000);
+  assert.equal(index.split('\n').filter((l) => l.includes('not fetched: untrusted author')).length, 20);
+  assert.match(index, /^\| 22 \| - \| - \| - \| and 4980 more not listed \|$/m);
+  assert.ok(index.length < 6000);
+});
+
+test('the content type in a reason is type/subtype only, at most 100 characters', async () => {
+  const out = tempDir('ctx-');
+  const deps = fakeDeps({}, {}, {
+    'https://docs.example.com/a': { body: Buffer.from('x'), contentType: `application/octet-stream; boundary=${'z'.repeat(5000)}; secret=1`, finalUrl: 'https://docs.example.com/a', isPdf: false, overLimit: false },
+    'https://docs.example.com/b': { body: Buffer.from('x'), contentType: `application/${'q'.repeat(500)}`, finalUrl: 'https://docs.example.com/b', isPdf: false, overLimit: false },
+  });
+  await hydrate({ issue: issue('https://docs.example.com/a https://docs.example.com/b'), repo: 'o/r', config, outDir: out }, deps);
+  const index = readFileSync(path.join(out, 'index.md'), 'utf8');
+  assert.match(index, /\| not fetched: not text \(application\/octet-stream\) \|/);
+  assert.doesNotMatch(index, /boundary|secret|zzz/);
+  const row = index.split('\n').find((l) => l.includes('application/qqq'));
+  assert.ok(row.length < 300);
+});
+
+test('once the run budget is spent no further reference is requested', async () => {
+  const out = tempDir('ctx-');
+  const big = (n, kb) => ({ number: n, title: `t${n}`, state: 'open', labels: [], body: 'x'.repeat(kb * 1024) });
+  const json = {};
+  for (let i = 1; i <= 8; i += 1) json[`api repos/o/r/issues/${i}`] = big(i, 60);
+  const deps = fakeDeps(json);
+  const asked = [];
+  const ghJson = deps.ghJson;
+  deps.ghJson = (args) => { asked.push(args[1]); return ghJson(args); };
+  const r = await hydrate({ issue: issue('#1 #2 #3 #4 #5 #6 #7 #8'), repo: 'o/r', config, outDir: out }, deps);
+  const index = readFileSync(path.join(out, 'index.md'), 'utf8');
+  assert.equal(r.fetched, 4);
+  assert.deepEqual(asked, [1, 2, 3, 4, 5].map((i) => `repos/o/r/issues/${i}`));
+  assert.match(index, /^\| 5 \| `#5` \| issue \| body \| not fetched: budget \|$/m);
+  for (const n of [6, 7, 8]) assert.match(index, new RegExp(`^\\| ${n} \\| \`#${n}\` \\| issue \\| body \\| not fetched: run budget spent \\|$`, 'm'));
+});
+
+test('a "fetch failed" reason carries the cause code', async () => {
+  const out = tempDir('ctx-');
+  const deps = { ...fakeDeps(), fetchUrl: async () => { throw new TypeError('fetch failed', { cause: Object.assign(new Error('connect'), { code: 'ECONNREFUSED' }) }); } };
+  await hydrate({ issue: issue('https://docs.example.com/a'), repo: 'o/r', config, outDir: out }, deps);
+  assert.match(readFileSync(path.join(out, 'index.md'), 'utf8'), /\| not fetched: fetch failed \(ECONNREFUSED\) \|/);
+  const bare = { ...fakeDeps(), fetchUrl: async () => { throw new TypeError('fetch failed'); } };
+  await hydrate({ issue: issue('https://docs.example.com/a'), repo: 'o/r', config, outDir: out }, bare);
+  assert.match(readFileSync(path.join(out, 'index.md'), 'utf8'), /\| not fetched: fetch failed \|/);
+});
+
+test('a URL with userinfo never lands in the index, and no request is made', async () => {
+  const out = tempDir('ctx-');
+  let asked = 0;
+  const deps = { ...fakeDeps(), fetchUrl: async () => { asked += 1; throw new Error('should not be called'); } };
+  await hydrate({ issue: issue('see https://admin:hunter2@docs.example.com/page'), repo: 'o/r', config, outDir: out }, deps);
+  const index = readFileSync(path.join(out, 'index.md'), 'utf8');
+  assert.equal(asked, 0);
+  assert.doesNotMatch(index, /hunter2|admin/);
+  assert.match(index, /`https:\/\/docs\.example\.com\/page` \| url \| body \| not fetched: URL includes credentials \|/);
+});
+
+test('pdfToText keeps the output within 64 KB when pdftotext prints more than its buffer', () => {
+  const bin = tempDir('fake-pdftotext-');
+  writeFileSync(path.join(bin, 'pdftotext'), '#!/bin/sh\nhead -c 40000000 /dev/zero | tr "\\0" "a"\n');
+  chmodSync(path.join(bin, 'pdftotext'), 0o755);
+  const saved = process.env.PATH;
+  process.env.PATH = `${bin}:${saved}`;
+  try {
+    const text = pdfToTextSync(Buffer.from('%PDF-1.7'));
+    assert.ok(Buffer.byteLength(text) <= 64 * 1024);
+    assert.match(text, /^a{1000}/);
+    assert.match(text, /\[truncated: the PDF has more text than fits\]$/);
+  } finally {
+    process.env.PATH = saved;
+  }
 });

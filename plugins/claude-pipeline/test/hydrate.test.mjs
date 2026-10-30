@@ -117,3 +117,44 @@ test('findReferences: a permalink path that escapes the repo or injects a query 
   assert.deepEqual(reasons('src/app.test.ts'), [['permalink', null]]);
   assert.deepEqual(reasons('.github/workflows/ci.yml'), [['permalink', null]]);
 });
+
+test('findReferences: thousands of untrusted URLs list 20 rows and one count, never thousands', () => {
+  const comments = Array.from({ length: 10 }, (_, c) => comment(c + 1, Array.from({ length: 500 }, (_, i) => `https://docs.example.com/p${c}-${i}`).join(' '), { trusted: false }));
+  const refs = findReferences(issue('Context: #12', comments), opts);
+  const listed = refs.filter((r) => r.reason !== null);
+  assert.equal(listed.length, 21);
+  assert.equal(refs.filter((r) => r.reason === null).length, 1);
+  assert.equal(listed.filter((r) => r.reason === 'not fetched: untrusted author').length, 20);
+  assert.equal(listed.at(-1).reason, 'and 4980 more not listed');
+  assert.equal(listed.at(-1).omitted, 4980);
+  assert.deepEqual(refs.map((r) => r.n), refs.map((_, i) => i + 1));
+  // Other not-fetched reasons share the same cap.
+  const hosts = Array.from({ length: 300 }, (_, i) => `https://h${i}.example/x`).join(' ');
+  const r2 = findReferences(issue(hosts), opts);
+  assert.equal(r2.length, 21);
+  assert.equal(r2.at(-1).reason, 'and 280 more not listed');
+});
+
+test('findReferences: lookalike and upper-case GitHub hosts are told apart by the allow-list', () => {
+  const host = ['github.com', 'docs.example.com'];
+  const reasons = (text, hydrateHosts = host) => findReferences(issue(text), { repo: 'o/r', hydrateHosts }).map((r) => r.reason);
+  assert.deepEqual(reasons('https://github.com.evil.example/o/r/readme'), ['not fetched: host not in hydrateHosts']);
+  assert.deepEqual(reasons('https://github.com.evil.example/other/repo'), ['not fetched: host not in hydrateHosts']);
+  assert.deepEqual(reasons('https://notgithub.com/other/repo'), ['not fetched: host not in hydrateHosts']);
+  assert.deepEqual(reasons('https://GITHUB.COM/other/repo/tree/main'), ['not fetched: other repository']);
+  assert.deepEqual(reasons('https://www.github.com/other/repo/tree/main'), ['not fetched: other repository']);
+  assert.deepEqual(reasons('https://www.github.com/o/r/tree/main'), ['not fetched: host not in hydrateHosts']);
+  assert.deepEqual(reasons('https://github.com:8443/other/repo'), ['not fetched: host not in hydrateHosts']);
+  assert.deepEqual(reasons('https://github.com/o/r/tree/main'), [null]);
+  assert.deepEqual(reasons('https://github.com/o/r/tree/main', null), ['not fetched: host not in hydrateHosts']);
+});
+
+test('findReferences: a URL with userinfo is not fetched and its credential is not kept', () => {
+  const refs = findReferences(issue('see https://admin:hunter2@docs.example.com/secret?x=1#top and https://tok@docs.example.com/y'), opts);
+  assert.equal(refs.length, 2);
+  for (const r of refs) {
+    assert.equal(r.reason, 'not fetched: URL includes credentials');
+    assert.doesNotMatch(JSON.stringify(r), /hunter2|admin|tok@/);
+  }
+  assert.equal(refs[0].text, 'https://docs.example.com/secret?x=1#top');
+});

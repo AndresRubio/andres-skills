@@ -8,6 +8,9 @@
 // Bare "#N" references are found from the "#" and checked backwards by hand (see scanRefs),
 // because a regex with an optional "owner/repo" prefix would rescan each "a.a.a." run.
 export const MAX_REFERENCES = 20;
+// Rows listed in the index for references that are not fetched. Anyone can comment on a public
+// repo, so the rest are counted in one closing row instead of listed.
+export const MAX_NOT_FETCHED_ROWS = 20;
 
 const MAX_PATH = 4096;
 const OR = '([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)';
@@ -118,10 +121,18 @@ function classify(hit, { owner, name, selfNumber, hydrateHosts }) {
   if (hit.kind === 'url') {
     let u;
     try { u = new URL(hit.url); } catch { return null; }
-    const base = { kind: 'url', url: u.href, target: `url:${u.href}` };
+    // The index shows the reference text, so a credential in the URL must not reach it.
+    const clean = (x) => `${x.protocol}//${x.host}${x.pathname}${x.search}${x.hash}`;
+    const hasCredentials = u.username !== '' || u.password !== '';
+    const text = hasCredentials ? clean(u) : undefined;
+    if (hasCredentials) { u.username = ''; u.password = ''; }
+    const base = { kind: 'url', url: u.href, target: `url:${u.href}`, ...(text ? { text } : {}) };
+    if (hasCredentials) return { ...base, reason: 'not fetched: URL includes credentials' };
     const [, o, r] = u.pathname.split('/');
-    if (u.host === 'github.com' && o && r && !same(o, r)) return { ...base, ...other };
-    if (!hydrateHosts.includes(u.host)) return { ...base, reason: 'not fetched: host not in hydrateHosts' };
+    // u.host is lower case. Only github.com and www.github.com are GitHub; a lookalike such as
+    // github.com.evil.example is an ordinary external host and goes through the allow-list.
+    if ((u.host === 'github.com' || u.host === 'www.github.com') && o && r && !same(o, r)) return { ...base, ...other };
+    if (!Array.isArray(hydrateHosts) || !hydrateHosts.includes(u.host)) return { ...base, reason: 'not fetched: host not in hydrateHosts' };
     return base;
   }
   const foreign = !same(hit.owner, hit.repo);
@@ -154,14 +165,20 @@ export function findReferences(issue, { repo, hydrateHosts, max = MAX_REFERENCES
         if (s.trusted && !prior.trusted) Object.assign(prior, { trusted: true, where: s.where });
         continue;
       }
-      byTarget.set(ref.target, { reason: null, ...ref, text: hit.raw, where: s.where, trusted: s.trusted });
+      byTarget.set(ref.target, { reason: null, ...ref, text: ref.text ?? hit.raw, where: s.where, trusted: s.trusted });
     }
   }
   let fetchable = 0;
-  return [...byTarget.values()].map((r, i) => {
+  const rows = [];
+  let listed = 0;
+  let omitted = 0;
+  for (const r of byTarget.values()) {
     let reason = r.reason;
     if (!reason && !r.trusted) reason = 'not fetched: untrusted author';
     if (!reason && ++fetchable > max) reason = `not fetched: over ${max} references`;
-    return { n: i + 1, ...r, reason };
-  });
+    if (reason && ++listed > MAX_NOT_FETCHED_ROWS) { omitted += 1; continue; }
+    rows.push({ n: rows.length + 1, ...r, reason });
+  }
+  if (omitted) rows.push({ n: rows.length + 1, kind: '-', text: '-', where: '-', trusted: false, omitted, reason: `and ${omitted} more not listed` });
+  return rows;
 }
