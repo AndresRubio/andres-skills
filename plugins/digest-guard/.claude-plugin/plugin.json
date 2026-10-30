@@ -1,0 +1,6 @@
+{
+  "name": "digest-guard",
+  "version": "0.1.0",
+  "author": { "name": "AndresRubio" },
+  "description": "In the ai-digest repo: refuses site/ writes that carry a Gmail address or mailbox link, refuses Gmail tools that write, and runs the structural gate before git push."
+}

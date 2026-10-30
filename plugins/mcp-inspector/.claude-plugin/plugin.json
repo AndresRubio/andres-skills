@@ -1,0 +1,7 @@
+{
+  "name": "mcp-inspector",
+  "version": "0.1.0",
+  "author": { "name": "AndresRubio" },
+  "description": "In mcp-lab: a pane of the session's MCP tool calls with error codes, a flag for personal data the gateway should have redacted, and a per-prompt tool-selection log for the M3 eval.",
+  "types": "./types/index.d.ts"
+}
