@@ -44,8 +44,8 @@ jobs:
           if [ "$PIPELINE_TOKEN_SET" != "true" ]; then echo "::warning::PIPELINE_TOKEN is not set; fix requests and branch updates will not trigger workflows"; fi
       - name: Decide and act
         env:
-          # Required for the fix lane and branch updates: a fine-grained PAT for the repo owner (contents, issues and
-          # pull-requests write). Events made with the default token start no workflows; the fallback only labels and comments.
+          # Required for the fix lane and branch updates: a fine-grained PAT for the repo owner (contents, issues,
+          # pull-requests and actions write). Events made with the default token start no workflows; the fallback only labels and comments.
           GH_TOKEN: ${{ secrets.PIPELINE_TOKEN || github.token }}
         run: |
           git remote set-head origin --auto

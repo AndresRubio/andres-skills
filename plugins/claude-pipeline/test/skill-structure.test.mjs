@@ -698,6 +698,14 @@ test('measurement: stages are marked, run.json goes in the commit before each pu
   const fix = read('stages/fix.md');
   assert.ok(fix.includes('run-record') && fix.indexOf('run-record') < fix.indexOf('git push origin "$BRANCH"'), 'fix mode records before it pushes');
   assert.match(fix, /--kind fix [^\n]*--verdict-file "\$RUN_DIR\/verdict\.json"/);
+  assert.match(skill, /--grade-file "\$RUN_DIR\/grade\.json"[^\n]*--verdict-file "\$RUN_DIR\/verdict\.json"[^\n]*`<N>` is the stage number, or `fix` in fix mode/);
+  assert.match(skill, /stage 0 step 13 \(hydrate\), so `context\/` is regenerated/);
+  assert.match(fix, /Then run `node "\$PIPELINE" stage-mark --run-dir "\$RUN_DIR" --stage fix` again, so step 11's time is not charged to stage 8/);
+  assert.ok(fix.indexOf('--stage fix` again') > fix.indexOf('Run stage 7 and stage 8') && fix.indexOf('--stage fix` again') < fix.indexOf('--kind fix'), 'fix mode re-marks between stage 8 and its run-record');
+  for (const f of ['stages/09-finish.md', 'stages/fix.md']) {
+    assert.match(read(f), /A `\{"warning":…\}` line on stderr means a field was recorded as null; mention it in the final summary\./, `${f} tells the agent what a warning line means`);
+  }
+  assert.match(read('stages/02-research.md'), /If index\.md is missing or lists nothing, go straight to the search\./);
   assert.match(read('stages/10-report.md'), /node "\$PIPELINE" run-summary --file "docs\/pipeline\/\$KEY\/run\.json"/);
   for (const f of ['SKILL.md', 'stages/09-finish.md', 'stages/10-report.md', 'stages/fix.md']) {
     assert.match(read(f), /`run-(record|summary)` exits non-zero/, `${f} says what to do when run-record or run-summary fails`);
