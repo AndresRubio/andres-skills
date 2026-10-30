@@ -184,6 +184,21 @@ test('evaluateGroup: every member passes and exactly the expected number backed 
   assert.match(noPr.failures.join('\n'), /^a: expected a PR/m);
 });
 
+test('evaluateGroup fails a backed-off member that never started again, and one that started again only after an owner comment', () => {
+  const ok = (wait) => ({ pr: { url: 'u', body: '' }, prLabels: ['ready'], labels: [], commentKinds: [], artifacts: [], wait });
+  const idle = { deferred: false, waitKeys: [], relocked: false, humanBetween: 0 };
+  const expected = { group: ['a', 'b'], deferredMembers: 1, member: { pr: true, prLabelsPresent: ['ready'] } };
+  const stuck = evaluateGroup(expected, [{ fixture: 'a', observed: ok(idle) }, { fixture: 'b', observed: ok({ deferred: true, waitKeys: [], relocked: false, humanBetween: 0 }) }]);
+  assert.equal(stuck.pass, false);
+  assert.deepEqual(stuck.failures, ['b: backed off and never started again']);
+  const nudged = evaluateGroup(expected, [{ fixture: 'a', observed: ok(idle) }, { fixture: 'b', observed: ok({ deferred: true, waitKeys: [], relocked: true, humanBetween: 2 }) }]);
+  assert.equal(nudged.pass, false);
+  assert.deepEqual(nudged.failures, ['b: started again only after an owner comment']);
+  // A member that waits for a named issue is not a back-off, so it is not held to the restart checks.
+  const waiting = evaluateGroup({ ...expected, deferredMembers: 0 }, [{ fixture: 'a', observed: ok({ deferred: true, waitKeys: ['7'], relocked: false, humanBetween: 0 }) }]);
+  assert.deepEqual(waiting.failures, []);
+});
+
 test('countFetched counts fetched rows of the Context section only', () => {
   const md = ['## Relevant code', '| 1 | x | fetched |', '## Context', '| # | Reference | Kind | Found in | Result | Used for |', '|---|---|---|---|---|---|',
     '| 1 | `#12` | issue | body | fetched: `01-issue-12.md`, 9 lines, 0.3 KB | Risks |', '| 2 | `https://x` | url | body | not fetched: host not in hydrateHosts | - |',

@@ -298,7 +298,19 @@ test('fetchRunJson decodes a base64 run.json and gives null for a failed call, a
   }
 });
 
+test('fetchRunJson never calls gh for a bad key or a bad sha', () => {
+  // fakeGh has no route for these paths and would fail the call anyway, so only a spy can tell that runJsonPath refused first.
+  const calls = [];
+  const spy = (args) => { calls.push(args); return { content: '' }; };
+  for (const [sha, key] of [[SHA, '../x'], [SHA, 'a/b'], [SHA, ''], ['zz', '1'], ['', '1'], ['main', '1']]) {
+    assert.equal(github.fetchRunJson('o/r', sha, key, spy), null, `${sha} ${key}`);
+  }
+  assert.deepEqual(calls, []);
+  github.fetchRunJson('o/r', SHA, '1', spy);
+  assert.equal(calls.length, 1);
+});
+
 test('isRepoSlug accepts owner/name and refuses anything else', () => {
-  for (const ok of ['o/r', 'AndresRubio/andres-skills', 'a-b/c.d_e']) assert.equal(github.isRepoSlug(ok), true, ok);
-  for (const bad of ['', 'o', 'o/', '/r', 'o/r/x', 'o/..', '-o/r', 'o r/x', 'o/r;x', '--flag', 'o/r\n', 'o/r?x', undefined, 5]) assert.equal(github.isRepoSlug(bad), false, JSON.stringify(bad));
+  for (const ok of ['o/r', 'AndresRubio/andres-skills', 'a-b/c.d_e', 'O/R.git', `${'a'.repeat(39)}/r`]) assert.equal(github.isRepoSlug(ok), true, ok);
+  for (const bad of ['', 'o', 'o/', '/r', 'o/r/x', 'o/.', 'o/..', '-o/r', 'o r/x', 'o/r;x', '--flag', 'o/r\n', 'o/r?x', undefined, 5]) assert.equal(github.isRepoSlug(bad), false, JSON.stringify(bad));
 });

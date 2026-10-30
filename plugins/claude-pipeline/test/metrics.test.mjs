@@ -100,17 +100,16 @@ test('collectRows counts a human-decision-needed verdict from the owner, not one
   assert.equal(rowFor(comment('someone', 'CONTRIBUTOR')).decision, false);
 });
 
-test('collectRows takes the earliest ready comment by time and skips run.json for a branch without a plain key', () => {
+test('collectRows takes the earliest ready comment by time', () => {
   const ready = (at) => ({ id: at, pipeline: true, marker: { kind: 'ready' }, createdAt: at, body: '' });
   const looked = [];
-  const prs = [pr(1, '2026-10-20T09:00:00Z'), { ...pr(2, '2026-10-20T09:00:00Z'), headRefName: 'claude/odd name' }];
+  const prs = [pr(1, '2026-10-20T09:00:00Z')];
   const r = collectRows('o/r', {}, baseDeps(prs, {
     prComments: () => [ready('2026-10-20T11:30:00Z'), ready('2026-10-20T11:00:00.500Z'), ready('2026-10-20T11:00:00Z')],
     runJson: (sha, key) => { looked.push(key); return null; },
   }));
   assert.equal(r[0].pr.readyAt, '2026-10-20T11:00:00Z');
   assert.deepEqual(looked, ['1']);
-  assert.equal(r[1].key, 'PR-2');
 });
 
 test('aggregate shrugs off a run with missing or wrong-typed tokens, usd, startedAt and contextPeak', () => {
@@ -127,13 +126,14 @@ test('aggregate shrugs off a run with missing or wrong-typed tokens, usd, starte
   ];
   const s = aggregate(messy);
   assert.equal(s.runs, 5);
-  assert.equal(s.medianUsdPerReady, 4);
+  // Row 2 has a readyAt that is not a time, so it is not a ready PR and its cost is not a cost per ready PR.
+  assert.equal(s.medianUsdPerReady, null);
   assert.equal(s.medianMinutesLockToReady, null);
   assert.equal(s.cacheWriteShare, 0.2);
   assert.equal(s.subagentCostShare, 0.25);
   assert.equal(s.medianContextPeak, 50_000);
   assert.equal(s.meanTaskCompliance, null);
-  for (const [k, v] of Object.entries(s)) assert.ok(v === null || Number.isFinite(v), `${k} = ${v}`);
+  for (const [k, v] of Object.entries(s)) if (!['truncated', 'errors'].includes(k)) assert.ok(v === null || Number.isFinite(v), `${k} = ${v}`);
   assert.doesNotThrow(() => formatTable('o/r', s));
   assert.doesNotThrow(() => aggregate([{ key: '9', pr: { number: 9 }, runs: [], decision: false, score: null }]));
 });
@@ -153,6 +153,9 @@ test('CLI metrics prints JSON, or one table per repo with --table, from the GitH
     'pr list --repo o/r --state all --limit 500 --json number,headRefName,headRefOid,isCrossRepository,state,createdAt,closedAt,mergedAt,body': [
       { number: 11, headRefName: 'claude/1-a', headRefOid: sha, isCrossRepository: false, state: 'MERGED', createdAt: '2026-10-20T09:00:00Z', closedAt: '2026-10-20T12:00:00Z', mergedAt: '2026-10-20T12:00:00Z', body: 'Fixes #1' },
     ],
+    'pr list --repo o/r --state all --limit 500 --search created:>=2026-10-01 --json number,headRefName,headRefOid,isCrossRepository,state,createdAt,closedAt,mergedAt,body': [
+      { number: 11, headRefName: 'claude/1-a', headRefOid: sha, isCrossRepository: false, state: 'MERGED', createdAt: '2026-10-20T09:00:00Z', closedAt: '2026-10-20T12:00:00Z', mergedAt: '2026-10-20T12:00:00Z', body: 'Fixes #1' },
+    ],
     [`api repos/o/r/contents/docs/pipeline/1/run.json?ref=${sha}`]: { content: runJson },
     'api --paginate --slurp repos/o/r/issues/11/comments': [[]],
     'api --paginate --slurp repos/o/r/issues/1/comments': [[]],
@@ -165,4 +168,98 @@ test('CLI metrics prints JSON, or one table per repo with --table, from the GitH
   const table = runCli(['metrics', '--repo', 'o/r', '--table', '--since', '2026-10-01T00:00:00Z'], { env });
   assert.equal(table.code, 0, table.stderr);
   assert.match(table.stdout, /^\| o\/r \| 1 \| 0% \|/m);
+});
+
+test('collectRows warns on stderr and flags truncated when pr list returns exactly 500 PRs', () => {
+  const warnings = [];
+  const prs = Array.from({ length: 500 }, (_, i) => pr(i + 1, '2026-10-20T09:00:00Z'));
+  const r = collectRows('o/r', {}, baseDeps(prs, { warn: (m) => warnings.push(m) }));
+  assert.equal(r.truncated, true);
+  assert.deepEqual(warnings, ['o/r: pr list hit the 500 limit; older PRs are not counted']);
+  const s = aggregate(r);
+  assert.equal(s.truncated, true);
+  assert.match(formatTable('o/r', s), /^\| o\/r \| 0\* \|/m);
+  const short = collectRows('o/r', {}, baseDeps(prs.slice(0, 499), { warn: (m) => warnings.push(m) }));
+  assert.equal(short.truncated, false);
+  assert.equal(warnings.length, 1);
+  assert.doesNotMatch(formatTable('o/r', aggregate(short)), /\*/);
+});
+
+test('collectRows writes the truncation warning to stderr as one JSON line by default', () => {
+  const prs = Array.from({ length: 500 }, (_, i) => pr(i + 1, '2026-10-20T09:00:00Z'));
+  const written = [];
+  const real = process.stderr.write;
+  process.stderr.write = (chunk) => { written.push(String(chunk)); return true; };
+  try { collectRows('o/r', {}, baseDeps(prs)); } finally { process.stderr.write = real; }
+  assert.deepEqual(written, ['{"warning":"o/r: pr list hit the 500 limit; older PRs are not counted"}\n']);
+});
+
+test('collectRows hands --since to listPrs as a UTC date so the query can be narrowed server side', () => {
+  const seen = [];
+  collectRows('o/r', { since: '2026-10-10T12:00:00Z' }, baseDeps([], { listPrs: (q) => { seen.push(q); return []; } }));
+  collectRows('o/r', {}, baseDeps([], { listPrs: (q) => { seen.push(q); return []; } }));
+  assert.deepEqual(seen, [{ since: '2026-10-10' }, { since: null }]);
+});
+
+test('collectRows isolates a failing comments fetch to its own row and collects the error', () => {
+  const ready = { id: 1, pipeline: true, marker: { kind: 'ready' }, createdAt: '2026-10-20T11:00:00Z', body: '' };
+  const prs = [pr(1, '2026-10-20T09:00:00Z'), pr(2, '2026-10-20T09:00:00Z', { body: 'Fixes #9' }), pr(3, '2026-10-20T09:00:00Z', { body: 'Fixes #3' })];
+  const r = collectRows('o/r', {}, baseDeps(prs, {
+    prComments: (n) => { if (n === 2) throw new Error('HTTP 502'); return [ready]; },
+    issueComments: (n) => { if (n === 3) throw new Error('HTTP 500'); return []; },
+  }));
+  assert.equal(r.length, 3);
+  assert.equal(r[0].pr.readyAt, '2026-10-20T11:00:00Z');
+  for (const row of [r[1], r[2]]) {
+    assert.equal(row.pr.readyAt, null);
+    assert.equal(row.decision, false);
+    assert.equal(row.score, null);
+  }
+  assert.deepEqual(r.errors, ['PR #2: HTTP 502', 'PR #3: HTTP 500']);
+  assert.deepEqual(aggregate(r).errors, r.errors);
+  assert.doesNotThrow(() => formatTable('o/r', aggregate(r)));
+});
+
+test('collectRows counts a blocked or questions comment on the PR itself as a decision', () => {
+  const on = (kind) => collectRows('o/r', {}, baseDeps([pr(1, '2026-10-20T09:00:00Z')], { prComments: () => [{ id: 1, pipeline: true, marker: { kind }, createdAt: '2026-10-20T10:00:00Z', body: '' }] }))[0].decision;
+  assert.equal(on('blocked'), true);
+  assert.equal(on('questions'), true);
+  assert.equal(on('ready'), false);
+});
+
+test('collectRows skips a claude/ branch without a pipeline key and counts it in skipped', () => {
+  const prs = [pr(1, '2026-10-20T09:00:00Z'), { ...pr(2, '2026-10-20T09:00:00Z'), headRefName: 'claude/odd name' }, { ...pr(3, '2026-10-20T09:00:00Z'), headRefName: 'claude/' }];
+  const r = collectRows('o/r', {}, baseDeps(prs));
+  assert.deepEqual(r.map((x) => x.key), ['1']);
+  assert.equal(r.skipped, 2);
+  const s = aggregate(r);
+  assert.equal(s.skipped, 2);
+  assert.equal(s.keys, 1);
+});
+
+test('lockToReady gives no figure when the ready time is before the earliest start', () => {
+  const early = { key: '1', pr: { number: 1, readyAt: '2026-10-20T09:00:00Z' }, runs: [run('ship', '2026-10-20T10:00:00Z', 1)], decision: false, score: null };
+  assert.equal(aggregate([early]).medianMinutesLockToReady, null);
+  const same = { ...early, pr: { number: 1, readyAt: '2026-10-20T10:00:00Z' } };
+  assert.equal(aggregate([same]).medianMinutesLockToReady, 0);
+});
+
+test('lockToReady takes the earliest start across many runs without spreading them', () => {
+  const many = Array.from({ length: 200_000 }, (_, i) => run('fix', new Date(Date.UTC(2026, 9, 20, 11) + i * 1000).toISOString(), 0));
+  many.push(run('ship', '2026-10-20T10:00:00Z', 1));
+  const row = { key: '1', pr: { number: 1, readyAt: '2026-10-20T10:30:00Z' }, runs: many, decision: false, score: null };
+  assert.equal(aggregate([row]).medianMinutesLockToReady, 30);
+});
+
+test('readyRate counts a PR only when its readyAt is a real time', () => {
+  const mk = (readyAt) => ({ key: '1', pr: { number: 1, readyAt }, runs: [], decision: false, score: null });
+  assert.equal(aggregate([mk('2026-10-20T10:00:00Z'), mk('garbage'), mk(5), mk(null)]).readyRate, 0.25);
+});
+
+test('the context peak prints as 999, 1k and 1.0M at the boundaries', () => {
+  const cell = (n) => formatTable('o/r', { runs: 1, medianContextPeak: n }).split('\n')[2].split(' | ').at(-1).replace(' |', '');
+  assert.equal(cell(999), '999');
+  assert.equal(cell(1000), '1k');
+  assert.equal(cell(1_000_000), '1.0M');
+  assert.equal(cell(50_000), '50k');
 });
