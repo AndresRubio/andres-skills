@@ -104,6 +104,11 @@ test('a new issue starts only when the person who labelled it is its author or t
   assert.deepEqual(run({ ...backOff(17), labeledBy: undefined }).start, [17]);
   assert.equal(labelSenderTrusted({ author: 'a', labeledBy: 'a' }, undefined), true);
   assert.equal(labelSenderTrusted({ author: 'a', labeledBy: 'o' }, ''), false);
+  // GitHub logins are case-insensitive; the events API and the issue payload may spell one differently.
+  assert.equal(labelSenderTrusted({ author: 'AndresRubio', labeledBy: 'andresrubio' }, 'someone'), true);
+  assert.equal(labelSenderTrusted({ author: 'friend', labeledBy: 'ANDRESRUBIO' }, 'AndresRubio'), true);
+  assert.equal(labelSenderTrusted({ author: 'friend', labeledBy: 'andres' }, 'AndresRubio'), false);
+  assert.equal(labelSenderTrusted({ author: null, labeledBy: 'x' }, null), false);
 });
 
 test('oldest first is stable: a missing createdAt sorts first, equal times go by issue number', () => {

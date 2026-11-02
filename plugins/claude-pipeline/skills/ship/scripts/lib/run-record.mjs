@@ -155,19 +155,25 @@ export function appendRun(file, run, { tmpDir, rename = renameSync } = {}) {
   const text = `${JSON.stringify(data, null, 2)}\n`;
   mkdirSync(path.dirname(file), { recursive: true });
   let tmp = tempPathFor(file, tmpDir);
+  // Only a temp file this call wrote is removed on failure: a link or file that was already there
+  // (writeFresh refused it) stays, so a committed link in the worktree is never deleted here.
+  let created = false;
   try {
     writeFresh(tmp, text);
+    created = true;
     try {
       rename(tmp, file);
     } catch (err) {
       if (err?.code !== 'EXDEV' || tmp === `${file}.tmp`) throw err;
       unlinkSync(tmp);
+      created = false;
       tmp = `${file}.tmp`;
       writeFresh(tmp, text);
+      created = true;
       rename(tmp, file);
     }
   } catch (err) {
-    try { unlinkSync(tmp); } catch { /* not created */ }
+    if (created) { try { unlinkSync(tmp); } catch { /* already gone */ } }
     throw err;
   }
   return data;

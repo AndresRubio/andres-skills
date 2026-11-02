@@ -50,7 +50,7 @@ function readVerdictFile(file) {
   try {
     text = readFileSync(file, 'utf8');
   } catch (err) {
-    if (err?.code !== 'ENOENT') throw err;
+    if (err?.code !== 'ENOENT') throw new Error(`${file} cannot be read: ${err?.message ?? err}`);
     process.stderr.write(`${JSON.stringify({ warning: `${file} not found, recorded null` })}\n`);
     return null;
   }
@@ -413,14 +413,19 @@ export const COMMANDS = {
     const cwd = v.cwd ?? process.cwd();
     const out = path.resolve(cwd, v.out);
     // run.json is committed with the change, so it belongs inside the repository being recorded.
-    // A symlinked directory inside the repo must not lead out of it, so the check also runs on real paths.
+    // No component between --cwd and --out may be a symlink: a link out of the repo would write outside it,
+    // and a link to another directory inside the repo would rewrite that directory's run.json and leave
+    // `git add` refusing a path beyond a symbolic link. So the real path of --out must be the real path of
+    // --cwd plus the relative path as given.
+    const absCwd = path.resolve(cwd);
     const realOut = realTarget(out);
-    const realCwd = realTarget(path.resolve(cwd));
-    if (!isInside(path.resolve(cwd), out) || realOut === null || realCwd === null || !isInside(realCwd, realOut)) throw new UsageError('--out must be inside --cwd');
+    const realCwd = realTarget(absCwd);
+    if (!isInside(absCwd, out) || realOut === null || realCwd === null || !isInside(realCwd, realOut)) throw new UsageError('--out must be inside --cwd');
+    refuseSymlink(out);
+    if (realOut !== path.join(realCwd, path.relative(absCwd, out))) throw new UsageError('--out must be inside --cwd and reached without a symlinked directory');
     const stages = readStages(v['run-dir']);
     const runId = process.env.GITHUB_RUN_ID ? defaultRun() : path.basename(v['run-dir']);
     // A retry of the same run replaces its entry (appendRun), so it must not count itself as an earlier run.
-    refuseSymlink(out);
     const recorded = readRunFile(out).runs;
     const earlier = sameRun(recorded.at(-1), { runId, kind: v.kind }) ? recorded.slice(0, -1) : recorded;
     const run = buildRun({

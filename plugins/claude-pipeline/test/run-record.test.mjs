@@ -551,6 +551,7 @@ test('CLI run-record with a directory as --grade-file exits 1: only ENOENT means
   const r = runCli(recordArgs(runDir, root, base, ['--grade-file', dir]), { env: { GITHUB_RUN_ID: '' } });
   assert.equal(r.code, 1);
   assert.match(r.stderr, /EISDIR/);
+  assert.match(r.stderr, /grade\.json cannot be read/, 'the error names the file');
   assert.throws(() => readFileSync(path.join(root, 'docs/pipeline/12/run.json')), /ENOENT/);
 });
 
@@ -593,6 +594,8 @@ test('appendRun refuses a symlink where the temp file would go in tmpDir, and ne
   assert.throws(() => appendRun(file, { runId: 'a', kind: 'ship' }, { tmpDir }), /run\.json\.tmp is a symlink/);
   assert.equal(readFileSync(victim, 'utf8'), OUTSIDE_BODY);
   assert.deepEqual(readdirSync(dir), []);
+  // The refusal does not delete the link it refused: only a temp file appendRun wrote is cleaned up.
+  assert.ok(lstatSync(path.join(tmpDir, 'run.json.tmp')).isSymbolicLink(), 'the planted link is still there');
   // A regular leftover in tmpDir is replaced.
   const other = tempDir('tmp-');
   writeFileSync(path.join(other, 'run.json.tmp'), 'torn');
@@ -609,4 +612,18 @@ test('CLI run-record writes its temp file in --run-dir: a regular run.json.tmp i
   assert.equal(r.code, 0, r.stderr);
   assert.equal(readFileSync(`${out}.tmp`, 'utf8'), 'keep');
   assert.equal(JSON.parse(readFileSync(out, 'utf8')).runs.length, 1);
+});
+
+test('CLI run-record refuses an --out reached through a symlinked directory inside the repo, and leaves the link target alone', () => {
+  const made = makeRepoWithOrigin({ 'src/a.ts': 'export const a = 1;\n', 'config/run.json': '{"version":1,"runs":[],"keep":"me"}\n' });
+  const root = realpathSync(made.root);
+  mkdirSync(path.join(root, 'docs/pipeline'), { recursive: true });
+  // docs/pipeline/12 -> ../../config: inside the repo, so a containment check alone passes it, and the
+  // write would land in config/run.json while `git add docs/pipeline/12/run.json` refuses the path.
+  symlinkSync('../../config', path.join(root, 'docs/pipeline/12'), 'dir');
+  const r = runCli(recordArgs(tempDir('run-'), root, made.base), { env: { GITHUB_RUN_ID: '' } });
+  assert.equal(r.code, 2, r.stderr);
+  assert.match(r.stderr, /--out must be inside --cwd/);
+  assert.equal(readFileSync(path.join(root, 'config/run.json'), 'utf8'), '{"version":1,"runs":[],"keep":"me"}\n');
+  assert.deepEqual(readdirSync(path.join(root, 'config')), ['run.json']);
 });

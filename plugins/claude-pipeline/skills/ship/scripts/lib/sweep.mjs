@@ -24,7 +24,9 @@ export function sweepReason(issue, { config, now = new Date() }) {
 export function labelSenderTrusted(issue, owner) {
   const sender = issue.labeledBy;
   if (!sender) return false;
-  return sender === issue.author || (Boolean(owner) && sender === owner);
+  // GitHub logins are case-insensitive, and the events API and the issue payload may spell one differently.
+  const same = (a, b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
+  return same(sender, issue.author) || (Boolean(owner) && same(sender, owner));
 }
 
 const byAge = (a, b) => {

@@ -97,6 +97,11 @@ test('latestLabeler: the newest labeled event for the label, or null', () => {
   assert.equal(latestLabeler([ev('labeled', 'claude', 'a'), ev('labeled', 'bug', 'b'), ev('labeled', 'claude', 'c'), ev('unlabeled', 'claude', 'd')], 'claude'), 'c');
   assert.equal(latestLabeler([ev('labeled', 'bug', 'b'), { event: 'commented' }], 'claude'), null);
   assert.equal(latestLabeler([], 'claude'), null);
+  // Events are ordered by created_at, not by their position in the response; ties keep the response order.
+  const at = (login, created_at) => ({ ...ev('labeled', 'claude', login), created_at });
+  assert.equal(latestLabeler([at('late', '2026-10-20T12:00:00Z'), at('early', '2026-10-20T10:00:00Z')], 'claude'), 'late');
+  assert.equal(latestLabeler([at('first', '2026-10-20T10:00:00Z'), at('second', '2026-10-20T10:00:00Z')], 'claude'), 'second');
+  assert.equal(latestLabeler([at('dated', '2026-10-20T10:00:00Z'), ev('labeled', 'claude', 'undated')], 'claude'), 'dated');
 });
 
 test('runSweep: a triage user labelled a trusted author\'s issue, so the sweep does not dispatch it', () => {

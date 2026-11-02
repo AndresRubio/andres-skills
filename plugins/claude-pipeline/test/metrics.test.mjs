@@ -153,9 +153,8 @@ test('CLI metrics prints JSON, or one table per repo with --table, from the GitH
     'pr list --repo o/r --state all --limit 500 --json number,headRefName,headRefOid,isCrossRepository,state,createdAt,closedAt,mergedAt,body': [
       { number: 11, headRefName: 'claude/1-a', headRefOid: sha, isCrossRepository: false, state: 'MERGED', createdAt: '2026-10-20T09:00:00Z', closedAt: '2026-10-20T12:00:00Z', mergedAt: '2026-10-20T12:00:00Z', body: 'Fixes #1' },
     ],
-    'pr list --repo o/r --state all --limit 500 --search created:>=2026-10-01 --json number,headRefName,headRefOid,isCrossRepository,state,createdAt,closedAt,mergedAt,body': [
-      { number: 11, headRefName: 'claude/1-a', headRefOid: sha, isCrossRepository: false, state: 'MERGED', createdAt: '2026-10-20T09:00:00Z', closedAt: '2026-10-20T12:00:00Z', mergedAt: '2026-10-20T12:00:00Z', body: 'Fixes #1' },
-    ],
+    // The narrowed query is served different data (nothing), so the --since call is proven to send --search.
+    'pr list --repo o/r --state all --limit 500 --search created:>=2026-10-01 --json number,headRefName,headRefOid,isCrossRepository,state,createdAt,closedAt,mergedAt,body': [],
     [`api repos/o/r/contents/docs/pipeline/1/run.json?ref=${sha}`]: { content: runJson },
     'api --paginate --slurp repos/o/r/issues/11/comments': [[]],
     'api --paginate --slurp repos/o/r/issues/1/comments': [[]],
@@ -167,7 +166,7 @@ test('CLI metrics prints JSON, or one table per repo with --table, from the GitH
   assert.equal(json.json().repos[0].runs, 1);
   const table = runCli(['metrics', '--repo', 'o/r', '--table', '--since', '2026-10-01T00:00:00Z'], { env });
   assert.equal(table.code, 0, table.stderr);
-  assert.match(table.stdout, /^\| o\/r \| 1 \| 0% \|/m);
+  assert.match(table.stdout, /^\| o\/r \| 0 \|/m, 'the --since query reached gh as --search and returned no PRs');
 });
 
 test('collectRows warns on stderr and flags truncated when pr list returns exactly 500 PRs', () => {

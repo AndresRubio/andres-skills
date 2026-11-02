@@ -22,7 +22,10 @@ const cleanReason = (r) => r.replace(/[\r\n]+/g, ' ').replace(/<!--/g, '<!-\u200
 export function formatScoreBody({ marker, head, score, model = null }) {
   validateScore(score);
   const reasons = { taskCompliance: cleanReason(score.reasons.taskCompliance), reviewQuality: cleanReason(score.reasons.reviewQuality) };
-  const data = JSON.stringify({ head, taskCompliance: score.taskCompliance, reviewQuality: score.reviewQuality, reasons, model }).replace(/-->/g, '--\\u003e');
+  // The model name is text from the scorer session's command line: cleaned the same way, so it cannot
+  // open a second tag either.
+  const cleanModel = model === null || model === undefined ? null : cleanReason(String(model));
+  const data = JSON.stringify({ head, taskCompliance: score.taskCompliance, reviewQuality: score.reviewQuality, reasons, model: cleanModel }).replace(/-->/g, '--\\u003e');
   return [
     marker, '',
     `**Score** at head \`${head.slice(0, 7)}\`: sampled 1 in 4. It informs and blocks nothing.`, '',

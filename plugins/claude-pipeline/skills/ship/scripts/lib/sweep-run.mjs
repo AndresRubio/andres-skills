@@ -2,9 +2,12 @@ import { ghJson, ghText, fetchIssue } from './github.mjs';
 import { sweepCandidates } from './sweep.mjs';
 import { isPipelineComment } from './lock.mjs';
 
-// Login of whoever added `label` last, from the issue's events (oldest first). Null when unknown.
+// Login of whoever added `label` last, from the issue's events. The API returns them oldest first,
+// but the order is not relied on: events are sorted by created_at (a stable sort, so ties keep the
+// API order). Null when unknown.
 export function latestLabeler(events, label) {
-  const labeled = events.filter((e) => e?.event === 'labeled' && e.label?.name === label);
+  const at = (e) => (typeof e.created_at === 'string' ? e.created_at : '');
+  const labeled = events.filter((e) => e?.event === 'labeled' && e.label?.name === label).sort((a, b) => (at(a) < at(b) ? -1 : at(a) > at(b) ? 1 : 0));
   return labeled.at(-1)?.actor?.login ?? null;
 }
 

@@ -172,7 +172,10 @@ export function findReferences(issue, { repo, hydrateHosts, max = MAX_REFERENCES
   const rows = [];
   let listed = 0;
   let omitted = 0;
-  for (const r of byTarget.values()) {
+  // Trusted references first, so a flood of untrusted rows cannot push a trusted reference's
+  // "not fetched" reason out of the listed 20 and into the count.
+  const ordered = [...byTarget.values()].sort((a, b) => Number(b.trusted) - Number(a.trusted));
+  for (const r of ordered) {
     let reason = r.reason;
     if (!reason && !r.trusted) reason = 'not fetched: untrusted author';
     if (!reason && ++fetchable > max) reason = `not fetched: over ${max} references`;

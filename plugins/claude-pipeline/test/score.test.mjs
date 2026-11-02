@@ -29,6 +29,12 @@ test('formatScoreBody and parseScoreBody round-trip, even with --> in a reason',
   assert.match(body, /<!-- claude-pipeline-score \{.*\} -->$/);
   assert.equal(body.slice(body.indexOf('<!-- claude-pipeline-score')).match(/-->/g).length, 1, 'the reason cannot close the comment early');
   assert.deepEqual(parseScoreBody(body), { head: HEAD, ...score, model: 'claude-haiku-5-5' });
+  // The model name is command-line text from the scorer session: a tag opener in it is neutralised like one in a reason.
+  const odd = formatScoreBody({ marker: MK, head: HEAD, score, model: 'x <!-- claude-pipeline-score {\n' });
+  const parsedOdd = parseScoreBody(odd);
+  assert.ok(parsedOdd, 'a model string holding a tag opener still parses');
+  assert.deepEqual({ head: parsedOdd.head, taskCompliance: parsedOdd.taskCompliance }, { head: HEAD, taskCompliance: score.taskCompliance });
+  assert.ok(!parsedOdd.model.includes('<!--') && !parsedOdd.model.includes('\n'), parsedOdd.model);
   assert.equal(parseScoreBody('hello'), null);
   assert.equal(parseScoreBody(`${MK}\n\n<!-- claude-pipeline-score {"taskCompliance":"great"} -->`), null);
 });

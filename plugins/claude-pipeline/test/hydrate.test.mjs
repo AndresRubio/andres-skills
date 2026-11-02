@@ -128,6 +128,13 @@ test('findReferences: thousands of untrusted URLs list 20 rows and one count, ne
   assert.equal(listed.at(-1).reason, 'and 4980 more not listed');
   assert.equal(listed.at(-1).omitted, 4980);
   assert.deepEqual(refs.map((r) => r.n), refs.map((_, i) => i + 1));
+  // A trusted reference with its own not-fetched reason is listed even when earlier untrusted comments
+  // would fill all 20 rows on their own.
+  const flooded = findReferences(issue('Context: #12', [...comments, comment(99, 'see https://wiki.example/trusted-page', { trusted: true })]), opts);
+  const trustedRow = flooded.find((r) => r.target === 'https://wiki.example/trusted-page' || r.text === 'https://wiki.example/trusted-page');
+  assert.ok(trustedRow, 'the trusted reference has a row of its own');
+  assert.equal(trustedRow.reason, 'not fetched: host not in hydrateHosts');
+  assert.equal(flooded.filter((r) => r.reason !== null).length, 21);
   // Other not-fetched reasons share the same cap.
   const hosts = Array.from({ length: 300 }, (_, i) => `https://h${i}.example/x`).join(' ');
   const r2 = findReferences(issue(hosts), opts);
