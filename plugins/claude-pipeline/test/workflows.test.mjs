@@ -139,6 +139,12 @@ test('claude-ship allows both claude[bot] and github-actions[bot], which a sweep
   assert.deepEqual(bots, ['claude[bot]', 'github-actions[bot]']);
 });
 
+test('claude-score allows github-actions[bot], which a pipeline-ready dispatch without PIPELINE_TOKEN runs as', () => {
+  const t = rendered('claude-score.yml');
+  const bots = t.match(/^\s+allowed_bots: "([^"]*)"$/m)[1].split(',');
+  assert.ok(bots.includes('github-actions[bot]'), bots.join(','));
+});
+
 test('claude-score blocks gh pr edit like claude-review does', () => {
   for (const name of ['claude-review.yml', 'claude-score.yml']) {
     assert.match(rendered(name), /--disallowedTools .*Bash\(gh pr edit:\*\)/, name);

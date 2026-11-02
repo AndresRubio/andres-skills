@@ -44,6 +44,9 @@ jobs:
           CLAUDE_PIPELINE_HOME: ${{ runner.temp }}/claude-pipeline
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # pipeline-ready dispatches this workflow with PIPELINE_TOKEN or, when that secret is unset,
+          # the default github.token, which runs as github-actions[bot]. The action refuses a bot it is not told about.
+          allowed_bots: "github-actions[bot]"
           prompt: "/claude-pipeline:score ${{ inputs.pr }}"
           claude_args: |
             --plugin-dir .claude-pipeline-plugin/{{PLUGIN_SUBDIR}}
