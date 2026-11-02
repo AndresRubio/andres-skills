@@ -15,7 +15,7 @@ Adapted from warpdotdev/warp-factory-examples (MIT License, Copyright (c) 2026 W
 2. `gh pr view <PR> --repo "$REPO" --json number,body,headRefOid,headRefName > "$WORK/pr.json"`. The issue number is the body's `Fixes #N`.
 3. `node "$PIPELINE" issue <N> --repo "$REPO" > "$WORK/issue.json"`. Use only the title, the body and comments with `trusted: true`.
 4. `gh pr diff <PR> --repo "$REPO" > "$WORK/pr.diff"`; read it by line range.
-5. `node "$PIPELINE" verdict-latest --repo "$REPO" --pr <PR> --head <headRefOid> > "$WORK/verdict.json"`, and the verdict comment's text from `node "$PIPELINE" issue <PR> --repo "$REPO"` (the newest comment with `pipeline: true` whose marker kind is `verdict`).
+5. `node "$PIPELINE" issue <PR> --repo "$REPO" > "$WORK/pr-comments.json"`. In its `comments` array, the review text is the `body` field of the newest comment (highest `id`) whose `pipeline` is `true` and whose `marker.kind` is `verdict`. Read that `body` and nothing else for the review quality judgment.
 
 ## Task compliance
 
@@ -29,7 +29,7 @@ Compare the pull request against the work item the run was dispatched with. Retu
 
 ## Review quality
 
-Judge the `verdict` comment.
+Judge the verdict comment body read in setup step 5.
 
 Evaluate the review agent's findings report. Return `actionable` when each finding names a file and line, states the impact, and proposes a correction. Return `vague` when findings are real but under-specified. Return `empty_or_noise` when the report misses evident defects or consists of restated style preferences.
 

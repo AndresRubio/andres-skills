@@ -15,24 +15,34 @@ export function validateScore(s) {
   if (typeof s.reasons?.taskCompliance !== 'string' || typeof s.reasons?.reviewQuality !== 'string') throw new Error('reasons.taskCompliance and reasons.reviewQuality must be strings');
 }
 
+// A reason is model-written text that lands in a visible bullet: one line, and no comment opener,
+// so it cannot start a second score tag that the parser would take for the real one.
+const cleanReason = (r) => r.replace(/[\r\n]+/g, ' ').replace(/<!--/g, '<!-\u200b-');
+
 export function formatScoreBody({ marker, head, score, model = null }) {
   validateScore(score);
-  const data = JSON.stringify({ head, taskCompliance: score.taskCompliance, reviewQuality: score.reviewQuality, reasons: score.reasons, model }).replace(/-->/g, '--\\u003e');
+  const reasons = { taskCompliance: cleanReason(score.reasons.taskCompliance), reviewQuality: cleanReason(score.reasons.reviewQuality) };
+  const data = JSON.stringify({ head, taskCompliance: score.taskCompliance, reviewQuality: score.reviewQuality, reasons, model }).replace(/-->/g, '--\\u003e');
   return [
     marker, '',
     `**Score** at head \`${head.slice(0, 7)}\`: sampled 1 in 4. It informs and blocks nothing.`, '',
-    `- Task compliance: \`${score.taskCompliance}\`. ${score.reasons.taskCompliance}`,
-    `- Review quality: \`${score.reviewQuality}\`. ${score.reasons.reviewQuality}`, '',
+    `- Task compliance: \`${score.taskCompliance}\`. ${reasons.taskCompliance}`,
+    `- Review quality: \`${score.reviewQuality}\`. ${reasons.reviewQuality}`, '',
     `<!-- ${TAG} ${data} -->`,
   ].join('\n');
 }
 
+// Linear: the tag is the last one in the body, closed by ` -->` at the very end. No regex backtracking.
 export function parseScoreBody(body) {
   if (parseMarker(body)?.kind !== 'score') return null;
-  const m = String(body).match(new RegExp(`<!-- ${TAG} (\\{.*\\}) -->\\s*$`, 's'));
-  if (!m) return null;
+  const text = String(body).trimEnd();
+  const open = `<!-- ${TAG} `;
+  const start = text.lastIndexOf(open);
+  if (start === -1 || !text.endsWith(' -->')) return null;
+  const json = text.slice(start + open.length, text.length - 4);
+  if (!json.startsWith('{') || !json.endsWith('}')) return null;
   try {
-    const data = JSON.parse(m[1]);
+    const data = JSON.parse(json);
     validateScore(data);
     return { head: data.head, taskCompliance: data.taskCompliance, reviewQuality: data.reviewQuality, reasons: data.reasons, model: data.model ?? null };
   } catch {

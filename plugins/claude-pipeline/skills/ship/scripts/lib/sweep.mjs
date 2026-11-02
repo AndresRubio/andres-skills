@@ -17,12 +17,22 @@ export function sweepReason(issue, { config, now = new Date() }) {
   return null;
 }
 
+// The event route (lane.mjs, issues/labeled) starts a run only when the person who added the
+// `claude` label is the issue's author or the repo owner. The sweep applies the same rule to an
+// issue no run has touched yet; issue.labeledBy is that person's login, put there by sweep-run.
+// No known labeller, or no owner given, never matches: it fails closed.
+export function labelSenderTrusted(issue, owner) {
+  const sender = issue.labeledBy;
+  if (!sender) return false;
+  return sender === issue.author || (Boolean(owner) && sender === owner);
+}
+
 const byAge = (a, b) => {
   if (a.createdAt !== b.createdAt) return (a.createdAt ?? '') < (b.createdAt ?? '') ? -1 : 1;
   return a.number - b.number;
 };
 
-export function sweepCandidates({ issues, prs, closedPrs, config, now = new Date() }) {
+export function sweepCandidates({ issues, prs, closedPrs, config, owner = null, now = new Date() }) {
   const unique = [...new Map(issues.map((i) => [i.number, i])).values()];
   const lockedIssues = unique.filter((i) => i.labels.includes('claude-working'));
   const common = { prs, lockedIssues, ttlHours: config.lockTtlHours, maxParallel: config.maxParallel, now };
@@ -34,6 +44,7 @@ export function sweepCandidates({ issues, prs, closedPrs, config, now = new Date
     const reason = sweepReason(issue, { config, now });
     if (!reason) continue; // an event starts it, or it is done
     const skip = (why) => skipped.push({ issue: issue.number, reason, why });
+    if (reason === 'new' && !labelSenderTrusted(issue, owner)) { skip('label sender is not the issue author or the repo owner'); continue; }
     if (prs.some((p) => p.isCrossRepository !== true && ownsBranch(issue.number, p.headRefName))) { skip('has an open claude/* PR'); continue; }
     const lastReport = issue.comments
       .filter((c) => isPipelineComment(c) && c.marker.kind === 'report')

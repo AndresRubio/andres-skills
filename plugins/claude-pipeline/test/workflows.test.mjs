@@ -132,3 +132,15 @@ test('claude-ship: the effort recorded in run.json matches the --effort it runs 
   const step = t.match(/- name: Run the pipeline\n[\s\S]*?\n {8}env:\n((?: {10}.*\n|\s*\n)+)/)[1];
   assert.match(step, new RegExp(`^ {10}CLAUDE_PIPELINE_EFFORT: '?${flag}'?$`, 'm'));
 });
+
+test('claude-ship allows both claude[bot] and github-actions[bot], which a sweep dispatch with the default token runs as', () => {
+  const t = rendered('claude-ship.yml');
+  const bots = t.match(/^\s+allowed_bots: "([^"]*)"$/m)[1].split(',');
+  assert.deepEqual(bots, ['claude[bot]', 'github-actions[bot]']);
+});
+
+test('claude-score blocks gh pr edit like claude-review does', () => {
+  for (const name of ['claude-review.yml', 'claude-score.yml']) {
+    assert.match(rendered(name), /--disallowedTools .*Bash\(gh pr edit:\*\)/, name);
+  }
+});

@@ -273,6 +273,27 @@ test('a sampled PR gets claude-score dispatched after the ready label; others do
   const r = await runReady({ repo: REPO, config, now: NOW }, c.deps);
   assert.equal(r.actions[0].action, 'ready');
   assert.ok(r.actions[0].done.includes('score dispatch failed: HTTP 403'));
+  assert.ok(!r.actions[0].done.includes('dispatch claude-score'), 'a failed dispatch is not recorded as done');
+});
+
+test('the score dispatch is recorded as done only after it succeeds; a dry run says "would"', async () => {
+  const sampled = basePr({ body: 'Fixes #8', headRefName: 'claude/8-x' });
+  const issue = { number: 8, labels: ['claude'], comments: [] };
+  const ok = fakeDeps({ prs: [sampled], comments: verdictComment('accepted'), issue });
+  ok.deps.dispatchScore = (n) => ok.calls.push(['dispatchScore', n]);
+  const okRun = await runReady({ repo: REPO, config, now: NOW }, ok.deps);
+  assert.ok(okRun.actions[0].done.includes('dispatch claude-score'));
+  const seen = [];
+  const order = fakeDeps({ prs: [sampled], comments: verdictComment('accepted'), issue });
+  order.deps.dispatchScore = () => { throw new Error('boom'); };
+  const bad = await runReady({ repo: REPO, config, now: NOW }, order.deps);
+  seen.push(...bad.actions[0].done);
+  assert.deepEqual(seen.filter((d) => /claude-score/.test(d)), [], 'nothing about claude-score is recorded except the failure');
+  assert.ok(seen.includes('score dispatch failed: boom'));
+  const dry = fakeDeps({ prs: [sampled], comments: verdictComment('accepted'), issue });
+  dry.deps.dispatchScore = () => { throw new Error('must not run'); };
+  const dryRun = await runReady({ repo: REPO, config, now: NOW, dryRun: true }, dry.deps);
+  assert.ok(dryRun.actions[0].done.includes('would dispatch claude-score'));
 });
 
 test('the ready report carries the run summary from run.json at the head SHA', async () => {

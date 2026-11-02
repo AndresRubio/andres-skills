@@ -5,7 +5,21 @@ export const VERDICTS = Object.freeze(['accepted', 'revision-needed', 'human-dec
 export const SEVERITIES = Object.freeze(['Critical', 'Important', 'Minor']);
 export const FINDING_KINDS = Object.freeze(['unambiguous', 'judgment']);
 const SHA_RE = /^[0-9a-f]{40}$/;
-const TAG_RE = /<!-- claude-pipeline-verdict (\{[\s\S]*?\}) -->\s*$/;
+const TAG_OPEN = '<!-- claude-pipeline-verdict ';
+
+// The payload: from the first tag followed by `{` to the `}` that closes the body with ` -->` and
+// optional whitespace. Linear (indexOf and endsWith only); the old regex backtracked quadratically.
+function tagPayload(body) {
+  const text = String(body).trimEnd();
+  if (!text.endsWith('} -->')) return null;
+  const last = text.length - 5; // index of the closing `}`
+  for (let at = text.indexOf(TAG_OPEN); at !== -1; at = text.indexOf(TAG_OPEN, at + 1)) {
+    const brace = at + TAG_OPEN.length;
+    if (brace > last) return null;
+    if (text[brace] === '{') return text.slice(brace, last + 1);
+  }
+  return null;
+}
 
 export function validateFindings(findings) {
   if (!Array.isArray(findings)) throw new Error('findings must be an array');
@@ -64,10 +78,10 @@ export function formatVerdictBody({ verdict, head, findings = [], diffRisk = [],
 export function parseVerdictBody(body) {
   const marker = parseMarker(body);
   if (!marker || marker.kind !== 'verdict') return null;
-  const m = String(body).match(TAG_RE);
-  if (!m) return null;
+  const json = tagPayload(body);
+  if (json === null) return null;
   let payload;
-  try { payload = JSON.parse(m[1]); } catch { return null; }
+  try { payload = JSON.parse(json); } catch { return null; }
   if (!VERDICTS.includes(payload.verdict) || !SHA_RE.test(payload.head ?? '')) return null;
   try { validateFindings(payload.findings ?? []); } catch { return null; }
   // The verdict is computed, never chosen: without a reason it must be what its findings give;

@@ -115,7 +115,9 @@ export async function runReady({ repo, config, now = new Date(), dryRun = false,
         // Sampled scoring (spec §7.5) runs in claude-score.yml: pipeline-ready has no AI and no OAuth token.
         if (isSampled(issueNumber) && deps.dispatchScore) {
           try {
-            act('dispatch claude-score', () => deps.dispatchScore(pr.number));
+            // Recorded as done only once the dispatch has succeeded (a dry run records "would ...").
+            if (dryRun) done.push('would dispatch claude-score');
+            else { deps.dispatchScore(pr.number); done.push('dispatch claude-score'); }
           } catch (err) {
             done.push(`score dispatch failed: ${String(err.stderr || err.message).trim()}`);
           }

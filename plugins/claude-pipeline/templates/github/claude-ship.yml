@@ -81,7 +81,9 @@ jobs:
           CLAUDE_PIPELINE_HOME: ${{ runner.temp }}/claude-pipeline
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: "claude[bot]"
+          # claude-code-action takes a comma-separated list. A sweep dispatch made with the default
+          # github.token runs as github-actions[bot], which the action refuses unless it is listed.
+          allowed_bots: "claude[bot],github-actions[bot]"
           prompt: ${{ needs.route.outputs.prompt }}
           # The agent loads the pinned checkout above, so its skills, stages and hooks match the CLI it calls.
           # Verify on the first sandbox run that claude-code-action passes --plugin-dir through.

@@ -159,3 +159,34 @@ test('CLI verdict-status --post-missing posts nothing for a head the PR has move
   assert.equal(r.code, 1, r.stderr);
   assert.deepEqual(r.json(), { verdict: 'human-decision-needed', source: 'stale' });
 });
+
+test('parseVerdictBody is linear: 200 KB of repeated tags and spaces ends in null in under a second', () => {
+  const marker = '**[claude-pipeline]** verdict · 2026-10-07T10:00:00Z · local';
+  const t0 = performance.now();
+  assert.equal(parseVerdictBody(`${marker}\n\n${('<!-- claude-pipeline-verdict {} -->' + ' '.repeat(20)).repeat(5500)}x`), null);
+  assert.equal(parseVerdictBody(`${marker}\n\n${'<!-- claude-pipeline-verdict '.repeat(7000)}`), null);
+  assert.equal(parseVerdictBody(`${marker}\n\n${'<!-- claude-pipeline-verdict {'.repeat(7000)}} -->`), null);
+  assert.ok(performance.now() - t0 < 1000, `took ${performance.now() - t0} ms`);
+});
+
+test('parseVerdictBody finds the same payload as the regex it replaced', () => {
+  const OLD = /<!-- claude-pipeline-verdict (\{[\s\S]*?\}) -->\s*$/;
+  const marker = '**[claude-pipeline]** verdict · 2026-10-07T10:00:00Z · local';
+  const good = JSON.stringify({ v: 1, verdict: 'accepted', head: HEAD, findings: [], diffRisk: [], model: null, reason: null });
+  const tag = (j) => `<!-- claude-pipeline-verdict ${j} -->`;
+  const cases = [
+    `${marker}\n\n${tag(good)}`, `${marker}\n\n${tag(good)}\n\n  \n`, `${marker}\n\n${tag(good)}\nmore`, `${marker}\n\n${tag(good).slice(0, -4)}`,
+    `${marker}\n\n<!-- claude-pipeline-verdict nope --> ${tag(good)}`, `${marker}\n\n${tag('{}')} ${tag(good)}`,
+    `${marker}\n\n<!-- claude-pipeline-verdict {} -->`, `${marker}\n\n<!-- claude-pipeline-verdict {} --> x`, `${marker}\n\n<!-- claude-pipeline-verdict {`,
+    `${marker}\n\n<!-- claude-pipeline-verdict } -->`, `${marker}\n\n<!-- claude-pipeline-verdict {\n"a": "}"\n} -->`, `${marker}\n\n<!-- claude-pipeline-verdict  {} -->`,
+    `${marker}\n\ntext <!-- claude-pipeline-verdict {} --> ${tag(good)}`, `${marker}`,
+  ];
+  for (const c of cases) {
+    const expected = c.match(OLD)?.[1] ?? null;
+    let viaOld = null;
+    if (expected !== null) { try { viaOld = JSON.parse(expected); } catch { viaOld = null; } }
+    const parsed = parseVerdictBody(c);
+    // The parsed result is non-null exactly when the old regex's capture was a valid verdict payload.
+    assert.equal(parsed !== null, viaOld !== null && viaOld.verdict === 'accepted' && viaOld.head === HEAD, JSON.stringify(c));
+  }
+});
