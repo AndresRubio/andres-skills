@@ -265,7 +265,11 @@ export const register: Register = on => {
     if (typeof e.command !== 'string') return next(e)
     const commit = findCommit(e.command)
     if (commit === undefined) return next(e)
-    const root = await repoRoot($, commit.dir)
+    // A bare `git commit` lands in the Bash tool's folder. `$.session.cwd()`
+    // follows Bash's `cd` (`$.session.root()` doesn't), and so does
+    // process.run's default on 2.1.309. Naming the folder keeps the gate off
+    // that default.
+    const root = await repoRoot($, commit.dir ?? (await $.session.cwd()))
     if (root === undefined) return next(e)
     const command = await commandFor($, root)
     if (command === undefined) return next(e)

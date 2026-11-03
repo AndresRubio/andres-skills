@@ -24,14 +24,18 @@ type World = {
   check: { exitCode: number; stdout: string } | 'cannot start'
   hasCheckScript: boolean
   isGitBroken: boolean
+  // Where the Bash tool is, which `$.session.cwd()` reports. `broken` makes the call reject.
+  bashDir: string | 'broken'
   checks: number
+  // The folder each inline check ran in.
+  checkedIn: (string | undefined)[]
   spawns: number
   allowed: number
   clock: ReturnType<typeof mock.clock>
 }
 
-// Stands for the engine and a repo at /repo: git, the check script and the
-// tool beneath the plugin.
+// Stands for the engine, a repo at /repo and a second one at /other whose
+// check always fails: git, the check script and the tool beneath the plugin.
 function repo(on: On, overrides: Partial<World> = {}): World {
   const clock = mock.clock(on, { now: 1_000 })
   const world: World = {
@@ -39,14 +43,16 @@ function repo(on: On, overrides: Partial<World> = {}): World {
     check: { exitCode: 1, stdout: FAILING },
     hasCheckScript: true,
     isGitBroken: false,
+    bashDir: '/repo',
     checks: 0,
+    checkedIn: [],
     spawns: 0,
     allowed: 0,
     clock,
     ...overrides,
   }
   mock.store(on)
-  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.cwd', () => (world.bashDir === 'broken' ? { deny: 'no folder' } : { value: world.bashDir }))
   on('ui.status', () => ({ value: undefined }))
   on('ui.toast', () => ({ value: undefined }))
   on('ui.log', () => ({ value: undefined }))
@@ -60,16 +66,25 @@ function repo(on: On, overrides: Partial<World> = {}): World {
     yield { stream: 'stdout' as const, text: check.stdout.slice(17) }
     return { value: { code: check.exitCode, signal: null } }
   })
-  on('fs.exists', (_, e) => ({ value: world.hasCheckScript && e.path === '/repo/scripts/check.sh' }))
+  on('fs.exists', (_, e) => ({
+    value: world.hasCheckScript && ['/repo/scripts/check.sh', '/other/scripts/check.sh'].includes(e.path),
+  }))
   on('process.run', (_, e) => {
     const argv = e.argv.join(' ')
     if (e.argv[0] === '/bin/sh' && e.argv[2]?.includes('"$HOME"')) return ok('/bin/zsh\n/Users/me')
-    if (argv === 'git rev-parse --show-toplevel') return ok('/repo\n')
+    if (argv === 'git rev-parse --show-toplevel') {
+      // With no folder named this answers /repo, so the gate has to name where
+      // Bash is. The real default follows Bash too on 2.1.309 (the PR has the
+      // runs); the gate names the folder so it doesn't lean on that.
+      return ok(e.init?.cwd?.startsWith('/other') ? '/other\n' : '/repo\n')
+    }
     if (argv === `/bin/sh -c ${FINGERPRINT}`) {
       return world.isGitBroken ? { deny: 'git is gone' } : ok(`${world.tree}\n`)
     }
     if (argv === CHECK.join(' ')) {
       world.checks += 1
+      world.checkedIn.push(e.init?.cwd)
+      if (e.init?.cwd === '/other') return ok(FAILING, 1)
       if (world.check === 'cannot start') return { deny: 'spawn /bin/zsh ENOENT' }
       return ok(world.check.stdout, world.check.exitCode)
     }
@@ -196,6 +211,38 @@ test('a gate that breaks fails closed', async ($, on) => {
   const refused = await commit($)
 
   expect(world.allowed).toBe(0)
+  expect(refused).toContain('the gate itself failed')
+})
+
+test('a bare commit after a cd is gated by the repo Bash moved to', async ($, on) => {
+  // /repo's check passes and /other's fails, so the wrong repo's check would let this through.
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, bashDir: '/other' })
+
+  const refused = await commit($)
+
+  expect(world.allowed).toBe(0)
+  expect(world.checkedIn).toEqual(['/other'])
+  expect(refused).toBeDefined()
+  expect(refused).toContain('checks fail in other')
+})
+
+test('a folder the command names wins over where Bash is', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, bashDir: '/other' })
+
+  expect(await commit($, 'git -C /repo commit -m "x"')).toBeUndefined()
+
+  expect(world.allowed).toBe(1)
+  expect(world.checkedIn).toEqual(['/repo'])
+})
+
+test('a Bash folder the gate cannot read stops the commit', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, bashDir: 'broken' })
+
+  const refused = await commit($)
+
+  expect(world.allowed).toBe(0)
+  expect(world.checks).toBe(0)
+  expect(refused).toBeDefined()
   expect(refused).toContain('the gate itself failed')
 })
 
