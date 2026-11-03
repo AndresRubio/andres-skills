@@ -1,0 +1,23 @@
+name: mods
+
+on:
+  push:
+    branches: [main]
+    paths: ['plugins/**', 'scripts/check-mods.sh', '.github/workflows/mods.yml']
+  pull_request:
+    paths: ['plugins/**', 'scripts/check-mods.sh', '.github/workflows/mods.yml']
+
+jobs:
+  mods:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Pinned because the mod API changes between releases. docs/mods.md says how to move it.
+      - run: npm install -g @anthropic-ai/claude-code@2.1.309
+      - run: scripts/check-mods.sh
+        env:
+          DISABLE_AUTOUPDATER: '1'
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
