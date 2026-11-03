@@ -300,9 +300,8 @@ test('a background run is followed through its output file to its end', async ($
   expect(await band($, /Remote forja/)).toContain('may still exist on modal')
   expect(world.toasts).toEqual(['forja: remote resources may still exist on modal. Run forja cleanup --provider modal.'])
   const appended = world.appended()
-  if (appended !== undefined) {
-    expect(appended.some(text => text.includes('the background forja run for smoke.yaml ended with exit code 3'))).toBe(true)
-  }
+  expect(appended).toBeDefined()
+  expect(appended?.some(text => text.includes('the background forja run for smoke.yaml ended with exit code 3'))).toBe(true)
 })
 
 test('an interrupted run after its run folder exists leaves a reminder', async ($, on) => {
