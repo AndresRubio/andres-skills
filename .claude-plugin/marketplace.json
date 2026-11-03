@@ -11,7 +11,7 @@
     {
       "name": "check-gate",
       "source": "./plugins/check-gate",
-      "description": "Mod: reruns the repo's check after code changes and stops git commit while it fails."
+      "description": "Mod: reruns the repo's check after code changes and stops git commit while it fails, or when it can't find the commit's repo."
     },
     {
       "name": "citation-guard",

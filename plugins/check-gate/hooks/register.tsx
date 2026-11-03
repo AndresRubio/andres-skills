@@ -12,6 +12,7 @@ import {
   errorText,
   findCommit,
   isRun,
+  noRepoText,
   outerScript,
   summary,
 } from './logic'
@@ -51,15 +52,23 @@ const hostInfo = async ($: Engine) => {
   return host
 }
 
-const repoRoot = async ($: Engine, dir?: string) => {
+// The repo's top folder as git reports it, or why git couldn't say.
+const locateRepo = async ($: Engine, dir?: string): Promise<{ root: string } | { reason: string }> => {
   let cwd = dir
   if (cwd?.startsWith('~/') || cwd === '~') cwd = (await hostInfo($)).home + cwd.slice(1)
   try {
     const found = await $.process.run(['git', 'rev-parse', '--show-toplevel'], cwd ? { cwd } : {})
-    return found.exitCode === 0 ? found.stdout.trim() || undefined : undefined
-  } catch {
-    return undefined
+    const root = found.exitCode === 0 ? found.stdout.trim() : ''
+    if (root) return { root }
+    return { reason: found.stderr.trim() || `exit ${found.exitCode} with no path` }
+  } catch (error) {
+    return { reason: errorText(error) }
   }
+}
+
+const repoRoot = async ($: Engine, dir?: string) => {
+  const found = await locateRepo($, dir)
+  return 'root' in found ? found.root : undefined
 }
 
 const commandFor = async ($: Engine, root: string) => {
@@ -260,13 +269,18 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // The gate. It fails closed: if the gate itself breaks, the commit stops.
+  // The gate. It fails closed: if it can't find the commit's repo, or the
+  // gate itself breaks, the commit stops. That includes a folder outside any
+  // repo: rev-parse runs in the session's folder unless the command names
+  // one, and the Bash tool may have moved since, so "not a repo here" doesn't
+  // prove git would refuse the commit.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     if (typeof e.command !== 'string') return next(e)
     const commit = findCommit(e.command)
     if (commit === undefined) return next(e)
-    const root = await repoRoot($, commit.dir)
-    if (root === undefined) return next(e)
+    const found = await locateRepo($, commit.dir)
+    if (!('root' in found)) return { deny: noRepoText(commit.dir, found.reason) }
+    const { root } = found
     const command = await commandFor($, root)
     if (command === undefined) return next(e)
 
