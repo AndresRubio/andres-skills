@@ -15,8 +15,10 @@ const FAILING = [
 
 const PASSING = ['==> uv run ruff check .', '==> uv run pytest -q', '==> all checks passed'].join('\n')
 
-const ok = (stdout: string, exitCode = 0): { value: ProcessRunResult } => ({
-  value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+const NOT_A_REPO = 'fatal: not a git repository (or any of the parent directories): .git'
+
+const ok = (stdout: string, exitCode = 0, stderr = ''): { value: ProcessRunResult } => ({
+  value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false },
 })
 
 type World = {
@@ -24,6 +26,8 @@ type World = {
   check: { exitCode: number; stdout: string } | 'cannot start'
   hasCheckScript: boolean
   isGitBroken: boolean
+  // What `git rev-parse --show-toplevel` does: finds /repo, exits 128, or never starts.
+  revParse: 'found' | 'not a repo' | 'cannot start'
   checks: number
   spawns: number
   allowed: number
@@ -39,6 +43,7 @@ function repo(on: On, overrides: Partial<World> = {}): World {
     check: { exitCode: 1, stdout: FAILING },
     hasCheckScript: true,
     isGitBroken: false,
+    revParse: 'found',
     checks: 0,
     spawns: 0,
     allowed: 0,
@@ -64,7 +69,10 @@ function repo(on: On, overrides: Partial<World> = {}): World {
   on('process.run', (_, e) => {
     const argv = e.argv.join(' ')
     if (e.argv[0] === '/bin/sh' && e.argv[2]?.includes('"$HOME"')) return ok('/bin/zsh\n/Users/me')
-    if (argv === 'git rev-parse --show-toplevel') return ok('/repo\n')
+    if (argv === 'git rev-parse --show-toplevel') {
+      if (world.revParse === 'cannot start') return { deny: 'spawn git ENOENT' }
+      return world.revParse === 'not a repo' ? ok('', 128, NOT_A_REPO) : ok('/repo\n')
+    }
     if (argv === `/bin/sh -c ${FINGERPRINT}`) {
       return world.isGitBroken ? { deny: 'git is gone' } : ok(`${world.tree}\n`)
     }
@@ -197,6 +205,30 @@ test('a gate that breaks fails closed', async ($, on) => {
 
   expect(world.allowed).toBe(0)
   expect(refused).toContain('the gate itself failed')
+})
+
+test('a commit in a folder git does not know as a repo is stopped', async ($, on) => {
+  const world = repo(on, { revParse: 'not a repo' })
+
+  const refused = await commit($, 'git -C /tmp/notes commit -m "x"')
+
+  expect(world.allowed).toBe(0)
+  expect(world.checks).toBe(0)
+  expect(refused).toContain("couldn't tell which git repository")
+  expect(refused).toContain('in /tmp/notes failed: fatal: not a git repository')
+  expect(refused).toContain('git -C /path/to/repo commit')
+})
+
+test('a git that cannot start stops the commit', async ($, on) => {
+  const world = repo(on, { revParse: 'cannot start' })
+
+  const refused = await commit($)
+
+  expect(world.allowed).toBe(0)
+  expect(world.checks).toBe(0)
+  expect(refused).toContain("couldn't tell which git repository")
+  expect(refused).toContain("in the session's folder failed")
+  expect(refused).toContain('ENOENT')
 })
 
 const TURN_END = { answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as const
