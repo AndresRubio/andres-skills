@@ -247,6 +247,9 @@ test('a commit the command moves to another repo is gated by that repo', async (
     'cd /other && cd sub && git commit -m "x"',
     'S=/other; cd "$S" && git commit -m "x"',
     'bash -c "cd /other && git commit -m x"',
+    'X="$(cd /other && git commit -m x)"',
+    'x=$((1<<2))\ncd /other && git commit -m x',
+    "echo $'it\\'s'; cd /other && git commit -m x",
   ]
   const world = repo(on, { check: { exitCode: 0, stdout: PASSING } })
 
