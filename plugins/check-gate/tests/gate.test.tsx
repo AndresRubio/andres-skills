@@ -15,8 +15,10 @@ const FAILING = [
 
 const PASSING = ['==> uv run ruff check .', '==> uv run pytest -q', '==> all checks passed'].join('\n')
 
-const ok = (stdout: string, exitCode = 0): { value: ProcessRunResult } => ({
-  value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+const NOT_A_REPO = 'fatal: not a git repository (or any of the parent directories): .git'
+
+const ok = (stdout: string, exitCode = 0, stderr = ''): { value: ProcessRunResult } => ({
+  value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false },
 })
 
 type World = {
@@ -26,6 +28,8 @@ type World = {
   isGitBroken: boolean
   // Where the Bash tool is, which `$.session.cwd()` reports. `broken` makes the call reject.
   bashDir: string | 'broken'
+  // What `git rev-parse --show-toplevel` does: finds /repo, exits 128, or never starts.
+  revParse: 'found' | 'not a repo' | 'cannot start'
   checks: number
   // The folder each inline check ran in.
   checkedIn: (string | undefined)[]
@@ -44,6 +48,7 @@ function repo(on: On, overrides: Partial<World> = {}): World {
     hasCheckScript: true,
     isGitBroken: false,
     bashDir: '/repo',
+    revParse: 'found',
     checks: 0,
     checkedIn: [],
     spawns: 0,
@@ -73,6 +78,8 @@ function repo(on: On, overrides: Partial<World> = {}): World {
     const argv = e.argv.join(' ')
     if (e.argv[0] === '/bin/sh' && e.argv[2]?.includes('"$HOME"')) return ok('/bin/zsh\n/Users/me')
     if (argv === 'git rev-parse --show-toplevel') {
+      if (world.revParse === 'cannot start') return { deny: 'spawn git ENOENT' }
+      if (world.revParse === 'not a repo') return ok('', 128, NOT_A_REPO)
       // With no folder named this answers /repo, so the gate has to name where
       // Bash is. The real default follows Bash too on 2.1.309 (the PR has the
       // runs); the gate names the folder so it doesn't lean on that.
@@ -212,6 +219,30 @@ test('a gate that breaks fails closed', async ($, on) => {
 
   expect(world.allowed).toBe(0)
   expect(refused).toContain('the gate itself failed')
+})
+
+test('a commit in a folder git does not know as a repo is stopped', async ($, on) => {
+  const world = repo(on, { revParse: 'not a repo' })
+
+  const refused = await commit($, 'git -C /tmp/notes commit -m "x"')
+
+  expect(world.allowed).toBe(0)
+  expect(world.checks).toBe(0)
+  expect(refused).toContain("couldn't tell which git repository")
+  expect(refused).toContain('in /tmp/notes failed: fatal: not a git repository')
+  expect(refused).toContain('git -C /path/to/repo commit')
+})
+
+test('a git that cannot start stops the commit', async ($, on) => {
+  const world = repo(on, { revParse: 'cannot start' })
+
+  const refused = await commit($)
+
+  expect(world.allowed).toBe(0)
+  expect(world.checks).toBe(0)
+  expect(refused).toContain("couldn't tell which git repository")
+  expect(refused).toContain("in the session's folder failed")
+  expect(refused).toContain('ENOENT')
 })
 
 test('a bare commit after a cd is gated by the repo Bash moved to', async ($, on) => {

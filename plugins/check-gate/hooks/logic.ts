@@ -274,6 +274,16 @@ export function denyText(run: Run): string {
   ].join('\n')
 }
 
+// What the model reads when the gate can't find the commit's repo. `dir` is
+// the folder the command named, if any.
+export function noRepoText(dir: string | undefined, reason: string): string {
+  return [
+    "Check gate: this commit was stopped because the gate couldn't tell which git repository it is in.",
+    `git rev-parse --show-toplevel in ${dir ?? "the session's folder"} failed: ${reason}`,
+    "The gate runs a repository's checks before each commit, so it stops a commit it can't place. If the commit belongs to a repository in another folder, name that folder in the command (git -C /path/to/repo commit ..., or cd /path/to/repo && git commit ...) and run it again. If git itself is failing, tell the user.",
+  ].join('\n')
+}
+
 // What /check-gate log prints.
 export function summary(run: Run): string {
   return `${bandLine(run)}\nCommand: ${run.command}${run.exitCode === undefined ? '' : ` (exit ${run.exitCode})`}`
