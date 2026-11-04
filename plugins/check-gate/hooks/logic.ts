@@ -28,10 +28,15 @@ EOF
 `
 
 // One shell word: plain characters, backslash escapes and quoted runs.
-const WORD = String.raw`(?:[^\s"'\;&|()]|\\.|"[^"]*"|'[^']*')+`
-const GIT_OPTION = String.raw`(?:-[Cc]\s+${WORD}|--(?:git-dir|work-tree|namespace|super-prefix|config-env)\s+${WORD}|--[A-Za-z][\w-]*(?:=${WORD})?|-[A-Za-z]+)`
+const WORD = String.raw`(?:[^\s"'\\;&|()]|\\.|"[^"]*"|'[^']*')+`
+// Each option reads one way only: the catch-all forms skip what takes a separate
+// value, and a word's parts don't overlap. Any choice here makes the regex exponential.
+const TAKES_NEXT_WORD = String.raw`(?:-[Cc]|--(?:git-dir|work-tree|namespace|super-prefix|config-env))\s`
+const GIT_OPTION = String.raw`(?:-[Cc]\s+${WORD}|--(?:git-dir|work-tree|namespace|super-prefix|config-env)\s+${WORD}|(?!${TAKES_NEXT_WORD})--[A-Za-z][\w-]*(?:=${WORD})?|(?!${TAKES_NEXT_WORD})-[A-Za-z]+)`
+// `-c commit.<key>` counts as a commit: sessions set it around `"$@"` or before a
+// `rebase --exec`, where the real subcommand is out of sight.
 const GIT_COMMIT = new RegExp(
-  String.raw`(?:^|[\s;&|(\x60/])git((?:\s+${GIT_OPTION})*)\s+commit(?![\w-])`,
+  String.raw`(?:^|[\s;&|(\x60/])git((?:\s+${GIT_OPTION})*)\s+(?:commit(?![\w-])|-c\s+commit\.)`,
   'g',
 )
 
