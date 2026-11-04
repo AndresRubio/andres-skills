@@ -14,6 +14,8 @@ import {
   isRun,
   noRepoText,
   outerScript,
+  pendingText,
+  reportText,
   summary,
   unplacedText,
 } from './logic'
@@ -24,7 +26,6 @@ type Engine = EngineInterface
 // version stored, which outlives a reload. The store key carries it too.
 const runs = atom({ plugin: 'check-gate', key: 'runs' } as const, {}, { shape: 'runs-1' })
 const STORE_PREFIX = 'run-1:'
-const TEN_MINUTES = 600_000
 const COLOR = {
   stale: 'subtle',
   running: 'subtle',
@@ -140,7 +141,16 @@ const stopBackground = (root: string) => {
   background.delete(root)
 }
 
-// Streams the check in the background, the band following its steps.
+// A run a commit started reports back when it ends, as a prompt of the
+// plugin's that takes a turn of its own once the session is idle, so the model
+// learns the outcome without polling. A dropped prompt is logged.
+const tellSession = async ($: Engine, run: Run) => {
+  const entered = await $.prompt.submit({ text: reportText(run) })
+  if (entered.drop !== undefined) $.ui.log(`check-gate: the report was dropped: ${entered.drop}`, { to: 'debug' })
+}
+
+// Streams the check in the background, the band following its steps. Returns
+// the run as it starts.
 const startBackground = async ($: Engine, root: string, command: string, tree: string, trigger: Run['trigger']) => {
   stopBackground(root)
   const { shell } = await hostInfo($)
@@ -184,7 +194,9 @@ const startBackground = async ($: Engine, root: string, command: string, tree: s
     background.delete(root)
     await record($, run)
     if (run.status === 'failed') $.ui.toast(bandLine(run))
+    if (run.trigger === 'commit') await tellSession($, run)
   })().catch(error => $.ui.log(`check-gate: ${errorText(error)}`, { to: 'debug' }))
+  return base
 }
 
 // `auto` after a turn: reuses a result for the same tree, and leaves a
@@ -209,38 +221,6 @@ const refresh = async ($: Engine, root: string, trigger: Run['trigger'], isEdite
     }
   }
   await startBackground($, root, command, tree, trigger)
-}
-
-// Runs the check inline, while the commit waits. `$.process.run` time does
-// not count against the hook's budget.
-const runBeforeCommit = async ($: Engine, root: string, command: string, tree: string) => {
-  stopBackground(root)
-  const { shell } = await hostInfo($)
-  const base = await baseRun(root, command, tree, 'commit', $)
-  await setRun($, base)
-  $.ui.status(`check gate: running ${command} in ${base.repo} before the commit`)
-
-  let run: Run
-  try {
-    const ran = await $.process.run([shell, '-ic', `${command} 2>&1`], { cwd: root, timeoutMs: TEN_MINUTES })
-    const parser = createParser(outerScript(command))
-    parser.push(ran.stdout)
-    parser.finish()
-    run = {
-      ...base,
-      status: ran.exitCode === 0 ? 'passed' : 'failed',
-      exitCode: ran.exitCode,
-      steps: parser.steps(ran.exitCode),
-      tail: parser.tail(),
-      durationMs: (await $.clock.now()) - base.startedAt,
-    }
-  } catch (error) {
-    run = { ...base, status: 'error', reason: errorText(error) }
-  } finally {
-    $.ui.status(undefined)
-  }
-  await record($, run)
-  return run
 }
 
 export const register: Register = on => {
@@ -294,12 +274,20 @@ export const register: Register = on => {
     if (tree === undefined) {
       return { deny: `Check gate: couldn't read the working tree of ${basename(root)}, so this commit was stopped. Tell the user.` }
     }
-    const run = (await known($, root, command, tree)) ?? (await runBeforeCommit($, root, command, tree))
-    if (run.status === 'passed') {
-      await setRun($, run)
+    const done = await known($, root, command, tree)
+    if (done?.status === 'passed') {
+      await setRun($, done)
       return next(e)
     }
-    return { deny: denyText(run) }
+    if (done) return { deny: denyText(done) }
+    // No result for this tree: the checks run in the background and the
+    // commit is refused now, instead of waiting on them inside the tool call,
+    // whose timeout would end the run and the commit together.
+    const running = (await read($, runs))[root]
+    if (background.get(root)?.tree === tree && running?.status === 'running') {
+      return { deny: pendingText(running, false) }
+    }
+    return { deny: pendingText(await startBackground($, root, command, tree, 'commit'), true) }
   }).catch(($, e, next) =>
     next.called
       ? next(e)
