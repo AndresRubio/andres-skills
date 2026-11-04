@@ -15,6 +15,7 @@ import {
   noRepoText,
   outerScript,
   summary,
+  unplacedText,
 } from './logic'
 
 type Engine = EngineInterface
@@ -269,14 +270,16 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // The gate. It fails closed: if it can't find the commit's repo, or the
-  // gate itself breaks, the commit stops. That includes a folder outside any
-  // repo: the command may move somewhere the gate can't read, so "not a repo
-  // here" doesn't prove git would refuse the commit.
+  // The gate. It fails closed: if the command's text doesn't settle the
+  // commit's repo, git can't find it, or the gate itself breaks, the commit
+  // stops. That includes a folder outside any repo: the command may move
+  // somewhere the gate can't read, so "not a repo here" doesn't prove git
+  // would refuse the commit.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     if (typeof e.command !== 'string') return next(e)
     const commit = findCommit(e.command)
     if (commit === undefined) return next(e)
+    if (commit.unplaced !== undefined) return { deny: unplacedText(commit.unplaced) }
     // A bare `git commit` lands in the Bash tool's folder. `$.session.cwd()`
     // follows Bash's `cd` (`$.session.root()` doesn't), and so does
     // process.run's default on 2.1.309. Naming the folder keeps the gate off

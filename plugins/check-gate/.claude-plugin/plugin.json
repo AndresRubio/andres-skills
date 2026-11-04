@@ -2,6 +2,6 @@
   "name": "check-gate",
   "version": "0.1.0",
   "author": { "name": "AndresRubio" },
-  "description": "Runs each repo's check command after code changes, shows the result above the prompt, and stops git commit while the checks fail, or when it can't find the commit's repo.",
+  "description": "Runs each repo's check command after code changes, shows the result above the prompt, and stops git commit while the checks fail in the repo the commit lands in, or when it can't tell which repo that is.",
   "types": "./types/index.d.ts"
 }

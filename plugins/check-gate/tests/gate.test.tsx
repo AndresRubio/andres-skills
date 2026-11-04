@@ -277,6 +277,113 @@ test('a Bash folder the gate cannot read stops the commit', async ($, on) => {
   expect(refused).toContain('the gate itself failed')
 })
 
+test('a commit the command moves to another repo is gated by that repo', async ($, on) => {
+  // /repo's check passes and /other's fails, so the wrong repo's check would let these through.
+  const commands = [
+    'pushd /other && git commit -m "x"',
+    'if cd /other; then git commit -m "x"; fi',
+    'cd /other && cd sub && git commit -m "x"',
+    'S=/other; cd "$S" && git commit -m "x"',
+    'bash -c "cd /other && git commit -m x"',
+    'X="$(cd /other && git commit -m x)"',
+    'x=$((1<<2))\ncd /other && git commit -m x',
+    "echo $'it\\'s'; cd /other && git commit -m x",
+  ]
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING } })
+
+  for (const command of commands) {
+    const refused = await commit($, command)
+    expect(refused).toBeDefined()
+    expect(refused).toContain('checks fail in other')
+  }
+
+  expect(world.allowed).toBe(0)
+  // The first run's result is reused for the same repo and tree.
+  expect(world.checkedIn).toEqual(['/other'])
+})
+
+test('a commit the gate cannot place is stopped, and told how to name the repo', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING } })
+
+  const refused = await commit($, 'GIT_DIR=/other/.git git commit -m "x"')
+
+  expect(world.allowed).toBe(0)
+  expect(world.checks).toBe(0)
+  expect(refused).toBeDefined()
+  expect(refused).toContain("couldn't tell which git repository it lands in")
+  expect(refused).toContain('GIT_DIR')
+  expect(refused).toContain('git -C /path/to/repo commit')
+})
+
+test('git --git-dir with a separate value is seen as a commit', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING } })
+
+  const refused = await commit($, 'git --git-dir /other/.git commit -m "x"')
+
+  expect(world.allowed).toBe(0)
+  expect(refused).toBeDefined()
+  expect(refused).toContain('--git-dir')
+})
+
+test('a commit split across lines is still gated', async ($, on) => {
+  const world = repo(on)
+
+  const refused = await commit($, 'git -c a=b \\\n  commit -m "x"')
+
+  expect(world.allowed).toBe(0)
+  expect(world.checks).toBe(1)
+  expect(refused).toBeDefined()
+  expect(refused).toContain('checks fail in repo')
+})
+
+test('a commit at the start of a nested shell string is gated', async ($, on) => {
+  const world = repo(on)
+
+  const refused = await commit($, "bash -c 'git commit -m x'")
+
+  expect(world.allowed).toBe(0)
+  expect(world.checks).toBe(1)
+  expect(refused).toBeDefined()
+  expect(refused).toContain('checks fail in repo')
+})
+
+test('a commit whose message mentions --dry-run is gated', async ($, on) => {
+  const world = repo(on)
+
+  const refused = await commit($, 'git commit -m "add --dry-run flag"')
+
+  expect(world.allowed).toBe(0)
+  expect(world.checks).toBe(1)
+  expect(refused).toBeDefined()
+  expect(refused).toContain('checks fail in repo')
+})
+
+test('text around a commit never makes it a dry run', async ($, on) => {
+  const world = repo(on)
+  const commands = [
+    "bash -c 'true; git commit -m x'; echo 'see --dry-run here'",
+    `git commit -m "$(cat <<'EOF'\n1) see "a --dry-run b"\nEOF\n)"`,
+    'bash -c "git commit -m \\"a --dry-run b\\""',
+  ]
+
+  for (const command of commands) {
+    const refused = await commit($, command)
+    expect(refused).toBeDefined()
+    expect(refused).toContain('checks fail in repo')
+  }
+
+  expect(world.allowed).toBe(0)
+})
+
+test('a dry run is not gated', async ($, on) => {
+  const world = repo(on)
+
+  expect(await commit($, 'git commit -m x --dry-run')).toBeUndefined()
+
+  expect(world.allowed).toBe(1)
+  expect(world.checks).toBe(0)
+})
+
 const TURN_END = { answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as const
 
 const BAND = {
