@@ -272,15 +272,19 @@ export const register: Register = on => {
 
   // The gate. It fails closed: if the command's text doesn't settle the
   // commit's repo, git can't find it, or the gate itself breaks, the commit
-  // stops. That includes a folder outside any repo: rev-parse runs in the
-  // session's folder unless the command names one, and the Bash tool may have
-  // moved since, so "not a repo here" doesn't prove git would refuse the commit.
+  // stops. That includes a folder outside any repo: the command may move
+  // somewhere the gate can't read, so "not a repo here" doesn't prove git
+  // would refuse the commit.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     if (typeof e.command !== 'string') return next(e)
     const commit = findCommit(e.command)
     if (commit === undefined) return next(e)
     if (commit.unplaced !== undefined) return { deny: unplacedText(commit.unplaced) }
-    const found = await locateRepo($, commit.dir)
+    // A bare `git commit` lands in the Bash tool's folder. `$.session.cwd()`
+    // follows Bash's `cd` (`$.session.root()` doesn't), and so does
+    // process.run's default on 2.1.309. Naming the folder keeps the gate off
+    // that default.
+    const found = await locateRepo($, commit.dir ?? (await $.session.cwd()))
     if (!('root' in found)) return { deny: noRepoText(commit.dir, found.reason) }
     const { root } = found
     const command = await commandFor($, root)
