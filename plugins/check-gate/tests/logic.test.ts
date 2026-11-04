@@ -342,13 +342,12 @@ describe('findCommit', () => {
     expect(findCommit('git commit --dry-run')).toBeUndefined()
     expect(findCommit('git commit -m x --dry-run')).toBeUndefined()
     expect(findCommit('git commit "--dry-run"')).toBeUndefined()
-    expect(findCommit('git commit -m -m --dry-run')).toBeUndefined()
     expect(findCommit('git commit --dry-run >/dev/null 2>&1')).toBeUndefined()
     expect(findCommit('X=$(git commit --dry-run) && echo ok')).toBeUndefined()
     expect(findCommit("bash -c 'git commit --dry-run'")).toBeUndefined()
     expect(findCommit('bash -c "git commit -m x --dry-run" && echo ok')).toBeUndefined()
-    expect(findCommit('git commit -m "$MSG" --dry-run')).toBeUndefined()
     expect(findCommit('git commit --message=x --dry-run')).toBeUndefined()
+    expect(findCommit('git commit -q --dry-run')).toBeUndefined()
 
     // Part of a message, or a comment.
     expect(findCommit('git commit -m "add --dry-run flag"')).toEqual({})
@@ -367,6 +366,17 @@ describe('findCommit', () => {
     expect(findCommit('git commit --dry-run $FLAGS')).toEqual({})
     expect(findCommit('git commit --dry-run "$(echo --no-dry-run)"')).toEqual({})
     expect(findCommit('git commit --dry-run $(echo --no-dry-run)')).toEqual({})
+    // A long option before the abbreviated one can't take it as its value and free the next word.
+    expect(findCommit("git commit --allow-empty --mess '--dry-run'")).toEqual({})
+    expect(findCommit('git commit --allow-empty --message --dry-run')).toEqual({})
+    expect(findCommit('git commit --allow-empty -qm --dry-run')).toEqual({})
+    // An empty variable leaves `-m --dry-run`.
+    expect(findCommit('git commit -m $EMPTY --dry-run')).toEqual({})
+    expect(findCommit('git commit --trailer $EMPTY --dry-run')).toEqual({})
+    // In doubt it's gated, which only costs a check on what may be a real dry run.
+    expect(findCommit('git commit -m -m --dry-run')).toEqual({})
+    expect(findCommit('git commit --amend --dry-run')).toEqual({})
+    expect(findCommit('git commit -m "$MSG" --dry-run')).toEqual({})
     // Another command's argument, or a later commit.
     expect(findCommit('git commit -m x; echo --dry-run')).toEqual({})
     expect(findCommit('git commit --dry-run && git commit -m x')).toEqual({})

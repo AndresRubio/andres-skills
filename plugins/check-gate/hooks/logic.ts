@@ -537,20 +537,21 @@ function ownText(rest: string, closer: string | undefined): string {
 
 // Whether a commit's own arguments ask for a dry run. They end at the next operator
 // or with the string the commit sits in. A message, another option's value, a path
-// after the double dash and a comment don't count. A word that may be a value is
-// read as one, because that leaves the commit gated.
+// after the double dash and a comment don't count. Every doubt leaves the commit
+// gated, which only costs a check: `--dry-run` doesn't count after a word that might
+// take it as a value, even if that word might be a value itself, and a word the shell
+// fills in might be empty or `--no-dry-run`.
 function isDryRun(rest: string, closer: string | undefined): boolean {
   let isDry = false
-  let isValue = false
+  let previous = ''
   for (const token of lex(ownText(rest, closer), 'operator').tokens) {
     if ('op' in token) break
-    if (isValue) isValue = false
-    else if (token.text === '--') break
-    // The shell fills this in, so it could still be `--no-dry-run`.
-    else if (token.isDynamic) return false
-    else if (token.text === '--dry-run') isDry = true
-    else if (token.text.startsWith('--no-d')) isDry = false
-    else isValue = TAKES_VALUE.test(token.text)
+    if (token.isDynamic) return false
+    const mayBeValue = TAKES_VALUE.test(previous)
+    if (token.text === '--' && !mayBeValue) break
+    if (token.text.startsWith('--no-d')) isDry = false
+    else if (token.text === '--dry-run' && !mayBeValue) isDry = true
+    previous = token.text
   }
   return isDry
 }
