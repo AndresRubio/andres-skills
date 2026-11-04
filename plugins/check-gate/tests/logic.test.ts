@@ -62,6 +62,12 @@ describe('findCommit', () => {
     expect(findCommit('bash -c "cd /other" && git commit -m x')).toEqual({})
   })
 
+  test('reads a nested shell through its flags', async () => {
+    const shells = ['bash --norc -c', 'bash --noprofile --norc -c', 'bash -o pipefail -c', 'bash -eo pipefail -c', 'bash +x -c', 'bash --rcfile /x -c', 'bash -ce', 'bash -c -x', 'zsh -f -c']
+    for (const shell of shells) expect(findCommit(`${shell} 'cd /other && git commit -m x'`)).toEqual({ dir: '/other' })
+    expect(findCommit(`echo --norc -c 'cd /other && git commit -m x'`)).toEqual({})
+  })
+
   test('is not fooled by text that only looks like a move', async () => {
     expect(findCommit('# cd /other\ngit commit -m x')).toEqual({})
     expect(findCommit('echo "; cd /other" && git commit -m x')).toEqual({})
@@ -70,6 +76,76 @@ describe('findCommit', () => {
     expect(findCommit('git commit -F - <<EOF\nfix cd /other && git commit\nEOF')).toEqual({})
     expect(findCommit('git commit -m "cd /other; git commit"')).toEqual({})
     expect(findCommit('echo "run git commit later"')).toEqual({})
+  })
+
+  test('follows a commit inside a substitution in a string', async () => {
+    expect(findCommit('X="$(cd /other && git commit -m x)"')).toEqual({ dir: '/other' })
+    expect(findCommit('echo "$(cd /other && git commit -m x)"')).toEqual({ dir: '/other' })
+    expect(findCommit('echo "`cd /other && git commit -m x`"')).toEqual({ dir: '/other' })
+    expect(findCommit('echo "a $(echo b) $(cd /other && git commit -m x)"')).toEqual({ dir: '/other' })
+    expect(findCommit('cd /a; echo "$(cd b; git commit -m x)"')).toEqual({ dir: '/a/b' })
+    // The outer shell expands the substitution before the inner shell runs its cd.
+    expect(findCommit('bash -c "cd /a; $(git commit -m x)"')).toEqual({})
+    expect(findCommit('X="$(cd "$REPO" && git commit -m x)"')?.unplaced).toContain('cd $REPO')
+    // A closed substitution keeps its cd to itself, and plain text in a string stays a mention.
+    expect(findCommit('X="$(cd /other; pwd)"; git commit -m x')).toEqual({})
+    expect(findCommit('cd "$REPO" && echo "$(pwd) run git commit later"')).toEqual({})
+    expect(findCommit('cd "$REPO"; gh pr create --body "$(cat <<\'EOF\'\nrun git commit\nEOF\n)"')).toEqual({})
+  })
+
+  test('reads the quotes and heredocs inside a substitution', async () => {
+    const heredocs = [
+      `git commit -m "$(cat <<'EOF'\n1) see "a b"\nEOF\n)" && cd /other && git commit -m y`,
+      `git commit -m "$(cat <<'EOF'\nfix (foo\nEOF\n)" && cd /other && git commit -m y`,
+      `git commit -m "$(cat <<EOF\nit's\nEOF\n)" && cd /other && git commit -m y`,
+      `git commit -m "$(echo ')')" && cd /other && git commit -m y`,
+      `git commit -m "$(echo '(')" && cd /other && git commit -m y`,
+      `git commit -m "$(echo "a")" && cd /other && git commit -m y`,
+      `git commit -m "$(echo a # it's )\n)" && cd /other && git commit -m y`,
+      'git commit -m "`echo "a"`" && cd /other && git commit -m y',
+    ]
+    for (const command of heredocs) expect(findCommit(command)?.unplaced).toContain('different folders')
+    expect(findCommit(`echo "$(cat <<EOF\n)\nEOF\n)"; cd /other && git commit -m x`)).toEqual({ dir: '/other' })
+  })
+
+  test('is not fooled by arithmetic or an escape string', async () => {
+    expect(findCommit('x=$((1<<2))\ncd /other && git commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit('x=$(( (1<<2) * 3 ))\ncd /other && git commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit('((x=1<<2))\ncd /other && git commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit('echo "$((1<<2)) it\'s"\ncd /other && git commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit('for ((i=0;i<<1;i++)); do cd /other; git commit -m x; done')).toEqual({ dir: '/other' })
+    expect(findCommit("echo $'it\\'s'; cd /other && git commit -m x")).toEqual({ dir: '/other' })
+    expect(findCommit("bash -c $'cd /other; git commit -m x'")).toEqual({ dir: '/other' })
+    // Two subshells, not arithmetic.
+    expect(findCommit('((cd /a); cd /other && git commit -m x)')).toEqual({ dir: '/other' })
+    expect(findCommit("cd $'/a' && git commit -m x")?.unplaced).toContain('only the shell can work out')
+    expect(findCommit('cd $((1)) && git commit -m x')?.unplaced).toContain('only the shell can work out')
+  })
+
+  test('takes a quoted ~ as a folder called ~', async () => {
+    expect(findCommit('cd "~/a"; git commit -m x')).toEqual({ dir: './~/a' })
+    expect(findCommit("cd '~' && git commit -m x")).toEqual({ dir: './~' })
+    expect(findCommit('cd \\~/a && git commit -m x')).toEqual({ dir: './~/a' })
+    expect(findCommit('S="~/a"; cd "$S"; git commit -m x')).toEqual({ dir: './~/a' })
+    expect(findCommit('git -C "~/a" commit -m x')).toEqual({ dir: './~/a' })
+    expect(findCommit('S=~/a; cd "$S"; git commit -m x')).toEqual({ dir: '~/a' })
+  })
+
+  test('reads home from HOME', async () => {
+    expect(findCommit('HOME=/other; cd; git commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit('HOME=/other; cd ~/a; git commit -m x')).toEqual({ dir: '/other/a' })
+    expect(findCommit('export HOME=/other; git -C ~ commit -m x')).toEqual({ dir: '/other' })
+    // HOME is already exported, so a new value reaches an inner shell.
+    expect(findCommit("HOME=/other; bash -c 'cd; git commit -m x'")).toEqual({ dir: '/other' })
+    expect(findCommit('cd ~ && git commit -m x')).toEqual({ dir: '~' })
+  })
+
+  test('sees a commit inside a function, and moves it could not see', async () => {
+    expect(findCommit('f() { echo; }; git commit -m x')).toEqual({})
+    expect(findCommit('time -p cd /other && git commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit('env X=1 git commit -m x')).toEqual({})
+    expect(findCommit('CDPATH= cd /other && git commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit('f() { echo "run git commit later"; }')).toEqual({})
   })
 
   test('never refuses a commit that may only be a mention', async () => {
@@ -132,6 +208,20 @@ describe('findCommit', () => {
       ['eval "cd /a"; git commit -m x', 'eval'],
       ['eval "cd /a && git commit -m x"', 'eval'],
       ['command cd /a && git commit -m x', 'command cd'],
+      ['f() { git commit -m x; }; cd /a; f', 'function'],
+      ['function f { git commit -m x; }; cd /a; f', 'function'],
+      ['f() {\n  git commit -m x\n}\ncd /a\nf', 'function'],
+      ['env -C /a git commit -m x', 'env -C'],
+      ['env --chdir=/a git commit -m x', 'env -C'],
+      ['CDPATH=/x; cd a; git commit -m x', 'CDPATH'],
+      ['CDPATH=/x cd a && git commit -m x', 'CDPATH'],
+      ['export CDPATH=/x; cd a && git commit -m x', 'CDPATH'],
+      ['S=/a; printf -v S %s /b; cd "$S" && git commit -m x', 'cd $S'],
+      ['S=/a; getopts o S; cd "$S" && git commit -m x', 'cd $S'],
+      ['unset HOME; cd; git commit -m x', 'only the shell can work out'],
+      ['unset HOME; cd ~/a; git commit -m x', 'only the shell can work out'],
+      ['true && HOME=/a; cd; git commit -m x', 'only the shell can work out'],
+      ['HOME=/other cd; git commit -m x', 'only the shell can work out'],
       ['cd /a && git commit -m x; cd /b && git commit -m y', 'different folders'],
     ]
     for (const [command, reason] of cases) {
