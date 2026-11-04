@@ -141,6 +141,18 @@ describe('findCommit', () => {
     expect(findCommit('echo "run git commit later"')).toEqual({})
   })
 
+  test('keeps reading a list past a newline after an operator', async () => {
+    expect(findCommit('mkdir -p /a && cd /a &&\ngit commit -m x')).toEqual({ dir: '/a' })
+    expect(findCommit('true && cd /a &&\n\n  git commit -m x')).toEqual({ dir: '/a' })
+    expect(findCommit('true && cd /a && # why\ngit commit -m x')).toEqual({ dir: '/a' })
+    expect(findCommit('cd /a &&\ngit commit -m x')).toEqual({ dir: '/a' })
+    expect(findCommit('git add . &&\ngit commit -m x')).toEqual({})
+    expect(findCommit('cd /a ||\nexit 1\ngit commit -m x')).toEqual({ dir: '/a' })
+    // A heredoc's body still starts after that newline.
+    expect(findCommit(`cat <<EOF &&\nit's\nEOF\ngit commit -m x`)).toEqual({})
+    expect(findCommit(`true && cat <<EOF &&\nit's\nEOF\ncd /a &&\ngit commit -m x`)).toEqual({ dir: '/a' })
+  })
+
   test('follows a commit inside a substitution in a string', async () => {
     expect(findCommit('X="$(cd /other && git commit -m x)"')).toEqual({ dir: '/other' })
     expect(findCommit('echo "$(cd /other && git commit -m x)"')).toEqual({ dir: '/other' })
@@ -208,7 +220,7 @@ describe('findCommit', () => {
     // Empty parentheses that define nothing.
     expect(findCommit('x=(); if true; then git commit -m x; fi')).toEqual({})
     expect(findCommit('echo $(); { git commit -m x; }')).toEqual({})
-    expect(findCommit('time -p cd /other && git commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit('time -p git commit -m x')).toEqual({})
     expect(findCommit('env X=1 git commit -m x')).toEqual({})
     expect(findCommit('CDPATH= cd /other && git commit -m x')).toEqual({ dir: '/other' })
     expect(findCommit('f() { echo "run git commit later"; }')).toEqual({})
@@ -277,6 +289,14 @@ describe('findCommit', () => {
       ['f() { git commit -m x; }; cd /a; f', 'function'],
       ['function f { git commit -m x; }; cd /a; f', 'function'],
       ['f() {\n  git commit -m x\n}\ncd /a\nf', 'function'],
+      ['false &&\ncd /a; git commit -m x', 'may not run'],
+      ['true ||\ncd /a; git commit -m x', 'may not run'],
+      ['true |\ncd /a; git commit -m x', 'may not run'],
+      ['true && # why\ncd /a; git commit -m x', 'may not run'],
+      ['chdir /a; git commit -m x', 'chdir'],
+      ['chdir /a && git commit -m x', 'chdir'],
+      ['time -p cd /a; git commit -m x', 'time -p'],
+      ['time -p cd /a && git commit -m x', 'time -p'],
       ['env -C /a git commit -m x', 'env -C'],
       ['env --chdir=/a git commit -m x', 'env -C'],
       ['CDPATH=/x; cd a; git commit -m x', 'CDPATH'],

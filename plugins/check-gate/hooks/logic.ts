@@ -54,6 +54,8 @@ type Word = { text: string; isDynamic: boolean; hasBareVariable: boolean }
 type Token = Word | { op: string }
 
 const OPERATOR = /^(?:;;&|;;|;&|&&|\|\||\|&|[;&|()\n])/
+// After these the list goes on past a newline.
+const CONTINUES_LIST = new Set(['&&', '||', '|', '|&'])
 const REDIRECT = /^(?:&>>?|\d*(?:>>|>&|<&|<>|>\||>|<<<|<<-?|<))/
 
 // `((...))` with at most one level of parentheses inside. Each `(` reads one way, so
@@ -168,7 +170,8 @@ function lex(text: string, stopAt?: 'operator' | 'paren'): { tokens: Token[]; op
   while (i < text.length) {
     const c = text.charAt(i)
     if (c === '\n') {
-      tokens.push({ op: '\n' })
+      const last = tokens.at(-1)
+      if (last === undefined || !('op' in last) || !CONTINUES_LIST.has(last.op)) tokens.push({ op: '\n' })
       if (stopAt === 'operator') return { tokens }
       i = afterHeredocs(text, i, heredocs)
       if (i === -1) return { tokens, inHeredoc: true }
@@ -237,7 +240,7 @@ type Place = {
 }
 
 const BEFORE_COMMAND = new Set(['then', 'do', '!', 'time', 'builtin'])
-const MOVES = new Set(['cd', 'chdir', 'pushd', 'popd'])
+const MOVES = new Set(['cd', 'pushd', 'popd'])
 const BLOCK_OPEN = new Set(['if', 'while', 'until', '{'])
 const BLOCK_OPEN_WITH_ARGS = new Set(['for', 'case', 'select'])
 const BLOCK_BRANCH = new Set(['else', 'elif'])
@@ -326,6 +329,7 @@ function runCommand(place: Place, words: readonly Word[], connector: string | un
     next !== '&' &&
     next !== '|' &&
     next !== '|&'
+  let isTimeP = false
   let i = 0
   for (; i < words.length; i++) {
     const text = words[i]?.text ?? ''
@@ -333,8 +337,10 @@ function runCommand(place: Place, words: readonly Word[], connector: string | un
     if (text === 'function') {
       place.definesFunction = true
       i += 1
-    } else if (text === 'time' && words[i + 1]?.text === '-p') i += 1
-    else if (BLOCK_OPEN.has(text)) place.blocks.push(false)
+    } else if (text === 'time' && words[i + 1]?.text === '-p') {
+      isTimeP = true
+      i += 1
+    } else if (BLOCK_OPEN.has(text)) place.blocks.push(false)
     else if (BLOCK_OPEN_WITH_ARGS.has(text)) {
       place.blocks.push(false)
       place.vars.delete(words[i + 1]?.text ?? '')
@@ -361,9 +367,13 @@ function runCommand(place: Place, words: readonly Word[], connector: string | un
   if (name === 'env' && args.some(arg => /^(?:-C|--chdir)/.test(arg.text))) place.unplaced ??= 'env -C, which moves the folder out of sight'
   // bash runs its own cd here, and zsh looks for a program called cd.
   if (name === 'command' && MOVES.has(args[0]?.text ?? '')) place.unplaced ??= 'command cd, which bash and zsh read differently'
+  // Only zsh has chdir.
+  if (name === 'chdir') place.unplaced ??= 'chdir, which bash and zsh read differently'
   const couldFail = place.chainCanFail
   place.chainCanFail = true
   if (!MOVES.has(name)) return false
+  // bash times the cd, and zsh looks for a program called -p.
+  if (isTimeP) place.unplaced ??= 'time -p cd, which bash and zsh read differently'
   if (connector === '||' || connector === '|' || connector === '|&') place.unplaced ??= 'a cd that may not run'
   if (connector === '&&' && couldFail) place.isGuarded = true
   if (words.slice(0, i).some(word => word.text.startsWith('HOME='))) place.unplaced ??= shellOnly(`${name} with HOME set in front of it`)
