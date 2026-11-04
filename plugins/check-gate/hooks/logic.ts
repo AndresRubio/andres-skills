@@ -30,8 +30,12 @@ EOF
 // One shell word: plain characters, backslash escapes and quoted runs.
 const WORD = String.raw`(?:[^\s"'\;&|()]|\\.|"[^"]*"|'[^']*')+`
 const GIT_OPTION = String.raw`(?:-[Cc]\s+${WORD}|--(?:git-dir|work-tree|namespace|super-prefix|config-env)\s+${WORD}|--[A-Za-z][\w-]*(?:=${WORD})?|-[A-Za-z]+)`
+// A shell that runs the string after it, up to where that string opens.
+const NESTED_SHELL_START = String.raw`(?:^|[\s;&|("'/])(?:(?:ba|z|da|k)?sh(?:\s+-\w+)*\s+-\w*c|eval)\s*`
+// A quote before `git` counts only when it opens a string a shell will run.
+// Checked inside the match, so other quoted text can't hide a later commit.
 const GIT_COMMIT = new RegExp(
-  String.raw`(?:^|[\s;&|(\x60/])git((?:\s+${GIT_OPTION})*)\s+commit(?![\w-])`,
+  String.raw`(?:^|[\s;&|(\x60/]|(?<=${NESTED_SHELL_START})['"])git((?:\s+${GIT_OPTION})*)\s+commit(?![\w-])`,
   'g',
 )
 
@@ -181,7 +185,7 @@ const BLOCK_OPEN_WITH_ARGS = new Set(['for', 'case', 'select'])
 const BLOCK_BRANCH = new Set(['else', 'elif'])
 const BLOCK_CLOSE = new Set(['fi', 'done', 'esac', '}'])
 const REPO_VARIABLE = /^(?:GIT_DIR|GIT_WORK_TREE)=/
-const NESTED_SHELL = /(?:^|[\s;&|(/])(?:(?:ba|z|da|k)?sh(?:\s+-\w+)*\s+-\w*c|eval)\s*$/
+const NESTED_SHELL = new RegExp(`${NESTED_SHELL_START}$`)
 const ASSIGNMENT = /^([A-Za-z_]\w*)(\+?)=([\s\S]*)$/
 const DECLARES = new Set(['export', 'declare', 'typeset', 'readonly'])
 // `local` outside a function fails in bash and works in zsh, so what it sets depends on the shell.
@@ -432,6 +436,28 @@ function joinContinuedLines(text: string): { joined: string; splitsOperator: boo
   return { joined: out, splitsOperator }
 }
 
+const TAKES_VALUE = /^(?:-[a-zA-Z]*[mFCct]|--(?:message|file|author|date|template|reuse-message|reedit-message|fixup|squash|trailer|cleanup|pathspec-from-file))$/
+
+// Whether a commit's own arguments ask for a dry run. They end at the next
+// operator, or at the quote that closes the string the commit sits in. A message,
+// another option's value, a path after the double dash and a comment don't count.
+// A word that may be a value is read as one, because that leaves the commit gated.
+function isDryRun(rest: string): boolean {
+  const { tokens, openQuote } = lex(rest)
+  const args = openQuote === undefined ? tokens : lex(rest.slice(0, openQuote)).tokens
+  let isDry = false
+  let isValue = false
+  for (const token of args) {
+    if ('op' in token) break
+    if (isValue) isValue = false
+    else if (token.text === '--') break
+    else if (token.text === '--dry-run') isDry = true
+    else if (token.text === '--no-dry-run') isDry = false
+    else isValue = TAKES_VALUE.test(token.text)
+  }
+  return isDry
+}
+
 // Finds a `git commit` in a Bash command and the folder it lands in, following
 // `git -C`, `cd`, `pushd`, variables the command sets, subshells, if blocks and
 // `bash -c` strings. A `--dry-run` commit is no commit. When the text can't say
@@ -447,8 +473,7 @@ export function findCommit(command: string): CommitTarget | undefined {
   let mention: CommitTarget | undefined
   for (const match of text.matchAll(GIT_COMMIT)) {
     const start = match.index ?? 0
-    const segment = text.slice(start + match[0].length).split(/[;&|\n]/, 1)[0] ?? ''
-    if (/(?:^|\s)--dry-run(?=\s|$)/.test(segment)) continue
+    if (isDryRun(text.slice(start + match[0].length))) continue
 
     // The match opens with the character before `git`, unless it starts the command.
     const before = match[0].startsWith('git') ? '' : text.slice(0, start + 1)

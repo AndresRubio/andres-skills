@@ -205,6 +205,50 @@ describe('findCommit', () => {
     }
   })
 
+  test('sees a commit at the very start of a nested shell string', async () => {
+    expect(findCommit("bash -c 'git commit -m x'")).toEqual({})
+    expect(findCommit('bash -c "git commit -m x"')).toEqual({})
+    expect(findCommit("sh -lc 'git -c a.b=c commit -m x'")).toEqual({})
+    expect(findCommit("/bin/zsh -c 'git commit -m x'")).toEqual({})
+    expect(findCommit("cd /other && bash -c 'git commit -m x'")).toEqual({ dir: '/other' })
+    expect(findCommit(`bash -c "bash -c 'git commit -m x'"`)).toEqual({})
+    expect(findCommit("bash -c 'git \\\n  commit -m x'")).toEqual({})
+    expect(findCommit("eval 'git commit -m x'")?.unplaced).toContain('eval')
+    // A quoted string anywhere else is only text.
+    expect(findCommit('echo "git commit -m x"')).toBeUndefined()
+    expect(findCommit("grep -n 'git commit' README.md")).toBeUndefined()
+    expect(findCommit('gh pr create --title "git commit fix"')).toBeUndefined()
+    // That text mustn't hide what comes after it in the same string, or after the string.
+    expect(findCommit("grep -c 'git -c a\\|git commit' f")).toEqual({})
+    expect(findCommit("echo 'git -c a' && git commit -m x")).toEqual({})
+  })
+
+  test('takes only a real --dry-run for a dry run', async () => {
+    expect(findCommit('git commit --dry-run')).toBeUndefined()
+    expect(findCommit('git commit -m x --dry-run')).toBeUndefined()
+    expect(findCommit('git commit "--dry-run"')).toBeUndefined()
+    expect(findCommit('git commit -m -m --dry-run')).toBeUndefined()
+    expect(findCommit('git commit --dry-run >/dev/null 2>&1')).toBeUndefined()
+    expect(findCommit('X=$(git commit --dry-run) && echo ok')).toBeUndefined()
+    expect(findCommit("bash -c 'git commit --dry-run'")).toBeUndefined()
+    expect(findCommit('bash -c "git commit -m x --dry-run" && echo ok')).toBeUndefined()
+
+    // Part of a message, or a comment.
+    expect(findCommit('git commit -m "add --dry-run flag"')).toEqual({})
+    expect(findCommit("git commit -m 'note --dry-run here' && echo done")).toEqual({})
+    expect(findCommit(`bash -c "git commit -m 'x --dry-run'"`)).toEqual({})
+    expect(findCommit('git commit -m x # --dry-run')).toEqual({})
+    // An option's value, a path, or switched back off.
+    expect(findCommit('git commit -m --dry-run')).toEqual({})
+    expect(findCommit('git commit -am --dry-run')).toEqual({})
+    expect(findCommit('git commit --message --dry-run')).toEqual({})
+    expect(findCommit('git commit -m x -- --dry-run')).toEqual({})
+    expect(findCommit('git commit -m x --dry-run --no-dry-run')).toEqual({})
+    // Another command's argument, or a later commit.
+    expect(findCommit('git commit -m x; echo --dry-run')).toEqual({})
+    expect(findCommit('git commit --dry-run && git commit -m x')).toEqual({})
+  })
+
   test('ignores what is not a commit', async () => {
     expect(findCommit('git status')).toBeUndefined()
     expect(findCommit('git log --grep commit')).toBeUndefined()

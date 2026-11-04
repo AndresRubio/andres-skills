@@ -295,6 +295,37 @@ test('a commit split across lines is still gated', async ($, on) => {
   expect(refused).toContain('checks fail in repo')
 })
 
+test('a commit at the start of a nested shell string is gated', async ($, on) => {
+  const world = repo(on)
+
+  const refused = await commit($, "bash -c 'git commit -m x'")
+
+  expect(world.allowed).toBe(0)
+  expect(world.checks).toBe(1)
+  expect(refused).toBeDefined()
+  expect(refused).toContain('checks fail in repo')
+})
+
+test('a commit whose message mentions --dry-run is gated', async ($, on) => {
+  const world = repo(on)
+
+  const refused = await commit($, 'git commit -m "add --dry-run flag"')
+
+  expect(world.allowed).toBe(0)
+  expect(world.checks).toBe(1)
+  expect(refused).toBeDefined()
+  expect(refused).toContain('checks fail in repo')
+})
+
+test('a dry run is not gated', async ($, on) => {
+  const world = repo(on)
+
+  expect(await commit($, 'git commit -m x --dry-run')).toBeUndefined()
+
+  expect(world.allowed).toBe(1)
+  expect(world.checks).toBe(0)
+})
+
 const TURN_END = { answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as const
 
 const BAND = {
