@@ -205,6 +205,9 @@ describe('findCommit', () => {
 
   test('sees a commit inside a function, and moves it could not see', async () => {
     expect(findCommit('f() { echo; }; git commit -m x')).toEqual({})
+    // Empty parentheses that define nothing.
+    expect(findCommit('x=(); if true; then git commit -m x; fi')).toEqual({})
+    expect(findCommit('echo $(); { git commit -m x; }')).toEqual({})
     expect(findCommit('time -p cd /other && git commit -m x')).toEqual({ dir: '/other' })
     expect(findCommit('env X=1 git commit -m x')).toEqual({})
     expect(findCommit('CDPATH= cd /other && git commit -m x')).toEqual({ dir: '/other' })
