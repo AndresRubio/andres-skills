@@ -17,7 +17,129 @@ describe('findCommit', () => {
     expect(findCommit('git -C ../evals commit -m x')).toEqual({ dir: '../evals' })
     expect(findCommit('git -C "/a b/c" commit')).toEqual({ dir: '/a b/c' })
     expect(findCommit('cd evals && git add . && git commit -m x')).toEqual({ dir: 'evals' })
-    expect(findCommit("cd '/x y' ; cd z && git commit")).toEqual({ dir: 'z' })
+    expect(findCommit("cd '/x y' ; cd z && git commit")).toEqual({ dir: '/x y/z' })
+  })
+
+  test('follows the folder through the command', async () => {
+    expect(findCommit('cd /a && cd b && git commit -m x')).toEqual({ dir: '/a/b' })
+    expect(findCommit('cd /a && git -C b commit -m x')).toEqual({ dir: '/a/b' })
+    expect(findCommit('git -C /a -C b commit -m x')).toEqual({ dir: '/a/b' })
+    expect(findCommit('cd ~/a && cd b && git commit -m x')).toEqual({ dir: '~/a/b' })
+    expect(findCommit('cd && git commit -m x')).toEqual({ dir: '~' })
+    expect(findCommit('pushd /other && git commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit('cd /other || exit 1\ngit commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit('cd /other; git add .; git commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit('git add . && cd /other && git commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit('cd /other >/dev/null 2>&1 && git commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit('builtin cd /other && git commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit('S=/other && cd /a; git commit -m x')).toEqual({ dir: '/a' })
+    expect(findCommit('env cd /other && git commit -m x')).toEqual({})
+    expect(findCommit('git commit -m a && git commit --amend --no-edit')).toEqual({})
+  })
+
+  test('fills in variables the command sets', async () => {
+    expect(findCommit('S=/other; cd $S && git commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit('S=/other; cd "$S/sub" && git commit -m x')).toEqual({ dir: '/other/sub' })
+    expect(findCommit('S=/a && T=$S/b && cd "${T}" && git commit -m x')).toEqual({ dir: '/a/b' })
+    expect(findCommit('export S=/other; cd $S && git commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit('S=/other; git -C $S commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit('cd $HOME/a && git commit -m x')).toEqual({ dir: '~/a' })
+    expect(findCommit('S="/a b"; cd "$S" && git commit -m x')).toEqual({ dir: '/a b' })
+    expect(findCommit('S=/a; (S=/b); cd $S && git commit -m x')).toEqual({ dir: '/a' })
+    expect(findCommit(`S=/a; bash -c "cd $S && git commit -m x"`)).toEqual({ dir: '/a' })
+    expect(findCommit("cd '$S' && git commit -m x")).toEqual({ dir: '$S' })
+  })
+
+  test('reads a cd in a condition, a subshell or a nested shell', async () => {
+    expect(findCommit('if cd /other; then git commit -m x; fi')).toEqual({ dir: '/other' })
+    expect(findCommit('if true; then cd /other; git commit -m x; fi')).toEqual({ dir: '/other' })
+    expect(findCommit('{ cd /other; git commit -m x; }')).toEqual({ dir: '/other' })
+    expect(findCommit('(cd /other && git commit -m x)')).toEqual({ dir: '/other' })
+    expect(findCommit('(cd /other && git status) && git commit -m x')).toEqual({})
+    expect(findCommit('X=$(cd /other && pwd) && git commit -m x')).toEqual({})
+    expect(findCommit('bash -c "cd /other && git commit -m x"')).toEqual({ dir: '/other' })
+    expect(findCommit("sh -lc 'git add . ; git commit -m x'")).toEqual({})
+    expect(findCommit('bash -c "cd /other" && git commit -m x')).toEqual({})
+  })
+
+  test('is not fooled by text that only looks like a move', async () => {
+    expect(findCommit('# cd /other\ngit commit -m x')).toEqual({})
+    expect(findCommit('echo "; cd /other" && git commit -m x')).toEqual({})
+    expect(findCommit("echo 'cd /other; x'; git commit -m x")).toEqual({})
+    expect(findCommit("cat > f <<'EOF'\ncd /other\nEOF\ngit commit -m x")).toEqual({})
+    expect(findCommit('git commit -F - <<EOF\nfix cd /other && git commit\nEOF')).toEqual({})
+    expect(findCommit('git commit -m "cd /other; git commit"')).toEqual({})
+    expect(findCommit('echo "run git commit later"')).toEqual({})
+  })
+
+  test('never refuses a commit that may only be a mention', async () => {
+    expect(findCommit('cd "$REPO" && echo "run git commit later"')).toEqual({})
+    expect(findCommit('GIT_DIR=/x echo "run git commit later"')).toEqual({})
+    expect(findCommit('cd "$REPO"; cat > f <<EOF\nrun git commit later\nEOF')).toEqual({})
+    expect(findCommit('git commit -m x; cd /b; echo "run git commit later"')).toEqual({})
+    expect(findCommit('cd /b; echo "run git commit later"')).toEqual({ dir: '/b' })
+  })
+
+  test('refuses a commit it cannot place, and says why', async () => {
+    const cases: readonly (readonly [string, string])[] = [
+      ['GIT_DIR=/other/.git git commit -m x', 'GIT_DIR'],
+      ['env GIT_WORK_TREE=/other git commit -m x', 'GIT_WORK_TREE'],
+      ['export GIT_DIR=/other/.git; git commit -m x', 'GIT_DIR'],
+      ['git --git-dir=/other/.git --work-tree=/other commit -m x', '--git-dir'],
+      ['git --git-dir /other/.git commit -m x', '--git-dir'],
+      ['git --work-tree /other commit -m x', '--work-tree'],
+      ['cd "$REPO" && git commit -m x', 'cd $REPO'],
+      ['S=$(mktemp -d); cd $S && git commit -m x', 'cd $S'],
+      ['S=/a; unset S; cd $S && git commit -m x', 'cd $S'],
+      ['local S=/a; cd $S && git commit -m x', 'cd $S'],
+      ['S=/a; local S=/b; cd $S && git commit -m x', 'cd $S'],
+      ['local GIT_DIR=/other/.git; git commit -m x', 'GIT_DIR'],
+      ['S=/a; S+=/b; cd $S && git commit -m x', 'cd $S'],
+      ['(S=/a); cd $S && git commit -m x', 'cd $S'],
+      ['S=/a cd $S && git commit -m x', 'cd $S'],
+      ['S=/a & cd $S && git commit -m x', 'cd $S'],
+      ['true && S=/a; cd $S && git commit -m x', 'cd $S'],
+      ['if true; then S=/a; fi; cd $S && git commit -m x', 'cd $S'],
+      ['S=/a; for S in /b; do cd $S; git commit -m x; done', 'cd $S'],
+      ['S="/a b"; cd $S && git commit -m x', 'cd $S'],
+      ['S=/a; bash -c \'cd $S && git commit -m x\'', 'cd $S'],
+      ['cd $(git rev-parse --show-toplevel) && git commit -m x', 'only the shell can work out'],
+      ['cd /a/* && git commit -m x', 'only the shell can work out'],
+      ['cd ~other/a && git commit -m x', 'only the shell can work out'],
+      ['cd -P /a && git commit -m x', 'only the shell can work out'],
+      ['cd /a /b && git commit -m x', 'only the shell can work out'],
+      ['git -C "$REPO" commit -m x', 'git -C $REPO'],
+      ['cd - && git commit -m x', 'cd -'],
+      ['cd /a && cd - && git commit -m x', 'cd -'],
+      ['popd && git commit -m x', 'popd'],
+      ['pushd /a && popd && git commit -m x', 'popd'],
+      ['pushd && git commit -m x', 'pushd'],
+      ['[ -d a ] && cd a; git commit -m x', 'may not run'],
+      ['true || cd a; git commit -m x', 'may not run'],
+      ['cd /a || cd /b; git commit -m x', 'may not run'],
+      ['cat f | cd /a; git commit -m x', 'may not run'],
+      ['cd /a && cd b; git commit -m x', 'may not run'],
+      ['cd /missing && cd /other\ngit commit -m x', 'may not run'],
+      ['if true; then cd /a; fi; git commit -m x', 'ended before the commit'],
+      ['if true; then cd /a; else git commit -m x; fi', 'ended before the commit'],
+      ['for d in a; do cd /a; done; git commit -m x', 'ended before the commit'],
+      ['case x in x) cd /a;; esac; git commit -m x', 'ended before the commit'],
+      ['cd /a | cat; git commit -m x', 'pipeline or the background'],
+      ['cd /a & git commit -m x', 'pipeline or the background'],
+      ['cd /a && true & git commit -m x', 'pipeline or the background'],
+      ['{ cd /a; } | cat; git commit -m x', 'ended before the commit'],
+      ['function f { cd /a; }; f; git commit -m x', 'ended before the commit'],
+      ['eval "cd /a"; git commit -m x', 'eval'],
+      ['eval "cd /a && git commit -m x"', 'eval'],
+      ['command cd /a && git commit -m x', 'command cd'],
+      ['cd /a && git commit -m x; cd /b && git commit -m y', 'different folders'],
+    ]
+    for (const [command, reason] of cases) {
+      const found = findCommit(command)
+      expect(found).toBeDefined()
+      expect(found?.dir).toBeUndefined()
+      expect(found?.unplaced).toContain(reason)
+    }
   })
 
   test('ignores what is not a commit', async () => {

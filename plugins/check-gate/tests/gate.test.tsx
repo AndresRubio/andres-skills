@@ -29,13 +29,15 @@ type World = {
   // What `git rev-parse --show-toplevel` does: finds /repo, exits 128, or never starts.
   revParse: 'found' | 'not a repo' | 'cannot start'
   checks: number
+  // The folder each inline check ran in.
+  checkedIn: (string | undefined)[]
   spawns: number
   allowed: number
   clock: ReturnType<typeof mock.clock>
 }
 
-// Stands for the engine and a repo at /repo: git, the check script and the
-// tool beneath the plugin.
+// Stands for the engine, a repo at /repo and a second one at /other whose
+// check always fails: git, the check script and the tool beneath the plugin.
 function repo(on: On, overrides: Partial<World> = {}): World {
   const clock = mock.clock(on, { now: 1_000 })
   const world: World = {
@@ -45,6 +47,7 @@ function repo(on: On, overrides: Partial<World> = {}): World {
     isGitBroken: false,
     revParse: 'found',
     checks: 0,
+    checkedIn: [],
     spawns: 0,
     allowed: 0,
     clock,
@@ -65,19 +68,24 @@ function repo(on: On, overrides: Partial<World> = {}): World {
     yield { stream: 'stdout' as const, text: check.stdout.slice(17) }
     return { value: { code: check.exitCode, signal: null } }
   })
-  on('fs.exists', (_, e) => ({ value: world.hasCheckScript && e.path === '/repo/scripts/check.sh' }))
+  on('fs.exists', (_, e) => ({
+    value: world.hasCheckScript && ['/repo/scripts/check.sh', '/other/scripts/check.sh'].includes(e.path),
+  }))
   on('process.run', (_, e) => {
     const argv = e.argv.join(' ')
     if (e.argv[0] === '/bin/sh' && e.argv[2]?.includes('"$HOME"')) return ok('/bin/zsh\n/Users/me')
     if (argv === 'git rev-parse --show-toplevel') {
       if (world.revParse === 'cannot start') return { deny: 'spawn git ENOENT' }
-      return world.revParse === 'not a repo' ? ok('', 128, NOT_A_REPO) : ok('/repo\n')
+      if (world.revParse === 'not a repo') return ok('', 128, NOT_A_REPO)
+      return ok(e.init?.cwd?.startsWith('/other') ? '/other\n' : '/repo\n')
     }
     if (argv === `/bin/sh -c ${FINGERPRINT}`) {
       return world.isGitBroken ? { deny: 'git is gone' } : ok(`${world.tree}\n`)
     }
     if (argv === CHECK.join(' ')) {
       world.checks += 1
+      world.checkedIn.push(e.init?.cwd)
+      if (e.init?.cwd === '/other') return ok(FAILING, 1)
       if (world.check === 'cannot start') return { deny: 'spawn /bin/zsh ENOENT' }
       return ok(world.check.stdout, world.check.exitCode)
     }
@@ -229,6 +237,51 @@ test('a git that cannot start stops the commit', async ($, on) => {
   expect(refused).toContain("couldn't tell which git repository")
   expect(refused).toContain("in the session's folder failed")
   expect(refused).toContain('ENOENT')
+})
+
+test('a commit the command moves to another repo is gated by that repo', async ($, on) => {
+  // /repo's check passes and /other's fails, so the wrong repo's check would let these through.
+  const commands = [
+    'pushd /other && git commit -m "x"',
+    'if cd /other; then git commit -m "x"; fi',
+    'cd /other && cd sub && git commit -m "x"',
+    'S=/other; cd "$S" && git commit -m "x"',
+    'bash -c "cd /other && git commit -m x"',
+  ]
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING } })
+
+  for (const command of commands) {
+    const refused = await commit($, command)
+    expect(refused).toBeDefined()
+    expect(refused).toContain('checks fail in other')
+  }
+
+  expect(world.allowed).toBe(0)
+  // The first run's result is reused for the same repo and tree.
+  expect(world.checkedIn).toEqual(['/other'])
+})
+
+test('a commit the gate cannot place is stopped, and told how to name the repo', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING } })
+
+  const refused = await commit($, 'GIT_DIR=/other/.git git commit -m "x"')
+
+  expect(world.allowed).toBe(0)
+  expect(world.checks).toBe(0)
+  expect(refused).toBeDefined()
+  expect(refused).toContain("couldn't tell which git repository it lands in")
+  expect(refused).toContain('GIT_DIR')
+  expect(refused).toContain('git -C /path/to/repo commit')
+})
+
+test('git --git-dir with a separate value is seen as a commit', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING } })
+
+  const refused = await commit($, 'git --git-dir /other/.git commit -m "x"')
+
+  expect(world.allowed).toBe(0)
+  expect(refused).toBeDefined()
+  expect(refused).toContain('--git-dir')
 })
 
 const TURN_END = { answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as const
