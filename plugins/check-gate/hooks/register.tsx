@@ -15,6 +15,7 @@ import {
   noRepoText,
   outerScript,
   summary,
+  unplacedText,
 } from './logic'
 
 type Engine = EngineInterface
@@ -269,15 +270,16 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // The gate. It fails closed: if it can't find the commit's repo, or the
-  // gate itself breaks, the commit stops. That includes a folder outside any
-  // repo: rev-parse runs in the session's folder unless the command names
-  // one, and the Bash tool may have moved since, so "not a repo here" doesn't
-  // prove git would refuse the commit.
+  // The gate. It fails closed: if the command's text doesn't settle the
+  // commit's repo, git can't find it, or the gate itself breaks, the commit
+  // stops. That includes a folder outside any repo: rev-parse runs in the
+  // session's folder unless the command names one, and the Bash tool may have
+  // moved since, so "not a repo here" doesn't prove git would refuse the commit.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     if (typeof e.command !== 'string') return next(e)
     const commit = findCommit(e.command)
     if (commit === undefined) return next(e)
+    if (commit.unplaced !== undefined) return { deny: unplacedText(commit.unplaced) }
     const found = await locateRepo($, commit.dir)
     if (!('root' in found)) return { deny: noRepoText(commit.dir, found.reason) }
     const { root } = found
