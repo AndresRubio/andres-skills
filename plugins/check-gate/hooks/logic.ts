@@ -793,7 +793,7 @@ export function denyText(run: Run): string {
   return [
     `Check gate: this commit was stopped because the checks fail in ${run.repo}.`,
     `Command: ${run.command} (exit ${run.exitCode ?? '?'})${failed.length ? `. Failed: ${failed.join(', ')}` : ''}.`,
-    'Fix the failures, then commit again. The gate reruns the checks on the next commit attempt once the code has changed.',
+    'Fix the failures, then commit again. Once the code has changed, the next commit attempt starts the checks again in the background and is refused until they pass.',
     '',
     'Last lines of the output:',
     run.tail || '(no output)',
@@ -823,7 +823,7 @@ export function pendingText(run: Run, isNew: boolean): string {
   return [
     `Check gate: this commit was stopped because the checks in ${run.repo} have no result for this tree yet.`,
     `${isNew ? 'They are running now' : 'They are still running'} in the background: ${run.command}.`,
-    'The band above the prompt follows them, and this session gets a message when they finish; commit again then.',
+    "The band above the prompt follows them, and the session's main conversation gets a message when they finish; commit again then. A subagent reports this refusal and stops.",
     `Do not start the checks yourself, and do not edit files in ${run.repo} until they report: a changed tree needs its own run.`,
   ].join('\n')
 }

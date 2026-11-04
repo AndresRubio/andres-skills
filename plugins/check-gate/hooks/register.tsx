@@ -34,8 +34,9 @@ const COLOR = {
   error: 'warning',
 } as const
 
-// Checks running after a turn, one per repo root.
-const background = new Map<string, { tree: string; stop: () => void }>()
+// Checks running in the background, one per repo root. `owed`: a commit was
+// refused while this run goes on, so its end is reported to the model.
+const background = new Map<string, { tree: string; owed: boolean; stop: () => void }>()
 // Folders of the files edited since the last turn ended.
 const touched = new Set<string>()
 let host: { shell: string; home: string } | undefined
@@ -141,17 +142,24 @@ const stopBackground = (root: string) => {
   background.delete(root)
 }
 
-// A run a commit started reports back when it ends, as a prompt of the
+// A run a commit was refused on reports back when it ends, as a prompt of the
 // plugin's that takes a turn of its own once the session is idle, so the model
-// learns the outcome without polling. A dropped prompt is logged.
+// learns the outcome without polling. A prompt the engine drops is toasted
+// instead, so the person sees what the model is waiting for.
 const tellSession = async ($: Engine, run: Run) => {
-  const entered = await $.prompt.submit({ text: reportText(run) })
-  if (entered.drop !== undefined) $.ui.log(`check-gate: the report was dropped: ${entered.drop}`, { to: 'debug' })
+  const text = reportText(run)
+  const entered = await $.prompt.submit({ text })
+  if (entered.drop !== undefined) {
+    $.ui.toast(text)
+    $.ui.log(`check-gate: the report was dropped: ${entered.drop}`, { to: 'debug' })
+  }
 }
 
 // Streams the check in the background, the band following its steps. Returns
-// the run as it starts.
+// the run as it starts. A run replaced while a report was owed owes it too:
+// the model is waiting on this root's next result, whichever run gives it.
 const startBackground = async ($: Engine, root: string, command: string, tree: string, trigger: Run['trigger']) => {
+  const owed = trigger === 'commit' || (background.get(root)?.owed ?? false)
   stopBackground(root)
   const { shell } = await hostInfo($)
   const parser = createParser(outerScript(command))
@@ -162,6 +170,7 @@ const startBackground = async ($: Engine, root: string, command: string, tree: s
   let isStopped = false
   const job = {
     tree,
+    owed,
     stop: () => {
       isStopped = true
       stream.return({ code: null, signal: 'SIGTERM' }).catch(() => undefined)
@@ -194,7 +203,7 @@ const startBackground = async ($: Engine, root: string, command: string, tree: s
     background.delete(root)
     await record($, run)
     if (run.status === 'failed') $.ui.toast(bandLine(run))
-    if (run.trigger === 'commit') await tellSession($, run)
+    if (job.owed) await tellSession($, run)
   })().catch(error => $.ui.log(`check-gate: ${errorText(error)}`, { to: 'debug' }))
   return base
 }
@@ -283,8 +292,10 @@ export const register: Register = on => {
     // No result for this tree: the checks run in the background and the
     // commit is refused now, instead of waiting on them inside the tool call,
     // whose timeout would end the run and the commit together.
+    const job = background.get(root)
     const running = (await read($, runs))[root]
-    if (background.get(root)?.tree === tree && running?.status === 'running') {
+    if (job?.tree === tree && running?.status === 'running') {
+      job.owed = true
       return { deny: pendingText(running, false) }
     }
     return { deny: pendingText(await startBackground($, root, command, tree, 'commit'), true) }

@@ -36,8 +36,11 @@ type World = {
   spawns: number
   // The folder each background check ran in.
   spawnedIn: (string | undefined)[]
-  // The prompts the gate submitted when a run a commit started ended.
+  // The prompts the gate submitted when a run a commit was refused on ended.
   sent: string[]
+  // The engine refuses every prompt, as it does while a Stop stands.
+  dropPrompts: boolean
+  toasts: string[]
   allowed: number
   clock: ReturnType<typeof mock.clock>
 }
@@ -58,6 +61,8 @@ function repo(on: On, overrides: Partial<World> = {}): World {
     spawns: 0,
     spawnedIn: [],
     sent: [],
+    dropPrompts: false,
+    toasts: [],
     allowed: 0,
     clock,
     ...overrides,
@@ -65,11 +70,15 @@ function repo(on: On, overrides: Partial<World> = {}): World {
   mock.store(on)
   on('session.cwd', () => (world.bashDir === 'broken' ? { deny: 'no folder' } : { value: world.bashDir }))
   on('prompt.submit', (_, e) => {
+    if (world.dropPrompts) return { drop: 'a Stop stands' }
     world.sent.push(e.text)
     return { text: e.text }
   })
   on('ui.status', () => ({ value: undefined }))
-  on('ui.toast', () => ({ value: undefined }))
+  on('ui.toast', (_, e) => {
+    world.toasts.push(JSON.stringify(e))
+    return { value: undefined }
+  })
   on('ui.log', () => ({ value: undefined }))
   on('turn.complete', () => ({ text: '' }))
   on('process.spawn', async function* (_, e) {
@@ -136,7 +145,7 @@ test('a commit with no result starts the checks and is refused; the next one rea
   expect(world.allowed).toBe(0)
   expect(world.spawns).toBe(1)
   expect(pending).toContain('have no result for this tree yet')
-  expect(pending).toContain('this session gets a message when they finish')
+  expect(pending).toContain('gets a message when they finish')
   expect(pending).toContain('do not edit files in repo until they report')
 
   await world.clock.settle()
@@ -181,6 +190,53 @@ test('a commit while the checks run is refused without a second run', async ($, 
   await world.clock.settle()
   expect(await commit($)).toBeUndefined()
   expect(world.spawns).toBe(1)
+})
+
+test('a commit refused on a run a turn end started is told its outcome too', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, hold: true })
+
+  await $.tool.call({ tool: 'Edit', file_path: '/repo/src/a.py', old_string: 'a', new_string: 'b' })
+  await $.turn.complete(TURN_END)
+  await world.clock.settle()
+  expect(world.spawns).toBe(1)
+
+  const refused = await commit($)
+  expect(refused).toContain('still running in the background')
+  expect(world.spawns).toBe(1)
+
+  world.release()
+  await world.clock.settle()
+  expect(world.sent).toHaveLength(1)
+  expect(world.sent[0]).toContain('the checks passed in repo')
+  expect(await commit($)).toBeUndefined()
+})
+
+test('a run that replaces the one a commit was refused on reports in its place', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, hold: true })
+
+  await commit($)
+  // The tree changes under the run, and the next turn end starts a fresh one.
+  world.tree = 'tree-2'
+  await $.tool.call({ tool: 'Edit', file_path: '/repo/src/a.py', old_string: 'a', new_string: 'b' })
+  await $.turn.complete(TURN_END)
+  await world.clock.settle()
+  expect(world.spawns).toBe(2)
+
+  world.release()
+  await world.clock.settle()
+  expect(world.sent).toHaveLength(1)
+  expect(world.sent[0]).toContain('the checks passed in repo')
+  expect(await commit($)).toBeUndefined()
+})
+
+test('a report the engine drops is toasted instead', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, dropPrompts: true })
+
+  await firstCommit($, world)
+
+  expect(world.sent).toEqual([])
+  expect(world.toasts.join('\n')).toContain('the checks passed in repo')
+  expect(await commit($)).toBeUndefined()
 })
 
 test('a changed tree runs the checks again', async ($, on) => {
