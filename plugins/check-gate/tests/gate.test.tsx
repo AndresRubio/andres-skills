@@ -287,6 +287,17 @@ test('git --git-dir with a separate value is seen as a commit', async ($, on) =>
   expect(refused).toContain('--git-dir')
 })
 
+test('a commit split across lines is still gated', async ($, on) => {
+  const world = repo(on)
+
+  const refused = await commit($, 'git -c a=b \\\n  commit -m "x"')
+
+  expect(world.allowed).toBe(0)
+  expect(world.checks).toBe(1)
+  expect(refused).toBeDefined()
+  expect(refused).toContain('checks fail in repo')
+})
+
 const TURN_END = { answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as const
 
 const BAND = {

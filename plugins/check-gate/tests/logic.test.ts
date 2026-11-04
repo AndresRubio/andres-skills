@@ -50,6 +50,69 @@ describe('findCommit', () => {
     expect(findCommit("cd '$S' && git commit -m x")).toEqual({ dir: '$S' })
   })
 
+  test('reads a commit split by a line continuation', async () => {
+    expect(findCommit('git \\\n  commit -m x')).toEqual({})
+    expect(findCommit('git\\\n  commit -m x')).toEqual({})
+    expect(findCommit('git -c a=b \\\n  -c c=d \\\n  commit -m x')).toEqual({})
+    expect(findCommit('gi\\\nt com\\\nmit -m x')).toEqual({})
+    expect(findCommit('git --no-\\\npager commit -m x')).toEqual({})
+    expect(findCommit('git -C /other \\\n  commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit('git -C \\\n  /other commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit('git -C /oth\\\ner commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit('cd /other \\\n  && git \\\n  commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit('c\\\nd /other && git commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit("bash -c 'git add . ; git \\\n  commit -m x'")).toEqual({})
+    expect(findCommit('bash -c "git add . ; git \\\n  commit -m x"')).toEqual({})
+    expect(findCommit('git --work-\\\ntree=/other commit -m x')?.unplaced).toContain('--work-tree')
+  })
+
+  test('a line continuation joins only what the shell joins', async () => {
+    // The shell reads these as `gitcommit`, `git commit-tree` and a dry run.
+    expect(findCommit('git\\\ncommit -m x')).toBeUndefined()
+    expect(findCommit('git commit-\\\ntree abc')).toBeUndefined()
+    expect(findCommit('git commit \\\n  --dry-run')).toBeUndefined()
+    // An escaped backslash ends the line, so the next line is its own command.
+    expect(findCommit('echo a\\\\\ngit commit -m x')).toEqual({})
+    expect(findCommit('echo a\\\\\ncd /other && git commit -m x')).toEqual({ dir: '/other' })
+    // A comment ends at the newline whatever comes before it, so the next line runs.
+    expect(findCommit('# note \\\ngit commit -m x')).toEqual({})
+    expect(findCommit('true # note \\\ncd /other && git commit -m x')).toEqual({ dir: '/other' })
+    // The line after a backslash in a heredoc body can still be the closing tag.
+    expect(findCommit("cat > f <<'EOF'\nnote \\\nEOF\ncd /other && git commit -m x")).toEqual({ dir: '/other' })
+    // A backslash before anything but a newline stays.
+    expect(findCommit('cd /a\\ b && git commit -m x')).toEqual({ dir: '/a b' })
+    expect(findCommit('git \\ commit -m x')).toBeUndefined()
+  })
+
+  test('refuses a commit behind an operator a line continuation splits', async () => {
+    // bash joins these and zsh doesn't, so the two shells can land in different folders.
+    const commands = [
+      'cd /a &\\\n>/dev/null\ngit commit -m x',
+      'cd /a &\\\n& git commit -m x',
+      'false &\\\n& cd /a\ngit commit -m x',
+      'cd /a 2\\\n>/dev/null; git commit -m x',
+      'cd /a 2>\\\n&1; git commit -m x',
+      'cd /a &\\\n\\\n& git commit -m x',
+    ]
+    for (const command of commands) {
+      expect(findCommit(command)?.unplaced).toContain('bash and zsh read differently')
+    }
+    // These split nothing.
+    expect(findCommit('cd /a && \\\n  git commit -m x')).toEqual({ dir: '/a' })
+    expect(findCommit('cd /a >\\\n/dev/null && git commit -m x')).toEqual({ dir: '/a' })
+    expect(findCommit('cd /a 2>/dev/null \\\n  && git commit -m x')).toEqual({ dir: '/a' })
+    // A mention is never refused.
+    expect(findCommit('echo "a &\\\n& run git commit later"')).toEqual({})
+  })
+
+  test('a line continuation in a message stays part of the message', async () => {
+    expect(findCommit('git commit -m "one \\\n  two"')).toEqual({})
+    expect(findCommit("git commit -m 'one \\\n  two'")).toEqual({})
+    // Joined, a mention is still a mention: it never gets the commit refused.
+    expect(findCommit("git commit -m 'run git \\\n  commit later'")).toEqual({})
+    expect(findCommit('cd "$REPO" && echo "run git \\\n  commit later"')).toEqual({})
+  })
+
   test('reads a cd in a condition, a subshell or a nested shell', async () => {
     expect(findCommit('if cd /other; then git commit -m x; fi')).toEqual({ dir: '/other' })
     expect(findCommit('if true; then cd /other; git commit -m x; fi')).toEqual({ dir: '/other' })

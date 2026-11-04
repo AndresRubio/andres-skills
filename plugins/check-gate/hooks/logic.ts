@@ -473,6 +473,56 @@ function targetOf(before: string, gitOptions: string): CommitTarget & { isMentio
   return withDir(dir)
 }
 
+const OPERATOR_CHAR = /[&|;<>]/
+const SPLIT_OPERATOR_REASON = 'a line continuation inside an operator, which bash and zsh read differently'
+
+// The shell drops a backslash-newline before it reads anything else, so one can
+// sit anywhere, even inside a word: `git com\<newline>mit`. Single quotes join
+// here too, because `bash -c '...'` hands that text to a shell that will join it.
+// Comments and heredoc bodies keep theirs: a comment ends at the newline whatever
+// precedes it, and a body's next line may be its closing tag. A `#` or `<<` inside
+// a string can look like one of those, which only leaves that text unjoined.
+// `splitsOperator`: one sat inside an operator such as `&&` or `2>`, which bash
+// joins and zsh doesn't.
+function joinContinuedLines(text: string): { joined: string; splitsOperator: boolean } {
+  let out = ''
+  let splitsOperator = false
+  let heredocs: { tag: string; isTabbed: boolean }[] = []
+  let i = 0
+  while (i < text.length) {
+    const c = text.charAt(i)
+    let end = i + 1
+    if (c === '\\') {
+      // Taken in pairs, so `\\` at a line's end stays an escaped backslash and a newline.
+      end = i + 2
+    } else if (c === '#' && (out === '' || /[\s;&|()<>`]/.test(out.charAt(out.length - 1)))) {
+      const newline = text.indexOf('\n', i)
+      end = newline === -1 ? text.length : newline
+    } else if (c === '\n' && heredocs.length > 0) {
+      const after = afterHeredocs(text, i, heredocs)
+      if (after !== -1) end = after
+      heredocs = []
+    } else if (text.startsWith('<<<', i)) {
+      end = i + 3
+    } else if (text.startsWith('<<', i)) {
+      const opener = /^<<-?[ \t]*/.exec(text.slice(i))?.[0] ?? '<<'
+      end = i + opener.length
+      const read = readWord(text, end)
+      if ('word' in read && read.word.text !== '') heredocs.push({ tag: read.word.text, isTabbed: opener.includes('-') })
+    }
+    const piece = text.slice(i, end)
+    if (piece === '\\\n') {
+      const last = out.charAt(out.length - 1)
+      const next = text.slice(end).replace(/^(?:\\\n)+/, '').charAt(0)
+      if ((OPERATOR_CHAR.test(last) && OPERATOR_CHAR.test(next)) || (/\d/.test(last) && /[<>]/.test(next))) splitsOperator = true
+    } else {
+      out += piece
+    }
+    i = end
+  }
+  return { joined: out, splitsOperator }
+}
+
 // Finds a `git commit` in a Bash command and the folder it lands in, following
 // `git -C`, `cd`, `pushd`, variables the command sets, subshells, substitutions, if
 // blocks and `bash -c` strings. A `--dry-run` commit is no commit. When the text can't
@@ -480,22 +530,25 @@ function targetOf(before: string, gitOptions: string): CommitTarget & { isMentio
 // commits in two folders) the target is `unplaced`, and the gate refuses it. Text inside a
 // string or a heredoc may only mention a commit: it's still gated, and never
 // refused for its folder. Reads the command's text, so it still misses a commit
-// or a move hidden behind an alias, a variable or a script.
+// or a move hidden behind an alias, a variable or a script, or a commit split by
+// a line continuation inside a heredoc fed to a shell.
 export function findCommit(command: string): CommitTarget | undefined {
+  const { joined: text, splitsOperator } = joinContinuedLines(command)
   let found: CommitTarget | undefined
   let mention: CommitTarget | undefined
-  for (const match of command.matchAll(GIT_COMMIT)) {
+  for (const match of text.matchAll(GIT_COMMIT)) {
     const start = match.index ?? 0
-    const segment = command.slice(start + match[0].length).split(/[;&|\n]/, 1)[0] ?? ''
+    const segment = text.slice(start + match[0].length).split(/[;&|\n]/, 1)[0] ?? ''
     if (/(?:^|\s)--dry-run(?=\s|$)/.test(segment)) continue
 
     // The match opens with the character before `git`, unless it starts the command.
-    const before = match[0].startsWith('git') ? '' : command.slice(0, start + 1)
+    const before = match[0].startsWith('git') ? '' : text.slice(0, start + 1)
     const { isMention, ...target } = targetOf(before, match[1] ?? '')
     if (isMention) {
       mention ??= target
       continue
     }
+    if (splitsOperator) return { unplaced: SPLIT_OPERATOR_REASON }
     if (target.unplaced !== undefined) return target
     if (found !== undefined && found.dir !== target.dir) return { unplaced: 'commits in different folders' }
     found ??= target
