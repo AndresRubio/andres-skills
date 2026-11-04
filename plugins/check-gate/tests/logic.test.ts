@@ -311,6 +311,28 @@ describe('findCommit', () => {
     // That text mustn't hide what comes after it in the same string, or after the string.
     expect(findCommit("grep -c 'git -c a\\|git commit' f")).toEqual({})
     expect(findCommit("echo 'git -c a' && git commit -m x")).toEqual({})
+    // Through a shell's flags, and an escape string.
+    expect(findCommit("bash --norc -c 'git commit -m x'")).toEqual({})
+    expect(findCommit('bash -o pipefail -c "git commit -m x"')).toEqual({})
+    expect(findCommit("bash -c -x 'git commit -m x'")).toEqual({})
+    expect(findCommit("bash -c $'git commit -m x'")).toEqual({})
+    expect(findCommit("echo --norc -c 'git commit -m x'")).toBeUndefined()
+  })
+
+  test('sees git and commit written quoted or escaped', async () => {
+    expect(findCommit('\\git commit -m x')).toEqual({})
+    expect(findCommit('echo a; \\git commit -m x')).toEqual({})
+    expect(findCommit("'git' commit -m x")).toEqual({})
+    expect(findCommit('"git" commit -m x')).toEqual({})
+    expect(findCommit("git 'commit' -m x")).toEqual({})
+    expect(findCommit('git "commit" -m x')).toEqual({})
+    expect(findCommit("cd /other && 'git' commit -m x")).toEqual({ dir: '/other' })
+    expect(findCommit('git "-C" /other commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit(`git '-c' a.b=c "commit" -m x`)).toEqual({})
+    // A string that holds more than the word is still only text.
+    expect(findCommit('"git commit" -m x')).toBeUndefined()
+    expect(findCommit('git "commit-tree" x')).toBeUndefined()
+    expect(findCommit('git "commit x"')).toBeUndefined()
   })
 
   test('takes only a real --dry-run for a dry run', async () => {
@@ -322,6 +344,8 @@ describe('findCommit', () => {
     expect(findCommit('X=$(git commit --dry-run) && echo ok')).toBeUndefined()
     expect(findCommit("bash -c 'git commit --dry-run'")).toBeUndefined()
     expect(findCommit('bash -c "git commit -m x --dry-run" && echo ok')).toBeUndefined()
+    expect(findCommit('git commit -m "$MSG" --dry-run')).toBeUndefined()
+    expect(findCommit('git commit --message=x --dry-run')).toBeUndefined()
 
     // Part of a message, or a comment.
     expect(findCommit('git commit -m "add --dry-run flag"')).toEqual({})
@@ -334,9 +358,34 @@ describe('findCommit', () => {
     expect(findCommit('git commit --message --dry-run')).toEqual({})
     expect(findCommit('git commit -m x -- --dry-run')).toEqual({})
     expect(findCommit('git commit -m x --dry-run --no-dry-run')).toEqual({})
+    expect(findCommit('git commit -m x --dry-run --no-dry')).toEqual({})
+    // An abbreviated option's value, or a word the shell fills in.
+    expect(findCommit('git commit --mess --dry-run')).toEqual({})
+    expect(findCommit('git commit --dry-run $FLAGS')).toEqual({})
+    expect(findCommit('git commit --dry-run "$(echo --no-dry-run)"')).toEqual({})
+    expect(findCommit('git commit --dry-run $(echo --no-dry-run)')).toEqual({})
     // Another command's argument, or a later commit.
     expect(findCommit('git commit -m x; echo --dry-run')).toEqual({})
     expect(findCommit('git commit --dry-run && git commit -m x')).toEqual({})
+  })
+
+  test('ends a commit in a string where the string ends', async () => {
+    // Text after the string can't make it a dry run, however its quotes pair up.
+    expect(findCommit("bash -c 'true; git commit -m x'; echo 'see --dry-run here'")).toEqual({})
+    expect(findCommit('bash -c "true; git commit -m x"; echo "see --dry-run here"')).toEqual({})
+    expect(findCommit("bash -c 'git commit -m x'; echo 'see --dry-run here'")).toEqual({})
+    expect(findCommit('`git commit -m x`; echo `date --dry-run`')).toEqual({})
+    expect(findCommit('echo "`git commit -m x`"; echo "see `date --dry-run`"')).toEqual({})
+    expect(findCommit(`bash -c 'echo "$(git commit -m x)"'; echo 'see --dry-run'`)).toEqual({})
+    // Nor can what the string holds, as the inner shell reads it.
+    expect(findCommit('bash -c "git commit -m \\"a --dry-run b\\""')).toEqual({})
+    expect(findCommit(`git commit -m "$(cat <<'EOF'\n1) see "a --dry-run b"\nEOF\n)"`)).toEqual({})
+
+    expect(findCommit("bash -c 'true; git commit --dry-run'; echo x")).toBeUndefined()
+    expect(findCommit('bash -c "git commit \\"--dry-run\\""')).toBeUndefined()
+    expect(findCommit('`git commit --dry-run`; echo x')).toBeUndefined()
+    expect(findCommit('echo "$(git commit --dry-run)"; echo x')).toBeUndefined()
+    expect(findCommit('echo "`git commit --dry-run`"; echo x')).toBeUndefined()
   })
 
   test('stays fast on text it could read many ways', async () => {

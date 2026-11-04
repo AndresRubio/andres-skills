@@ -320,6 +320,23 @@ test('a commit whose message mentions --dry-run is gated', async ($, on) => {
   expect(refused).toContain('checks fail in repo')
 })
 
+test('text around a commit never makes it a dry run', async ($, on) => {
+  const world = repo(on)
+  const commands = [
+    "bash -c 'true; git commit -m x'; echo 'see --dry-run here'",
+    `git commit -m "$(cat <<'EOF'\n1) see "a --dry-run b"\nEOF\n)"`,
+    'bash -c "git commit -m \\"a --dry-run b\\""',
+  ]
+
+  for (const command of commands) {
+    const refused = await commit($, command)
+    expect(refused).toBeDefined()
+    expect(refused).toContain('checks fail in repo')
+  }
+
+  expect(world.allowed).toBe(0)
+})
+
 test('a dry run is not gated', async ($, on) => {
   const world = repo(on)
 

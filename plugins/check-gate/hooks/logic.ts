@@ -32,18 +32,19 @@ const WORD = String.raw`(?:[^\s"'\\;&|()]|\\.|"[^"]*"|'[^']*')+`
 // Each option reads one way only: the catch-all forms skip what takes a separate
 // value, and a word's parts don't overlap. Any choice here makes the regex exponential.
 const TAKES_NEXT_WORD = String.raw`(?:-[Cc]|--(?:git-dir|work-tree|namespace|super-prefix|config-env))\s`
-const GIT_OPTION = String.raw`(?:-[Cc]\s+${WORD}|--(?:git-dir|work-tree|namespace|super-prefix|config-env)\s+${WORD}|(?!${TAKES_NEXT_WORD})--[A-Za-z][\w-]*(?:=${WORD})?|(?!${TAKES_NEXT_WORD})-[A-Za-z]+)`
+const GIT_OPTION = String.raw`(?:(?:-[Cc]|"-[Cc]"|'-[Cc]')\s+${WORD}|--(?:git-dir|work-tree|namespace|super-prefix|config-env)\s+${WORD}|(?!${TAKES_NEXT_WORD})--[A-Za-z][\w-]*(?:=${WORD})?|(?!${TAKES_NEXT_WORD})-[A-Za-z]+)`
 // A shell's flags before its `-c`: `-o pipefail`, `--rcfile x`, `--norc`, `+x`. Each one
 // reads one way only, for the same reason as GIT_OPTION.
 const SHELL_FLAGS = String.raw`(?:\s+(?:[-+]\w*[oO]\s+\w+|--(?:rcfile|init-file)\s+[^\s-]\S*|[-+][-\w]*))*`
 // A shell that runs the string after it, up to where that string opens.
 const NESTED_SHELL_START = String.raw`(?:^|[\s;&|("'/])(?:(?:ba|z|da|k)?sh${SHELL_FLAGS}\s+-\w*c\w*(?:\s+[-+][-\w]*)*|eval)\s*\$?`
-// A quote before `git` counts only when it opens a string a shell will run.
-// Checked inside the match, so other quoted text can't hide a later commit.
+// The first group is what opens the command. A quote counts only when it opens a
+// string a shell will run, checked inside the match so other quoted text can't hide a
+// later commit. `git` and `commit` can be quoted or escaped as words of their own.
 // `-c commit.<key>` counts as a commit: sessions set it around `"$@"` or before a
 // `rebase --exec`, where the real subcommand is out of sight.
 const GIT_COMMIT = new RegExp(
-  String.raw`(?:^|[\s;&|(\x60/]|(?<=${NESTED_SHELL_START})['"])git((?:\s+${GIT_OPTION})*)\s+(?:commit(?![\w-])|-c\s+commit\.)`,
+  String.raw`(^|[\s;&|(\x60/]|['"](?<=${NESTED_SHELL_START}['"]))(?:\\?git|"git"|'git')((?:\s+${GIT_OPTION})*)\s+(?:(?:commit|"commit"|'commit')(?![\w-])|-c\s+commit\.)`,
   'g',
 )
 
@@ -231,6 +232,8 @@ type Place = {
   isMention?: boolean
   // The command has defined a function, so a block still open may be its body.
   definesFunction?: boolean
+  // The quote that ends the string this text sits in. A `$(...)` needs none: its `)` ends it.
+  closer: string | undefined
 }
 
 const BEFORE_COMMAND = new Set(['then', 'do', '!', 'time', 'builtin'])
@@ -414,7 +417,11 @@ function followFolder(before: string, start: Place): Place {
     // the string is for.
     const quote = before.charAt(openQuote)
     const inside = quote === '"' ? scanString(before, openQuote).inside : undefined
-    if (inside !== undefined) return followFolder(before.slice(inside), place)
+    if (inside !== undefined) {
+      place.closer = before.charAt(inside - 1) === '`' ? '`' : undefined
+      return followFolder(before.slice(inside), place)
+    }
+    place.closer = quote
     if (quote === '`' || NESTED_SHELL.test(before.slice(0, openQuote))) {
       // In single quotes the inner shell reads the variables, and it only has exported
       // ones. HOME is already exported, so a new value reaches it.
@@ -439,16 +446,8 @@ export type CommitTarget = {
 
 const withDir = (dir: string | undefined): CommitTarget => (dir === undefined ? {} : { dir })
 
-function targetOf(before: string, gitOptions: string): CommitTarget & { isMention?: boolean } {
-  const place = followFolder(before, {
-    dir: undefined,
-    vars: startingVars(),
-    chainCanFail: false,
-    isGuarded: false,
-    listMoved: false,
-    blocks: [],
-  })
-  if (place.isMention) return { ...withDir(place.dir), isMention: true }
+function targetOf(place: Place, gitOptions: string): CommitTarget {
+  if (place.isMention) return withDir(place.dir)
   if (place.unplaced !== undefined) return { unplaced: place.unplaced }
   if (place.definesFunction && place.blocks.length > 0) return { unplaced: FUNCTION_REASON }
   if (/--(?:git-dir|work-tree)\b/.test(gitOptions)) return { unplaced: '--git-dir or --work-tree is on the git command' }
@@ -518,23 +517,38 @@ function joinContinuedLines(text: string): { joined: string; splitsOperator: boo
   return { joined: out, splitsOperator }
 }
 
-const TAKES_VALUE = /^(?:-[a-zA-Z]*[mFCct]|--(?:message|file|author|date|template|reuse-message|reedit-message|fixup|squash|trailer|cleanup|pathspec-from-file))$/
+// git takes a long option abbreviated, so any of them may be one that takes the next
+// word: `--mess --dry-run` is a commit with that message.
+const TAKES_VALUE = /^(?:-[a-zA-Z]*[mFCct]|--[^=]+)$/
 
-// Whether a commit's own arguments ask for a dry run. They end at the next
-// operator, or at the quote that closes the string the commit sits in. A message,
-// another option's value, a path after the double dash and a comment don't count.
-// A word that may be a value is read as one, because that leaves the commit gated.
-function isDryRun(rest: string): boolean {
-  const { tokens, openQuote } = lex(rest, 'operator')
-  const args = openQuote === undefined ? tokens : lex(rest.slice(0, openQuote), 'operator').tokens
+// The text after a commit as the shell running it reads it: up to the quote that ends
+// its string, with the backslashes that string's own shell takes off gone.
+function ownText(rest: string, closer: string | undefined): string {
+  if (closer === undefined) return rest
+  if (closer === "'") {
+    const end = rest.indexOf("'")
+    return end === -1 ? rest : rest.slice(0, end)
+  }
+  const { end } = scanString(closer + rest, 0)
+  const text = end === -1 ? rest : rest.slice(0, end - 1)
+  return text.replace(closer === '"' ? /\\(["\\$`])/g : /\\([\\$`])/g, '$1')
+}
+
+// Whether a commit's own arguments ask for a dry run. They end at the next operator
+// or with the string the commit sits in. A message, another option's value, a path
+// after the double dash and a comment don't count. A word that may be a value is
+// read as one, because that leaves the commit gated.
+function isDryRun(rest: string, closer: string | undefined): boolean {
   let isDry = false
   let isValue = false
-  for (const token of args) {
+  for (const token of lex(ownText(rest, closer), 'operator').tokens) {
     if ('op' in token) break
     if (isValue) isValue = false
     else if (token.text === '--') break
+    // The shell fills this in, so it could still be `--no-dry-run`.
+    else if (token.isDynamic) return false
     else if (token.text === '--dry-run') isDry = true
-    else if (token.text === '--no-dry-run') isDry = false
+    else if (token.text.startsWith('--no-d')) isDry = false
     else isValue = TAKES_VALUE.test(token.text)
   }
   return isDry
@@ -555,12 +569,20 @@ export function findCommit(command: string): CommitTarget | undefined {
   let mention: CommitTarget | undefined
   for (const match of text.matchAll(GIT_COMMIT)) {
     const start = match.index ?? 0
-    if (isDryRun(text.slice(start + match[0].length))) continue
+    const [whole, opener = '', gitOptions = ''] = match
+    const place = followFolder(text.slice(0, start + opener.length), {
+      dir: undefined,
+      vars: startingVars(),
+      chainCanFail: false,
+      isGuarded: false,
+      listMoved: false,
+      blocks: [],
+      closer: undefined,
+    })
+    if (isDryRun(text.slice(start + whole.length), place.closer)) continue
 
-    // The match opens with the character before `git`, unless it starts the command.
-    const before = match[0].startsWith('git') ? '' : text.slice(0, start + 1)
-    const { isMention, ...target } = targetOf(before, match[1] ?? '')
-    if (isMention) {
+    const target = targetOf(place, gitOptions)
+    if (place.isMention) {
       mention ??= target
       continue
     }
