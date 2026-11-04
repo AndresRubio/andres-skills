@@ -766,7 +766,7 @@ export function bandLine(run: Run): string {
     case 'stale':
       return `· Checks in ${run.repo} haven't run since the last change`
     case 'running': {
-      const why = run.trigger === 'commit' ? ' before the commit' : ''
+      const why = run.trigger === 'commit' ? ' for the commit' : ''
       return `… Checks running in ${run.repo}${why}${steps.length ? `: ${steps.join(' · ')}` : ''}`
     }
     case 'passed':
@@ -793,7 +793,7 @@ export function denyText(run: Run): string {
   return [
     `Check gate: this commit was stopped because the checks fail in ${run.repo}.`,
     `Command: ${run.command} (exit ${run.exitCode ?? '?'})${failed.length ? `. Failed: ${failed.join(', ')}` : ''}.`,
-    'Fix the failures, then commit again. The gate reruns the checks on the next commit attempt once the code has changed.',
+    'Fix the failures, then commit again. Once the code has changed, the next commit attempt starts the checks again in the background and is refused until they pass.',
     '',
     'Last lines of the output:',
     run.tail || '(no output)',
@@ -816,6 +816,24 @@ export function unplacedText(reason: string): string {
     `Check gate: this commit was stopped because the gate couldn't tell which git repository it lands in (${reason}).`,
     "The gate runs a repository's checks before each commit, so it stops a commit it can't place. Name the repository's folder plainly and run it again: git -C /path/to/repo commit ..., or cd /path/to/repo && git commit ... If the path has to be worked out, work it out first and put the result in the command.",
   ].join('\n')
+}
+
+// What the model reads when the gate starts the checks instead of waiting for them.
+export function pendingText(run: Run, isNew: boolean): string {
+  return [
+    `Check gate: this commit was stopped because the checks in ${run.repo} have no result for this tree yet.`,
+    `${isNew ? 'They are running now' : 'They are still running'} in the background: ${run.command}.`,
+    "The band above the prompt follows them, and the session's main conversation gets a message when they finish; commit again then. A subagent reports this refusal and stops.",
+    `Do not start the checks yourself, and do not edit files in ${run.repo} until they report: a changed tree needs its own run.`,
+  ].join('\n')
+}
+
+// What the model reads, as a prompt of the plugin's, when a run a commit started ends.
+export function reportText(run: Run): string {
+  if (run.status === 'passed') {
+    return `Check gate: the checks passed in ${run.repo}${seconds(run)}. Run the commit again; it goes through while the tree stays as it was.`
+  }
+  return `${bandLine(run).replace(/^[✗!] /, 'Check gate: ')} Fix that and commit again.`
 }
 
 // What /check-gate log prints.

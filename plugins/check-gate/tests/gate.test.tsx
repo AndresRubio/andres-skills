@@ -30,10 +30,17 @@ type World = {
   bashDir: string | 'broken'
   // What `git rev-parse --show-toplevel` does: finds /repo, exits 128, or never starts.
   revParse: 'found' | 'not a repo' | 'cannot start'
-  checks: number
-  // The folder each inline check ran in.
-  checkedIn: (string | undefined)[]
+  // A check that waits for `release()` before it ends, to look at the gate mid-run.
+  hold: boolean
+  release: () => void
   spawns: number
+  // The folder each background check ran in.
+  spawnedIn: (string | undefined)[]
+  // The prompts the gate submitted when a run a commit was refused on ended.
+  sent: string[]
+  // The engine refuses every prompt, as it does while a Stop stands.
+  dropPrompts: boolean
+  toasts: string[]
   allowed: number
   clock: ReturnType<typeof mock.clock>
 }
@@ -49,23 +56,38 @@ function repo(on: On, overrides: Partial<World> = {}): World {
     isGitBroken: false,
     bashDir: '/repo',
     revParse: 'found',
-    checks: 0,
-    checkedIn: [],
+    hold: false,
+    release: () => undefined,
     spawns: 0,
+    spawnedIn: [],
+    sent: [],
+    dropPrompts: false,
+    toasts: [],
     allowed: 0,
     clock,
     ...overrides,
   }
   mock.store(on)
   on('session.cwd', () => (world.bashDir === 'broken' ? { deny: 'no folder' } : { value: world.bashDir }))
+  on('prompt.submit', (_, e) => {
+    if (world.dropPrompts) return { drop: 'a Stop stands' }
+    world.sent.push(e.text)
+    return { text: e.text }
+  })
   on('ui.status', () => ({ value: undefined }))
-  on('ui.toast', () => ({ value: undefined }))
+  on('ui.toast', (_, e) => {
+    world.toasts.push(JSON.stringify(e))
+    return { value: undefined }
+  })
   on('ui.log', () => ({ value: undefined }))
   on('turn.complete', () => ({ text: '' }))
   on('process.spawn', async function* (_, e) {
     world.spawns += 1
+    world.spawnedIn.push(e.cwd)
     expect(e.argv).toEqual(CHECK)
-    const check = world.check === 'cannot start' ? { exitCode: 1, stdout: '' } : world.check
+    if (world.hold) await new Promise<void>(resolve => (world.release = resolve))
+    if (world.check === 'cannot start') return { deny: 'spawn /bin/zsh ENOENT' }
+    const check = e.cwd === '/other' ? { exitCode: 1, stdout: FAILING } : world.check
     // Split mid-line, as a pipe does.
     yield { stream: 'stdout' as const, text: check.stdout.slice(0, 17) }
     yield { stream: 'stdout' as const, text: check.stdout.slice(17) }
@@ -88,13 +110,6 @@ function repo(on: On, overrides: Partial<World> = {}): World {
     if (argv === `/bin/sh -c ${FINGERPRINT}`) {
       return world.isGitBroken ? { deny: 'git is gone' } : ok(`${world.tree}\n`)
     }
-    if (argv === CHECK.join(' ')) {
-      world.checks += 1
-      world.checkedIn.push(e.init?.cwd)
-      if (e.init?.cwd === '/other') return ok(FAILING, 1)
-      if (world.check === 'cannot start') return { deny: 'spawn /bin/zsh ENOENT' }
-      return ok(world.check.stdout, world.check.exitCode)
-    }
     throw new Error(`unexpected command: ${argv}`)
   })
   on('tool.call', () => {
@@ -104,56 +119,149 @@ function repo(on: On, overrides: Partial<World> = {}): World {
   return world
 }
 
+type Caller = { tool: { call: (input: { tool: 'Bash'; command: string }) => Promise<unknown> } }
+
 // What the model reads when the call was refused, else undefined.
-async function commit(
-  $: { tool: { call: (input: { tool: 'Bash'; command: string }) => Promise<unknown> } },
-  command = 'git commit -m "x"',
-) {
+async function commit($: Caller, command = 'git commit -m "x"') {
   const ran = (await $.tool.call({ tool: 'Bash', command })) as { deny?: string; isError?: boolean; text?: string }
   return ran.deny ?? (ran.isError ? ran.text : undefined)
 }
 
-test('a failing check stops the commit and says why', async ($, on) => {
+// A commit on a tree nobody has checked: refused while the checks start in the
+// background, which then run to their end.
+async function firstCommit($: Caller, world: World, command?: string) {
+  const refused = await commit($, command)
+  expect(refused).toContain('have no result for this tree yet')
+  expect(refused).toContain('running now in the background: bash scripts/check.sh')
+  await world.clock.settle()
+  return refused
+}
+
+test('a commit with no result starts the checks and is refused; the next one reads their failure', async ($, on) => {
   const world = repo(on)
 
-  const refused = await commit($)
+  const pending = await commit($)
 
   expect(world.allowed).toBe(0)
-  expect(world.checks).toBe(1)
+  expect(world.spawns).toBe(1)
+  expect(pending).toContain('have no result for this tree yet')
+  expect(pending).toContain('gets a message when they finish')
+  expect(pending).toContain('do not edit files in repo until they report')
+
+  await world.clock.settle()
+  expect(world.sent).toHaveLength(1)
+  expect(world.sent[0]).toContain('Check gate: Checks fail in repo: pytest')
+  expect(world.sent[0]).toContain('commit again')
+
+  const refused = await commit($)
+  expect(world.allowed).toBe(0)
+  expect(world.spawns).toBe(1)
   expect(refused).toContain('checks fail in repo')
   expect(refused).toContain('Failed: pytest')
   expect(refused).toContain('FAILED tests/test_x.py::test_y')
 })
 
-test('a passing check lets the commit through, and is reused for the same tree', async ($, on) => {
+test('a passing check reports back, lets the commit through, and is reused for the same tree', async ($, on) => {
   const world = repo(on, { check: { exitCode: 0, stdout: PASSING } })
 
+  await firstCommit($, world)
+
+  expect(world.sent).toHaveLength(1)
+  expect(world.sent[0]).toContain('Check gate: the checks passed in repo')
+  expect(world.sent[0]).toContain('Run the commit again')
   expect(await commit($)).toBeUndefined()
   expect(await commit($, 'git -c user.name=AndresRubio commit --amend --no-edit')).toBeUndefined()
 
   expect(world.allowed).toBe(2)
-  expect(world.checks).toBe(1)
+  expect(world.spawns).toBe(1)
+})
+
+test('a commit while the checks run is refused without a second run', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, hold: true })
+
+  await commit($)
+  const again = await commit($)
+
+  expect(again).toContain('still running in the background')
+  expect(world.spawns).toBe(1)
+  expect(world.allowed).toBe(0)
+
+  world.release()
+  await world.clock.settle()
+  expect(await commit($)).toBeUndefined()
+  expect(world.spawns).toBe(1)
+})
+
+test('a commit refused on a run a turn end started is told its outcome too', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, hold: true })
+
+  await $.tool.call({ tool: 'Edit', file_path: '/repo/src/a.py', old_string: 'a', new_string: 'b' })
+  await $.turn.complete(TURN_END)
+  await world.clock.settle()
+  expect(world.spawns).toBe(1)
+
+  const refused = await commit($)
+  expect(refused).toContain('still running in the background')
+  expect(world.spawns).toBe(1)
+
+  world.release()
+  await world.clock.settle()
+  expect(world.sent).toHaveLength(1)
+  expect(world.sent[0]).toContain('the checks passed in repo')
+  expect(await commit($)).toBeUndefined()
+})
+
+test('a run that replaces the one a commit was refused on reports in its place', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, hold: true })
+
+  await commit($)
+  // The tree changes under the run, and the next turn end starts a fresh one.
+  world.tree = 'tree-2'
+  await $.tool.call({ tool: 'Edit', file_path: '/repo/src/a.py', old_string: 'a', new_string: 'b' })
+  await $.turn.complete(TURN_END)
+  await world.clock.settle()
+  expect(world.spawns).toBe(2)
+
+  world.release()
+  await world.clock.settle()
+  expect(world.sent).toHaveLength(1)
+  expect(world.sent[0]).toContain('the checks passed in repo')
+  expect(await commit($)).toBeUndefined()
+})
+
+test('a report the engine drops is toasted instead', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, dropPrompts: true })
+
+  await firstCommit($, world)
+
+  expect(world.sent).toEqual([])
+  expect(world.toasts.join('\n')).toContain('the checks passed in repo')
+  expect(await commit($)).toBeUndefined()
 })
 
 test('a changed tree runs the checks again', async ($, on) => {
   const world = repo(on, { check: { exitCode: 0, stdout: PASSING } })
 
-  await commit($)
+  await firstCommit($, world)
+  expect(await commit($)).toBeUndefined()
+
   world.tree = 'tree-2'
   world.check = { exitCode: 1, stdout: FAILING }
+  await firstCommit($, world)
   const refused = await commit($)
 
-  expect(world.checks).toBe(2)
+  expect(world.spawns).toBe(2)
   expect(refused).toContain('Failed: pytest')
 })
 
 test('a failing result is reused too: no rerun until the code changes', async ($, on) => {
   const world = repo(on)
 
+  await firstCommit($, world)
   await commit($)
   await commit($)
 
-  expect(world.checks).toBe(1)
+  expect(world.spawns).toBe(1)
   expect(world.allowed).toBe(0)
 })
 
@@ -163,7 +271,7 @@ test('commands that are not commits pass untouched', async ($, on) => {
   expect(await commit($, 'git status && git commit --dry-run')).toBeUndefined()
   expect(await commit($, 'ls -la')).toBeUndefined()
 
-  expect(world.checks).toBe(0)
+  expect(world.spawns).toBe(0)
   expect(world.allowed).toBe(2)
 })
 
@@ -174,22 +282,28 @@ test('a repo with no check command is not gated', async ($, on) => {
   })
 
   expect(await commit($)).toBeUndefined()
-  expect(world.checks).toBe(0)
+  expect(world.spawns).toBe(0)
 })
 
-test('a check that cannot start stops the commit', async ($, on) => {
+test('a check that cannot start is reported, and the commit stays stopped', async ($, on) => {
   const world = repo(on, { check: 'cannot start' })
 
-  const refused = await commit($)
+  await firstCommit($, world)
 
   expect(world.allowed).toBe(0)
-  expect(refused).toContain('could not run')
-  expect(refused).toContain('ENOENT')
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const line = await ui.find({ type: 'Text', text: /run the checks/ })
+  await ui.unmount()
+  expect(line?.text).toContain("Couldn't run the checks in repo")
+  expect(line?.text).toContain('ENOENT')
+  expect(world.sent).toHaveLength(1)
+  expect(world.sent[0]).toContain('ENOENT')
+  expect(world.sent[0]).toContain('commit again')
 })
 
 test('the band shows the failing steps, on every surface', async ($, on) => {
-  repo(on)
-  await commit($)
+  const world = repo(on)
+  await firstCommit($, world)
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({
@@ -227,7 +341,7 @@ test('a commit in a folder git does not know as a repo is stopped', async ($, on
   const refused = await commit($, 'git -C /tmp/notes commit -m "x"')
 
   expect(world.allowed).toBe(0)
-  expect(world.checks).toBe(0)
+  expect(world.spawns).toBe(0)
   expect(refused).toContain("couldn't tell which git repository")
   expect(refused).toContain('in /tmp/notes failed: fatal: not a git repository')
   expect(refused).toContain('git -C /path/to/repo commit')
@@ -239,7 +353,7 @@ test('a git that cannot start stops the commit', async ($, on) => {
   const refused = await commit($)
 
   expect(world.allowed).toBe(0)
-  expect(world.checks).toBe(0)
+  expect(world.spawns).toBe(0)
   expect(refused).toContain("couldn't tell which git repository")
   expect(refused).toContain("in the session's folder failed")
   expect(refused).toContain('ENOENT')
@@ -249,21 +363,22 @@ test('a bare commit after a cd is gated by the repo Bash moved to', async ($, on
   // /repo's check passes and /other's fails, so the wrong repo's check would let this through.
   const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, bashDir: '/other' })
 
+  await firstCommit($, world)
   const refused = await commit($)
 
   expect(world.allowed).toBe(0)
-  expect(world.checkedIn).toEqual(['/other'])
-  expect(refused).toBeDefined()
+  expect(world.spawnedIn).toEqual(['/other'])
   expect(refused).toContain('checks fail in other')
 })
 
 test('a folder the command names wins over where Bash is', async ($, on) => {
   const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, bashDir: '/other' })
 
+  await firstCommit($, world, 'git -C /repo commit -m "x"')
   expect(await commit($, 'git -C /repo commit -m "x"')).toBeUndefined()
 
   expect(world.allowed).toBe(1)
-  expect(world.checkedIn).toEqual(['/repo'])
+  expect(world.spawnedIn).toEqual(['/repo'])
 })
 
 test('a Bash folder the gate cannot read stops the commit', async ($, on) => {
@@ -272,8 +387,7 @@ test('a Bash folder the gate cannot read stops the commit', async ($, on) => {
   const refused = await commit($)
 
   expect(world.allowed).toBe(0)
-  expect(world.checks).toBe(0)
-  expect(refused).toBeDefined()
+  expect(world.spawns).toBe(0)
   expect(refused).toContain('the gate itself failed')
 })
 
@@ -291,6 +405,7 @@ test('a commit the command moves to another repo is gated by that repo', async (
   ]
   const world = repo(on, { check: { exitCode: 0, stdout: PASSING } })
 
+  await firstCommit($, world, commands[0])
   for (const command of commands) {
     const refused = await commit($, command)
     expect(refused).toBeDefined()
@@ -299,7 +414,7 @@ test('a commit the command moves to another repo is gated by that repo', async (
 
   expect(world.allowed).toBe(0)
   // The first run's result is reused for the same repo and tree.
-  expect(world.checkedIn).toEqual(['/other'])
+  expect(world.spawnedIn).toEqual(['/other'])
 })
 
 test('a commit the gate cannot place is stopped, and told how to name the repo', async ($, on) => {
@@ -308,7 +423,7 @@ test('a commit the gate cannot place is stopped, and told how to name the repo',
   const refused = await commit($, 'GIT_DIR=/other/.git git commit -m "x"')
 
   expect(world.allowed).toBe(0)
-  expect(world.checks).toBe(0)
+  expect(world.spawns).toBe(0)
   expect(refused).toBeDefined()
   expect(refused).toContain("couldn't tell which git repository it lands in")
   expect(refused).toContain('GIT_DIR')
@@ -328,34 +443,28 @@ test('git --git-dir with a separate value is seen as a commit', async ($, on) =>
 test('a commit split across lines is still gated', async ($, on) => {
   const world = repo(on)
 
-  const refused = await commit($, 'git -c a=b \\\n  commit -m "x"')
+  await firstCommit($, world, 'git -c a=b \\\n  commit -m "x"')
 
   expect(world.allowed).toBe(0)
-  expect(world.checks).toBe(1)
-  expect(refused).toBeDefined()
-  expect(refused).toContain('checks fail in repo')
+  expect(world.spawns).toBe(1)
 })
 
 test('a commit at the start of a nested shell string is gated', async ($, on) => {
   const world = repo(on)
 
-  const refused = await commit($, "bash -c 'git commit -m x'")
+  await firstCommit($, world, "bash -c 'git commit -m x'")
 
   expect(world.allowed).toBe(0)
-  expect(world.checks).toBe(1)
-  expect(refused).toBeDefined()
-  expect(refused).toContain('checks fail in repo')
+  expect(world.spawns).toBe(1)
 })
 
 test('a commit whose message mentions --dry-run is gated', async ($, on) => {
   const world = repo(on)
 
-  const refused = await commit($, 'git commit -m "add --dry-run flag"')
+  await firstCommit($, world, 'git commit -m "add --dry-run flag"')
 
   expect(world.allowed).toBe(0)
-  expect(world.checks).toBe(1)
-  expect(refused).toBeDefined()
-  expect(refused).toContain('checks fail in repo')
+  expect(world.spawns).toBe(1)
 })
 
 test('text around a commit never makes it a dry run', async ($, on) => {
@@ -366,6 +475,7 @@ test('text around a commit never makes it a dry run', async ($, on) => {
     'bash -c "git commit -m \\"a --dry-run b\\""',
   ]
 
+  await firstCommit($, world, commands[0])
   for (const command of commands) {
     const refused = await commit($, command)
     expect(refused).toBeDefined()
@@ -381,7 +491,7 @@ test('a dry run is not gated', async ($, on) => {
   expect(await commit($, 'git commit -m x --dry-run')).toBeUndefined()
 
   expect(world.allowed).toBe(1)
-  expect(world.checks).toBe(0)
+  expect(world.spawns).toBe(0)
 })
 
 const TURN_END = { answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as const
@@ -415,10 +525,12 @@ test('an edit runs the checks in the background when the turn ends', async ($, o
 
   expect(world.spawns).toBe(1)
   expect(await bandText($)).toContain('Checks fail in repo: pytest. Commits are blocked.')
+  // Only a run a commit started reports to the session.
+  expect(world.sent).toEqual([])
 
   // The commit reuses the background result: no second run.
   expect(await commit($)).toContain('Failed: pytest')
-  expect(world.checks).toBe(0)
+  expect(world.spawns).toBe(1)
 
   // Same tree at the next turn end: nothing runs again.
   await $.turn.complete(TURN_END)
