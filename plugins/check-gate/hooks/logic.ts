@@ -371,16 +371,17 @@ function followFolder(before: string, start: Place): Place {
   let place = start
   let words: Word[] = []
   let connector: string | undefined
-  let lastOp: string | undefined
+  // The last token was a `(` right after one plain word, as in `f()`. Not `x=()` or `$()`.
+  let isAfterName = false
   for (const token of tokens) {
     if (!('op' in token)) {
       words.push(token)
-      lastOp = undefined
+      isAfterName = false
       continue
     }
     const { op } = token
-    const isEmptyParens = op === ')' && lastOp === '('
-    lastOp = op
+    const isFunction = op === ')' && isAfterName
+    isAfterName = op === '(' && words.length === 1 && /^[\w.:+-]+$/.test(words[0]?.text ?? '')
     const didMove = runCommand(place, words, connector, op)
     words = []
     if ((didMove && (op === '|' || op === '|&')) || (place.listMoved && op === '&')) place.unplaced ??= SUBSHELL_REASON
@@ -393,7 +394,7 @@ function followFolder(before: string, start: Place): Place {
     } else if (op === ')') {
       place = subshells.pop() ?? place
       place.chainCanFail = true
-      if (isEmptyParens) place.definesFunction = true
+      if (isFunction) place.definesFunction = true
     } else {
       if (place.isGuarded && op !== '&&') place.unplaced ??= 'a cd that may not run'
       if (op !== '&&') place.chainCanFail = false
