@@ -167,7 +167,7 @@ const checkPush = async ($: Engine, target: PushTarget, seen: Set<string>): Prom
 export const register: Register = on => {
   // 1. Nothing under site/ may carry a Gmail address or a mailbox link.
   on('tool.call', { tool: ['Write', 'Edit', 'NotebookEdit'] }, async ($, e, next) => {
-    const refusal = await checkWrite($, e.tool, e as unknown as Record<string, unknown>)
+    const refusal = await checkWrite($, e.tool, e)
     return refusal ? refuse($, refusal) : next(e)
   }).catch(($, e, next) =>
     next.called

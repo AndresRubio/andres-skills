@@ -175,7 +175,7 @@ export const register: Register = on => {
     if (!(await isActive($))) return next(e)
     await ensureCommand($)
 
-    const input = e as unknown as Record<string, unknown>
+    const input: Record<string, unknown> = e
     const call: McpCall = {
       id: String(input.tool_use_id ?? ''),
       server: name.server,
