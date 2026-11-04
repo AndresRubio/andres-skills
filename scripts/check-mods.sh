@@ -1,10 +1,23 @@
 #!/bin/sh
 # Validates and tests each mod: every plugins/<name>/ whose hooks/hooks.json
-# names a hooks module. CI runs this on pull requests that touch plugins/.
+# names a hooks module. CI runs this on pull requests and pushes to main that
+# touch plugins/.
 # Name mods to check only those: scripts/check-mods.sh check-gate boe-guard
 # validate runs without --strict, which would fail every mod for its missing icon.
 set -u
 cd "$(dirname "$0")/.." || exit 1
+
+# `claude plugin update` goes by the version number, so a hooks change that keeps
+# the version never reaches installed copies. Versions are compared against
+# CHECK_MODS_BASE (CI sets it on a push to main), else where this branch left
+# origin/main.
+base=${CHECK_MODS_BASE:-$(git merge-base HEAD origin/main 2>/dev/null)}
+if ! git cat-file -e "${base:-none}^{commit}" 2>/dev/null; then
+  echo "Can't find a commit to compare mod versions against (${base:-no origin/main}). Run: git fetch origin main"
+  exit 1
+fi
+
+version_of() { sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' | head -n 1; }
 
 if [ $# -gt 0 ]; then
   dirs=''
@@ -29,6 +42,17 @@ for dir in $dirs; do
     continue
   fi
   checked=$((checked + 1))
+
+  if ! git diff --quiet "$base" -- "$dir/hooks"; then
+    before=$(git show "$base:$dir/.claude-plugin/plugin.json" 2>/dev/null | version_of)
+    now=$(version_of <"$dir/.claude-plugin/plugin.json")
+    # A mod that is new since the base has no installed copies to reach.
+    if [ -n "$before" ] && [ "$before" = "$now" ]; then
+      echo "$name: FAILED, its hooks changed but its version is still $now, so installed copies won't update. Bump the version in plugin.json."
+      failed="$failed $name"
+      continue
+    fi
+  fi
 
   if grep -rnE '@ts-(ignore|nocheck|expect-error)' "$dir/hooks" "$dir/tests" 2>/dev/null; then
     echo "$name: FAILED, a @ts- comment turns off type checking (docs/mods.md, rule 3)"

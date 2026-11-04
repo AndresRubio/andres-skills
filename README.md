@@ -18,7 +18,7 @@ Install from the marketplace: `claude plugin marketplace add https://github.com/
 
 ## Mods
 
-Mods are plugins whose TypeScript hooks module runs inside the Claude Code session: it can refuse or rewrite tool calls, add a slash command, and draw a pane, a band above the prompt, a status line entry or a toast. Most of these are tied to one of my repos and do nothing anywhere else. They need a Claude Code version with mod support (built and tested on 2.1.309).
+Mods are plugins whose TypeScript hooks module runs inside the Claude Code session: it can refuse or rewrite tool calls, add a slash command, and draw a pane, a band above the prompt, a status line entry or a toast. Most of these are tied to one of my repos and do nothing anywhere else. They need a Claude Code version with mod support (tested on 2.1.317).
 
 | Mod | Where it acts | What it does |
 |---|---|---|
@@ -31,7 +31,7 @@ Mods are plugins whose TypeScript hooks module runs inside the Claude Code sessi
 | [`jev-status`](plugins/jev-status/) | every session | Shows `local-jev: up` or `down` in the status line, checked every minute, with a toast when the server goes down. `/jev-start` starts the server, or prints the `launchctl` command to start it when a login agent manages it. |
 | [`pipeline-pane`](plugins/pipeline-pane/) | any repo running claude-pipeline | A pane showing the current `/claude-pipeline:ship` run: the stage running and its time, finished stages, subagents and the last events, with a toast when the run ends. |
 
-Install one with `claude plugin install <mod>@andres-skills` once the marketplace is added. `scripts/check-mods.sh` validates and tests every mod, and CI runs it on each pull request that touches `plugins/`. [`docs/mods.md`](docs/mods.md) has the rules for changing or adding a mod and how to type-check one.
+Install one with `claude plugin install <mod>@andres-skills` once the marketplace is added. `scripts/check-mods.sh` validates and tests every mod, and CI runs it on each pull request and push to main that touches `plugins/`. [`docs/mods.md`](docs/mods.md) has the rules for changing or adding a mod and how to type-check one.
 
 ## Install
 
