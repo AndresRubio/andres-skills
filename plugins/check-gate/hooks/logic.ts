@@ -28,14 +28,19 @@ EOF
 `
 
 // One shell word: plain characters, backslash escapes and quoted runs.
-const WORD = String.raw`(?:[^\s"'\;&|()]|\\.|"[^"]*"|'[^']*')+`
-const GIT_OPTION = String.raw`(?:-[Cc]\s+${WORD}|--(?:git-dir|work-tree|namespace|super-prefix|config-env)\s+${WORD}|--[A-Za-z][\w-]*(?:=${WORD})?|-[A-Za-z]+)`
+const WORD = String.raw`(?:[^\s"'\\;&|()]|\\.|"[^"]*"|'[^']*')+`
+// Each option reads one way only: the catch-all forms skip what takes a separate
+// value, and a word's parts don't overlap. Any choice here makes the regex exponential.
+const TAKES_NEXT_WORD = String.raw`(?:-[Cc]|--(?:git-dir|work-tree|namespace|super-prefix|config-env))\s`
+const GIT_OPTION = String.raw`(?:-[Cc]\s+${WORD}|--(?:git-dir|work-tree|namespace|super-prefix|config-env)\s+${WORD}|(?!${TAKES_NEXT_WORD})--[A-Za-z][\w-]*(?:=${WORD})?|(?!${TAKES_NEXT_WORD})-[A-Za-z]+)`
 // A shell that runs the string after it, up to where that string opens.
 const NESTED_SHELL_START = String.raw`(?:^|[\s;&|("'/])(?:(?:ba|z|da|k)?sh(?:\s+-\w+)*\s+-\w*c|eval)\s*`
 // A quote before `git` counts only when it opens a string a shell will run.
 // Checked inside the match, so other quoted text can't hide a later commit.
+// `-c commit.<key>` counts as a commit: sessions set it around `"$@"` or before a
+// `rebase --exec`, where the real subcommand is out of sight.
 const GIT_COMMIT = new RegExp(
-  String.raw`(?:^|[\s;&|(\x60/]|(?<=${NESTED_SHELL_START})['"])git((?:\s+${GIT_OPTION})*)\s+commit(?![\w-])`,
+  String.raw`(?:^|[\s;&|(\x60/]|(?<=${NESTED_SHELL_START})['"])git((?:\s+${GIT_OPTION})*)\s+(?:commit(?![\w-])|-c\s+commit\.)`,
   'g',
 )
 
@@ -117,8 +122,8 @@ function afterHeredocs(text: string, newline: number, heredocs: readonly { tag: 
 // Splits shell text into words and operators, dropping comments, redirections
 // and heredoc bodies. `openQuote` is where it stopped at a quote that never
 // closes, as when the text ends inside a string; `inHeredoc`, that it ended
-// inside a heredoc body.
-function lex(text: string): { tokens: Token[]; openQuote?: number; inHeredoc?: boolean } {
+// inside a heredoc body. `stopAtOperator` ends it at the first operator.
+function lex(text: string, stopAtOperator = false): { tokens: Token[]; openQuote?: number; inHeredoc?: boolean } {
   const tokens: Token[] = []
   let heredocs: { tag: string; isTabbed: boolean }[] = []
   let i = 0
@@ -126,6 +131,7 @@ function lex(text: string): { tokens: Token[]; openQuote?: number; inHeredoc?: b
     const c = text.charAt(i)
     if (c === '\n') {
       tokens.push({ op: '\n' })
+      if (stopAtOperator) return { tokens }
       i = afterHeredocs(text, i, heredocs)
       if (i === -1) return { tokens, inHeredoc: true }
       heredocs = []
@@ -145,6 +151,7 @@ function lex(text: string): { tokens: Token[]; openQuote?: number; inHeredoc?: b
         while (text.charAt(i) === ' ' || text.charAt(i) === '\t') i += 1
       } else if (op !== undefined) {
         tokens.push({ op })
+        if (stopAtOperator) return { tokens }
         i += op.length
         continue
       }
@@ -443,8 +450,8 @@ const TAKES_VALUE = /^(?:-[a-zA-Z]*[mFCct]|--(?:message|file|author|date|templat
 // another option's value, a path after the double dash and a comment don't count.
 // A word that may be a value is read as one, because that leaves the commit gated.
 function isDryRun(rest: string): boolean {
-  const { tokens, openQuote } = lex(rest)
-  const args = openQuote === undefined ? tokens : lex(rest.slice(0, openQuote)).tokens
+  const { tokens, openQuote } = lex(rest, true)
+  const args = openQuote === undefined ? tokens : lex(rest.slice(0, openQuote), true).tokens
   let isDry = false
   let isValue = false
   for (const token of args) {

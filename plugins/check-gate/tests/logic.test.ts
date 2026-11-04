@@ -249,6 +249,50 @@ describe('findCommit', () => {
     expect(findCommit('git commit --dry-run && git commit -m x')).toEqual({})
   })
 
+  test('stays fast on text it could read many ways', async () => {
+    const commands = [
+      'git -c ' + '\\\\'.repeat(18) + ' x',
+      'git -c ' + 'a\\b'.repeat(24) + ' x',
+      'git ' + '-c '.repeat(32) + 'status',
+      'git ' + '-C '.repeat(32) + 'status',
+      'git ' + '--git-dir '.repeat(32) + 'status',
+      'git ' + '--namespace '.repeat(32) + 'status',
+      'git ' + '-c --work-tree '.repeat(16) + 'status',
+    ]
+    for (const command of commands) {
+      const started = Date.now()
+      expect(findCommit(command)).toBeUndefined()
+      expect(Date.now() - started).toBeLessThan(200)
+    }
+  })
+
+  test('still reads what those options and words mean', async () => {
+    expect(findCommit('git -c a=' + '\\\\'.repeat(500) + ' commit -m x')).toEqual({})
+    expect(findCommit('git -c a\\ b=c commit -m x')).toEqual({})
+    expect(findCommit('git -C /a\\ b commit -m x')).toEqual({ dir: '/a b' })
+    expect(findCommit('git --no-pager -c a=b -C /other commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit('git --namespace=x commit -m x')).toEqual({})
+    expect(findCommit('git --namespace x commit -m x')).toEqual({})
+    expect(findCommit('git -C commit commit -m x')).toEqual({ dir: 'commit' })
+    // The word after -C or -c is its value, so there's no commit here.
+    expect(findCommit('git -C commit')).toBeUndefined()
+    expect(findCommit('git -c commit')).toBeUndefined()
+    expect(findCommit('git --namespace commit')).toBeUndefined()
+  })
+
+  test('takes a commit setting on the command line for a commit', async () => {
+    // The real subcommand can be out of sight, as these from real sessions show.
+    expect(findCommit('git -c user.name=t -c commit.gpgsign=false "$@"')).toEqual({})
+    expect(findCommit("git -c commit.gpgsign=false rebase -q --root --exec 'git -c commit.gpgsign=false commit --amend'")).toEqual({})
+    expect(findCommit('git -C /other -c commit.gpgsign=false "$@"')).toEqual({ dir: '/other' })
+    // The folder still comes from every option when the subcommand is in sight.
+    expect(findCommit('git -c commit.gpgsign=false -C /other commit -m x')).toEqual({ dir: '/other' })
+    expect(findCommit('git -c commit.gpgsign=false --dry-run')).toBeUndefined()
+    // A value that merely starts with the word isn't one.
+    expect(findCommit('git -c committer.name=x status')).toBeUndefined()
+    expect(findCommit('git -c a=commit.b status')).toBeUndefined()
+  })
+
   test('ignores what is not a commit', async () => {
     expect(findCommit('git status')).toBeUndefined()
     expect(findCommit('git log --grep commit')).toBeUndefined()
