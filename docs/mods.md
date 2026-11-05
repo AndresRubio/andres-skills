@@ -4,6 +4,14 @@ Every folder in `plugins/` except `claude-pipeline/` is a mod: a Claude Code plu
 
 `plugins/check-gate/` is the reference mod. It has a gate on Bash calls, a band above the prompt, a background process with streamed output, a slash command, a `$.state` atom, `$.store`, and tests that mock the engine. Copy its patterns.
 
+## The Python mod
+
+`plugins/humanizer/` is the one mod with no TypeScript module. Its `hooks/hooks.json` declares Python command hooks, because the checks are text parsing that needs nothing from the engine, and a port would mean rewriting the code and its tests with no change anyone could see. Write new mods in TypeScript.
+
+`scripts/check-mods.sh` recognises this kind of mod by a `hooks/hooks.json` with no `"modules"` and tests at `tests/test_*.py`. It validates the plugin, runs those tests with `python3 -m unittest`, and requires a version bump when `hooks/` or `skills/` change. The numbered rules and the Tests section below are about the TypeScript API and don't apply to it.
+
+Its commit check is an exception to the Guards section: when git can't be read, the commit goes through. This is deliberate, since it checks writing style and a broken check shouldn't stop work.
+
 ## A mod's folder
 
 ```text
