@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On, ProcessRunResult } from 'claude-code'
 
-import { FINGERPRINT } from '../hooks/logic'
+import { FINGERPRINT, GRACE_MS } from '../hooks/logic'
 
 const CHECK = ['/bin/zsh', '-ic', 'bash scripts/check.sh 2>&1']
 
@@ -42,13 +42,23 @@ type World = {
   dropPrompts: boolean
   toasts: string[]
   allowed: number
+  // The engine refuses every wait the gate asks for.
+  isSleepRefused: boolean
   clock: ReturnType<typeof mock.clock>
+}
+
+// A clock whose waits the engine refuses. It holds nothing, so there is nothing to move.
+function refusedClock(on: On): ReturnType<typeof mock.clock> {
+  on('clock.now', () => ({ value: 1_000 }))
+  on('clock.sleep', () => ({ deny: 'no timers' }))
+  const done = async () => undefined
+  return { now: () => 1_000, advance: done, set: done, settle: done, sleep: done }
 }
 
 // Stands for the engine, a repo at /repo and a second one at /other whose
 // check always fails: git, the check script and the tool beneath the plugin.
 function repo(on: On, overrides: Partial<World> = {}): World {
-  const clock = mock.clock(on, { now: 1_000 })
+  const clock = overrides.isSleepRefused ? refusedClock(on) : mock.clock(on, { now: 1_000 })
   const world: World = {
     tree: 'tree-1',
     check: { exitCode: 1, stdout: FAILING },
@@ -64,6 +74,7 @@ function repo(on: On, overrides: Partial<World> = {}): World {
     dropPrompts: false,
     toasts: [],
     allowed: 0,
+    isSleepRefused: false,
     clock,
     ...overrides,
   }
@@ -119,28 +130,42 @@ function repo(on: On, overrides: Partial<World> = {}): World {
   return world
 }
 
-type Caller = { tool: { call: (input: { tool: 'Bash'; command: string }) => Promise<unknown> } }
+type Caller = { tool: { call: (input: { tool: 'Bash'; command: string; agentId?: string }) => Promise<unknown> } }
 
 // What the model reads when the call was refused, else undefined.
-async function commit($: Caller, command = 'git commit -m "x"') {
-  const ran = (await $.tool.call({ tool: 'Bash', command })) as { deny?: string; isError?: boolean; text?: string }
+async function commit($: Caller, command = 'git commit -m "x"', agentId?: string) {
+  // `agentId` names the subagent whose loop makes the call; the main conversation has none.
+  const input = agentId === undefined ? { tool: 'Bash' as const, command } : { tool: 'Bash' as const, command, agentId }
+  const ran = (await $.tool.call(input)) as { deny?: string; isError?: boolean; text?: string }
   return ran.deny ?? (ran.isError ? ran.text : undefined)
 }
 
-// A commit on a tree nobody has checked: refused while the checks start in the
-// background, which then run to their end.
+// A commit whose checks are held past the gate's wait: what the model reads
+// once the wait is over.
+async function waitedOut($: Caller, world: World, command?: string) {
+  const call = commit($, command)
+  await world.clock.settle()
+  await world.clock.advance(GRACE_MS)
+  return call
+}
+
+// A commit on a tree nobody has checked, whose checks outlast the gate's wait:
+// refused while they run in the background, which then run to their end.
 async function firstCommit($: Caller, world: World, command?: string) {
-  const refused = await commit($, command)
+  world.hold = true
+  const refused = await waitedOut($, world, command)
   expect(refused).toContain('have no result for this tree yet')
   expect(refused).toContain('running now in the background: bash scripts/check.sh')
+  world.hold = false
+  world.release()
   await world.clock.settle()
   return refused
 }
 
-test('a commit with no result starts the checks and is refused; the next one reads their failure', async ($, on) => {
-  const world = repo(on)
+test('a commit whose checks outlast the wait is refused; the next one reads their failure', async ($, on) => {
+  const world = repo(on, { hold: true })
 
-  const pending = await commit($)
+  const pending = await waitedOut($, world)
 
   expect(world.allowed).toBe(0)
   expect(world.spawns).toBe(1)
@@ -148,6 +173,7 @@ test('a commit with no result starts the checks and is refused; the next one rea
   expect(pending).toContain('gets a message when they finish')
   expect(pending).toContain('do not edit files in repo until they report')
 
+  world.release()
   await world.clock.settle()
   expect(world.sent).toHaveLength(1)
   expect(world.sent[0]).toContain('Check gate: Checks fail in repo: pytest')
@@ -179,8 +205,8 @@ test('a passing check reports back, lets the commit through, and is reused for t
 test('a commit while the checks run is refused without a second run', async ($, on) => {
   const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, hold: true })
 
-  await commit($)
-  const again = await commit($)
+  await waitedOut($, world)
+  const again = await waitedOut($, world)
 
   expect(again).toContain('still running in the background')
   expect(world.spawns).toBe(1)
@@ -200,7 +226,7 @@ test('a commit refused on a run a turn end started is told its outcome too', asy
   await world.clock.settle()
   expect(world.spawns).toBe(1)
 
-  const refused = await commit($)
+  const refused = await waitedOut($, world)
   expect(refused).toContain('still running in the background')
   expect(world.spawns).toBe(1)
 
@@ -214,7 +240,7 @@ test('a commit refused on a run a turn end started is told its outcome too', asy
 test('a run that replaces the one a commit was refused on reports in its place', async ($, on) => {
   const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, hold: true })
 
-  await commit($)
+  await waitedOut($, world)
   // The tree changes under the run, and the next turn end starts a fresh one.
   world.tree = 'tree-2'
   await $.tool.call({ tool: 'Edit', file_path: '/repo/src/a.py', old_string: 'a', new_string: 'b' })
@@ -227,6 +253,295 @@ test('a run that replaces the one a commit was refused on reports in its place',
   expect(world.sent).toHaveLength(1)
   expect(world.sent[0]).toContain('the checks passed in repo')
   expect(await commit($)).toBeUndefined()
+})
+
+test('checks that pass within the wait let the commit through in the same call', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING } })
+
+  expect(await commit($)).toBeUndefined()
+
+  expect(world.allowed).toBe(1)
+  expect(world.spawns).toBe(1)
+  // Nobody was refused, so nothing is reported.
+  await world.clock.settle()
+  expect(world.sent).toEqual([])
+})
+
+test('checks that fail within the wait refuse the commit with the failure', async ($, on) => {
+  const world = repo(on)
+
+  const refused = await commit($)
+
+  expect(world.allowed).toBe(0)
+  expect(refused).toContain('checks fail in repo')
+  expect(refused).toContain('Failed: pytest')
+  expect(refused).toContain('FAILED tests/test_x.py::test_y')
+  await world.clock.settle()
+  expect(world.sent).toEqual([])
+})
+
+test('checks that cannot start within the wait refuse the commit with the reason', async ($, on) => {
+  const world = repo(on, { check: 'cannot start' })
+
+  const refused = await commit($)
+
+  expect(world.allowed).toBe(0)
+  expect(refused).toContain('could not run')
+  expect(refused).toContain('ENOENT')
+  await world.clock.settle()
+  expect(world.sent).toEqual([])
+})
+
+test('a run a turn end started that ends within the wait lets the commit through', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, hold: true })
+
+  await $.tool.call({ tool: 'Edit', file_path: '/repo/src/a.py', old_string: 'a', new_string: 'b' })
+  await $.turn.complete(TURN_END)
+  await world.clock.settle()
+
+  // The edit is the one call let through so far.
+  const call = commit($)
+  await world.clock.settle()
+  expect(world.allowed).toBe(1)
+  world.release()
+  await world.clock.settle()
+
+  expect(await call).toBeUndefined()
+  expect(world.allowed).toBe(2)
+  expect(world.spawns).toBe(1)
+  expect(world.sent).toEqual([])
+})
+
+test('a run started over during the wait reports in place of the one the commit waited on', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, hold: true })
+  on('command.run', () => ({ text: '' }))
+
+  const call = commit($)
+  await world.clock.settle()
+  // The person runs the checks again on the same tree, which stops the first run.
+  await $.command.run({
+    command: 'check-gate',
+    args: '',
+    origin: { kind: 'composer' },
+    presentation: { isFullscreen: false, columns: 120 },
+  })
+  await world.clock.settle()
+  expect(world.spawns).toBe(2)
+
+  await world.clock.advance(GRACE_MS)
+  expect(await call).toContain('have no result for this tree yet')
+
+  world.release()
+  await world.clock.settle()
+  expect(world.sent).toHaveLength(1)
+  expect(world.sent[0]).toContain('the checks passed in repo')
+  expect(await commit($)).toBeUndefined()
+})
+
+test('files that change during the wait stop the commit, whatever the checks then say', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, hold: true })
+
+  const call = commit($)
+  await world.clock.settle()
+  world.tree = 'tree-2'
+  world.release()
+  await world.clock.settle()
+
+  const refused = await call
+  expect(refused).toContain('changed while it waited for the checks')
+  expect(refused).toContain('Run the commit again')
+  expect(world.allowed).toBe(0)
+  // The run passed, for the tree as it was.
+  expect(world.spawns).toBe(1)
+  expect(world.sent).toEqual([])
+})
+
+test('a tree checked again during the wait stops the commit that waited on the old one', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, hold: true })
+
+  const call = commit($)
+  await world.clock.settle()
+  world.tree = 'tree-2'
+  world.hold = false
+  await $.tool.call({ tool: 'Edit', file_path: '/repo/src/a.py', old_string: 'a', new_string: 'b' })
+  await $.turn.complete(TURN_END)
+  await world.clock.settle()
+  expect(world.spawns).toBe(2)
+
+  await world.clock.advance(GRACE_MS)
+  const refused = await call
+  expect(refused).toContain('changed while it waited for the checks')
+  // Only the edit went through.
+  expect(world.allowed).toBe(1)
+  expect(world.sent).toEqual([])
+
+  expect(await commit($)).toBeUndefined()
+  expect(world.allowed).toBe(2)
+  expect(world.spawns).toBe(2)
+})
+
+test('a commit that reads the result itself is sent no report, even when an earlier one was refused', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, hold: true })
+
+  expect(await waitedOut($, world)).toContain('gets a message when they finish')
+  const call = commit($)
+  await world.clock.settle()
+  world.release()
+  await world.clock.settle()
+
+  expect(await call).toBeUndefined()
+  expect(world.allowed).toBe(1)
+  expect(world.sent).toEqual([])
+})
+
+test('a run started over while a commit waits still sends that commit no report', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, hold: true })
+  on('command.run', () => ({ text: '' }))
+
+  expect(await waitedOut($, world)).toContain('gets a message when they finish')
+  const call = commit($)
+  await world.clock.settle()
+  await $.command.run({
+    command: 'check-gate',
+    args: '',
+    origin: { kind: 'composer' },
+    presentation: { isFullscreen: false, columns: 120 },
+  })
+  await world.clock.settle()
+  expect(world.spawns).toBe(2)
+  world.release()
+  await world.clock.settle()
+  // The second run has passed. The commit still waits on the first, which was
+  // stopped, until its wait is over; it then reads the stored result.
+  expect(world.sent).toEqual([])
+  await world.clock.advance(GRACE_MS)
+
+  expect(await call).toBeUndefined()
+  expect(world.allowed).toBe(1)
+  expect(world.sent).toEqual([])
+})
+
+test("a subagent's commit that reads the result does not take the main conversation's report", async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, hold: true })
+
+  expect(await waitedOut($, world)).toContain('gets a message when they finish')
+  const call = commit($, undefined, 'a1')
+  await world.clock.settle()
+  world.release()
+  await world.clock.settle()
+
+  expect(await call).toBeUndefined()
+  expect(world.allowed).toBe(1)
+  expect(world.sent).toHaveLength(1)
+  expect(world.sent[0]).toContain('the checks passed in repo')
+})
+
+test('a tree that cannot be read after the wait stops the commit', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, hold: true })
+
+  const call = commit($)
+  await world.clock.settle()
+  // git prints no tree.
+  world.tree = ''
+  world.release()
+  await world.clock.settle()
+
+  expect(await call).toContain("couldn't read the working tree of repo")
+  expect(world.allowed).toBe(0)
+})
+
+// Whether a write to the session's state holds /repo's row with the run over.
+function storesAFinishedRun(e: { value?: unknown }): boolean {
+  const shaped = e.value
+  if (typeof shaped !== 'object' || shaped === null || !('value' in shaped)) return false
+  const rows = shaped.value
+  if (typeof rows !== 'object' || rows === null || !('/repo' in rows)) return false
+  const row = rows['/repo']
+  return typeof row === 'object' && row !== null && 'status' in row && row.status !== 'running'
+}
+
+test('a result the session cannot keep stops the commit and promises no message', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING } })
+  on('state.set', (_, e, next) => (storesAFinishedRun(e) ? { deny: 'state is gone' } : next(e)))
+
+  const refused = await commit($)
+  await world.clock.settle()
+
+  // The run is over and left no result, so no run is left to report either.
+  expect(refused).toContain('ended or were started over while it waited')
+  expect(refused).toContain('Run the commit again')
+  expect(world.allowed).toBe(0)
+  expect(world.sent).toEqual([])
+})
+
+test('a run started over while its result is stored leaves the report to the new run', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, hold: true })
+  on('command.run', () => ({ text: '' }))
+  let store = () => undefined
+  let isHeld = false
+  on('state.set', async (_, e, next) => {
+    if (storesAFinishedRun(e) && !isHeld) {
+      isHeld = true
+      await new Promise<void>(resolve => {
+        store = () => {
+          resolve()
+          return undefined
+        }
+      })
+    }
+    return next(e)
+  })
+
+  expect(await waitedOut($, world)).toContain('gets a message when they finish')
+  // The first run ends, and the write of its result hangs.
+  world.release()
+  await world.clock.settle()
+  expect(isHeld).toBe(true)
+  await $.command.run({
+    command: 'check-gate',
+    args: '',
+    origin: { kind: 'composer' },
+    presentation: { isFullscreen: false, columns: 120 },
+  })
+  await world.clock.settle()
+  expect(world.spawns).toBe(2)
+
+  store()
+  await world.clock.settle()
+  expect(world.sent).toEqual([])
+
+  world.release()
+  await world.clock.settle()
+  expect(world.sent).toHaveLength(1)
+  expect(world.sent[0]).toContain('the checks passed in repo')
+})
+
+test('a failure read inside the wait is not reported a second time', async ($, on) => {
+  const world = repo(on, { hold: true })
+
+  await waitedOut($, world)
+  const call = commit($)
+  await world.clock.settle()
+  world.release()
+  await world.clock.settle()
+
+  expect(await call).toContain('Failed: pytest')
+  expect(world.sent).toEqual([])
+})
+
+test('a wait the engine refuses counts as one that ran out: the commit is refused', async ($, on) => {
+  const world = repo(on, { check: { exitCode: 0, stdout: PASSING }, hold: true, isSleepRefused: true })
+
+  const refused = await commit($)
+
+  expect(refused).toContain('have no result for this tree yet')
+  expect(refused).toContain('gets a message when they finish')
+  expect(world.allowed).toBe(0)
+  world.release()
+  // This clock holds nothing to settle, so the run's end is waited for by yielding.
+  for (let i = 0; i < 20_000 && world.sent.length === 0; i += 1) await Promise.resolve()
+  expect(world.sent).toHaveLength(1)
+  expect(world.sent[0]).toContain('the checks passed in repo')
 })
 
 test('a report the engine drops is toasted instead', async ($, on) => {

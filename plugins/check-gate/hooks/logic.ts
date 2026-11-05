@@ -780,6 +780,10 @@ export function bandLine(run: Run): string {
   }
 }
 
+// How long a commit waits for the checks before it is refused, in
+// milliseconds. The wait is the hook's own time, and a hook has ten seconds.
+export const GRACE_MS = 4_000
+
 // What the model reads when the gate stops a commit.
 export function denyText(run: Run): string {
   if (run.status === 'error') {
@@ -825,6 +829,23 @@ export function pendingText(run: Run, isNew: boolean): string {
     `${isNew ? 'They are running now' : 'They are still running'} in the background: ${run.command}.`,
     "The band above the prompt follows them, and the session's main conversation gets a message when they finish; commit again then. A subagent reports this refusal and stops.",
     `Do not start the checks yourself, and do not edit files in ${run.repo} until they report: a changed tree needs its own run.`,
+  ].join('\n')
+}
+
+// What the model reads when the files changed while its commit waited on the checks.
+export function movedText(run: Run): string {
+  return [
+    `Check gate: this commit was stopped because files in ${run.repo} changed while it waited for the checks, so their result would be for an older tree.`,
+    'Run the commit again once nothing is changing: it starts the checks for the tree as it is then.',
+  ].join('\n')
+}
+
+// What the model reads when no run is going after the wait and no result is
+// stored for the tree yet: a run ended or was started over at that moment.
+export function restartedText(run: Run): string {
+  return [
+    `Check gate: this commit was stopped because the checks in ${run.repo} ended or were started over while it waited, and the gate has not read a result for this tree yet.`,
+    'Run the commit again: it reads the result, or starts the checks for the tree as it is now.',
   ].join('\n')
 }
 
