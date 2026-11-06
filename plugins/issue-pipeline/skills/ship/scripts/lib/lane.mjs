@@ -1,0 +1,57 @@
+import { TRUSTED } from './lock.mjs';
+import { parseMarker } from './marker.mjs';
+
+const no = (reason) => ({ run: false, reason });
+const yes = (prompt, key) => ({ run: true, prompt, key, concurrency: `ship-${key}` });
+const names = (labels) => (labels ?? []).map((l) => (typeof l === 'string' ? l : l.name));
+const pipelinePrFor = (n, openPrs) => openPrs.find((p) => !p.isCrossRepository && (p.headRefName === `pipeline/${n}` || p.headRefName.startsWith(`pipeline/${n}-`)));
+
+export function laneTarget({ name, payload }, { openPrs = [] } = {}) {
+  if (name === 'issues' && payload.action === 'labeled') {
+    const { issue, label, sender } = payload;
+    if (!['pipeline', 'pipeline-go'].includes(label?.name)) return no(`label ${label?.name} is not an intake label`);
+    if (issue.pull_request) return no('pull requests are not issues');
+    if (issue.state !== 'open') return no('issue is not open');
+    if (names(issue.labels).includes('needs-local')) return no('needs-local issues run only on the local lane');
+    if (!TRUSTED.has(issue.author_association)) return no('issue author is not trusted');
+    if (!sender?.login) return no('no label sender');
+    // GitHub sends no author_association for the sender. In a solo repo the trusted labellers are
+    // the issue's (trusted) author and the repository owner.
+    if (sender?.login !== issue.user?.login && sender?.login !== payload.repository?.owner?.login) {
+      return no('label sender is not the issue author or the repo owner');
+    }
+    return yes(`/issue-pipeline:ship #${issue.number} --mode auto`, String(issue.number));
+  }
+  if (name === 'issue_comment' && payload.action === 'created') {
+    const { issue, comment } = payload;
+    if (issue.pull_request) return no('comment is on a pull request');
+    if (issue.state !== 'open') return no('issue is not open');
+    if (names(issue.labels).includes('needs-local')) return no('needs-local issues run only on the local lane');
+    if (!names(issue.labels).includes('needs-decision')) return no('issue is not waiting for a decision');
+    if (!TRUSTED.has(comment.author_association)) return no('commenter is not trusted');
+    if (!TRUSTED.has(issue.author_association)) return no('issue author is not trusted');
+    if (parseMarker(comment.body)) return no('pipeline comment');
+    const pr = pipelinePrFor(issue.number, openPrs);
+    if (pr && names(pr.labels).includes('needs-local')) return no('needs-local PRs are fixed only by the local runner');
+    return pr
+      ? yes(`/issue-pipeline:ship ${pr.number} --mode auto --fix`, String(issue.number))
+      : yes(`/issue-pipeline:ship #${issue.number} --mode auto`, String(issue.number));
+  }
+  if (name === 'pull_request' && payload.action === 'labeled') {
+    const pr = payload.pull_request;
+    if (payload.label?.name !== 'pipeline-fix') return no('label is not pipeline-fix');
+    if (pr.state !== 'open') return no('pull request is not open');
+    if (pr.head?.repo?.full_name !== pr.base?.repo?.full_name) return no('pull request is from a fork');
+    if (!String(pr.head?.ref ?? '').startsWith('pipeline/')) return no('not a pipeline branch');
+    if (names(pr.labels).includes('needs-local')) return no('needs-local PRs are fixed only by the local runner');
+    return yes(`/issue-pipeline:ship ${pr.number} --mode auto --fix`, `PR-${pr.number}`);
+  }
+  // The sweep (pipeline-ready) dispatches pipeline-ship with an issue number. Only users with write
+  // access, or the workflow token, can dispatch; stage 0 still checks the issue's eligibility.
+  if (name === 'workflow_dispatch') {
+    const raw = payload.inputs?.issue;
+    if (typeof raw !== 'string' || !/^[1-9]\d*$/.test(raw)) return no('workflow_dispatch needs a positive issue number input');
+    return yes(`/issue-pipeline:ship #${raw} --mode auto`, raw);
+  }
+  return no(`event ${name}/${payload.action ?? ''} is not routed`);
+}

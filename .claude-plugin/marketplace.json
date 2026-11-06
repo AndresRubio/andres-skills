@@ -4,8 +4,8 @@
   "metadata": { "description": "AndresRubio's Claude Code plugins" },
   "plugins": [
     {
-      "name": "claude-pipeline",
-      "source": "./plugins/claude-pipeline",
+      "name": "issue-pipeline",
+      "source": "./plugins/issue-pipeline",
       "description": "Issue-to-PR pipeline: ship, review, pipeline-setup."
     },
     {
@@ -46,7 +46,7 @@
     {
       "name": "pipeline-pane",
       "source": "./plugins/pipeline-pane",
-      "description": "Mod: a pane showing where a claude-pipeline /ship run stands."
+      "description": "Mod: a pane showing where an issue-pipeline /ship run stands."
     },
     {
       "name": "humanizer",

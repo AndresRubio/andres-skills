@@ -1,0 +1,11 @@
+{
+  "name": "issue-pipeline",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --import ./test/helpers/clean-env.mjs --test \"test/**/*.test.mjs\"",
+    "check": "npm test && claude plugin validate . --strict"
+  }
+}
