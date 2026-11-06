@@ -17,6 +17,8 @@ Work from the record. Your memory of a long or compacted session drops exactly t
 
 Run this block in a single shell call from the repo the session worked in, since variables don't carry over between calls and the git commands read the current directory. It finds this session's log by its id and also reads the logs of any subagents the session started. To review a session the user names, start the block with `LOG=<that file>` and `cd` into that session's repo first.
 
+In a worktree-isolated session the sandbox refuses this compound block, and most shell variables or command substitutions near a git command. Split it: write the log scans (everything except the git commands) into a script in the session's scratchpad directory, with the log path pasted in as a literal, run that script, then run each git command as its own plain call with no variables. The session log for a worktree lives under the worktree's own project directory in `~/.claude/projects/`.
+
 ```bash
 [ -n "$LOG" ] || LOG=$(find "$HOME/.claude/projects" -maxdepth 2 -name "${CLAUDE_CODE_SESSION_ID:-none}.jsonl" 2>/dev/null | head -1)
 if [ ! -s "$LOG" ]; then D="$HOME/.claude/projects/$(pwd | sed 's/[^a-zA-Z0-9]/-/g')"; LOG="$D/$(ls -t "$D" 2>/dev/null | grep '\.jsonl$' | head -1)"; fi
