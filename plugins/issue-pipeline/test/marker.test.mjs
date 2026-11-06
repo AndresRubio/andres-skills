@@ -43,7 +43,7 @@ test('defaultRun uses the Actions run URL when present', () => {
 });
 
 test('CLI marker prints the line; parse-marker reads stdin', () => {
-  const r = runCli(['marker', 'report', '--now', '2026-09-25T10:00:00Z'], { env: { GITHUB_RUN_ID: '' } });
+  const r = runCli(['marker', 'report', '--now', '2026-09-25T10:00:00Z']);
   assert.equal(r.code, 0, r.stderr);
   assert.equal(r.stdout, '**[issue-pipeline]** report · 2026-09-25T10:00:00Z · local\n');
   const p = runCli(['parse-marker'], { input: r.stdout });

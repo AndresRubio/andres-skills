@@ -50,7 +50,7 @@ test('latestScore reads only pipeline score comments', () => {
 test('CLI score prints the comment body for a score file', () => {
   const file = path.join(tempDir('score-'), 'score.json');
   writeFileSync(file, JSON.stringify(score));
-  const r = runCli(['score', '--head', HEAD, '--score-file', file, '--model', 'claude-haiku-5-5', '--now', '2026-10-20T10:00:00Z'], { env: { GITHUB_RUN_ID: '' } });
+  const r = runCli(['score', '--head', HEAD, '--score-file', file, '--model', 'claude-haiku-5-5', '--now', '2026-10-20T10:00:00Z']);
   assert.equal(r.code, 0, r.stderr);
   assert.equal(parseScoreBody(r.json().body).reviewQuality, 'actionable');
   assert.equal(runCli(['score', '--head', 'xyz', '--score-file', file]).code, 2);

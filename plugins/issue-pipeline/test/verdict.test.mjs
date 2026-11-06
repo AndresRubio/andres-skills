@@ -108,7 +108,7 @@ test('CLI verdict computes the verdict from a findings file and prints the body'
   const dir = tempDir();
   writeFileSync(path.join(dir, 'findings.json'), JSON.stringify([unambiguous]));
   writeFileSync(path.join(dir, 'risk.json'), JSON.stringify({ hits: [{ rule: 'dependency-changed', file: 'package.json', detail: 'manifest changed' }] }));
-  const r = runCli(['verdict', '--head', HEAD, '--findings-file', path.join(dir, 'findings.json'), '--diff-risk-file', path.join(dir, 'risk.json'), '--model', 'claude-fable-5-1', '--now', '2026-10-07T10:00:00Z'], { env: { GITHUB_RUN_ID: '' } });
+  const r = runCli(['verdict', '--head', HEAD, '--findings-file', path.join(dir, 'findings.json'), '--diff-risk-file', path.join(dir, 'risk.json'), '--model', 'claude-fable-5-1', '--now', '2026-10-07T10:00:00Z']);
   assert.equal(r.code, 0, r.stderr);
   assert.equal(r.json().verdict, 'revision-needed');
   assert.equal(r.json().body.split('\n')[0], '**[issue-pipeline]** verdict · 2026-10-07T10:00:00Z · local');

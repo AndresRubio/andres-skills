@@ -5,7 +5,7 @@
   "type": "module",
   "engines": { "node": ">=22" },
   "scripts": {
-    "test": "node --test \"test/**/*.test.mjs\"",
+    "test": "node --import ./test/helpers/clean-env.mjs --test \"test/**/*.test.mjs\"",
     "check": "npm test && claude plugin validate . --strict"
   }
 }

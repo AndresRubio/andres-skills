@@ -198,7 +198,7 @@ test('CLI stage-mark and run-record write run.json from the marks, the transcrip
   assert.equal(runCli(['stage-mark', '--run-dir', runDir, '--stage', '0', '--now', '2026-10-20T10:00:00Z']).code, 0);
   assert.equal(runCli(['stage-mark', '--run-dir', runDir, '--stage', 'nine']).code, 2);
   writeFileSync(path.join(runDir, 'grade.json'), JSON.stringify({ verdict: 'small-gaps' }));
-  const r = runCli(['run-record', '--run-dir', runDir, '--out', 'docs/pipeline/12/run.json', '--key', '12', '--kind', 'ship', '--lane', 'github', '--mode', 'auto', '--base', base, '--cwd', root, '--grade-file', path.join(runDir, 'grade.json'), '--now', '2026-10-20T10:30:00Z'], { env: { ISSUE_PIPELINE_EFFORT: 'high', GITHUB_RUN_ID: '' } });
+  const r = runCli(['run-record', '--run-dir', runDir, '--out', 'docs/pipeline/12/run.json', '--key', '12', '--kind', 'ship', '--lane', 'github', '--mode', 'auto', '--base', base, '--cwd', root, '--grade-file', path.join(runDir, 'grade.json'), '--now', '2026-10-20T10:30:00Z'], { env: { ISSUE_PIPELINE_EFFORT: 'high' } });
   assert.equal(r.code, 0, r.stderr);
   const run = JSON.parse(readFileSync(path.join(root, 'docs/pipeline/12/run.json'), 'utf8')).runs[0];
   assert.equal(run.runId, 'run-T3st');
@@ -215,7 +215,7 @@ test('CLI stage-mark and run-record write run.json from the marks, the transcrip
 test('CLI run-record without session.json still writes the run, with null usage', () => {
   const { root, base } = changedRepo();
   const runDir = tempDir('run-');
-  const r = runCli(recordArgs(runDir, root, base), { env: { GITHUB_RUN_ID: '' } });
+  const r = runCli(recordArgs(runDir, root, base));
   assert.equal(r.code, 0, r.stderr);
   const run = JSON.parse(readFileSync(path.join(root, 'docs/pipeline/12/run.json'), 'utf8')).runs[0];
   assert.equal(run.tokens.output, null);
@@ -230,7 +230,7 @@ test('CLI run-record with a missing grade or verdict file records null and names
   const runDir = tempDir('run-');
   const grade = path.join(runDir, 'grade.json');
   const verdict = path.join(runDir, 'verdict.json');
-  const r = runCli(recordArgs(runDir, root, base, ['--grade-file', grade, '--verdict-file', verdict]), { env: { GITHUB_RUN_ID: '' } });
+  const r = runCli(recordArgs(runDir, root, base, ['--grade-file', grade, '--verdict-file', verdict]));
   assert.equal(r.code, 0, r.stderr);
   const run = JSON.parse(readFileSync(path.join(root, 'docs/pipeline/12/run.json'), 'utf8')).runs[0];
   assert.equal(run.outcome.grade, null);
@@ -243,7 +243,7 @@ test('CLI run-record with a grade file that exists but does not parse still exit
   const { root, base } = changedRepo();
   const runDir = tempDir('run-');
   writeFileSync(path.join(runDir, 'grade.json'), '{"verdict": ');
-  const r = runCli(recordArgs(runDir, root, base, ['--grade-file', path.join(runDir, 'grade.json')]), { env: { GITHUB_RUN_ID: '' } });
+  const r = runCli(recordArgs(runDir, root, base, ['--grade-file', path.join(runDir, 'grade.json')]));
   assert.equal(r.code, 1);
 });
 
@@ -251,7 +251,7 @@ test('CLI run-record with a transcript that is gone writes null usage', () => {
   const { root, base } = changedRepo();
   const runDir = tempDir('run-');
   writeFileSync(path.join(runDir, 'session.json'), JSON.stringify({ sessions: [{ sessionId: 's1', transcriptPath: path.join(runDir, 'gone.jsonl'), firstSeen: '2026-10-20T10:00:00Z' }] }));
-  const r = runCli(recordArgs(runDir, root, base), { env: { GITHUB_RUN_ID: '' } });
+  const r = runCli(recordArgs(runDir, root, base));
   assert.equal(r.code, 0, r.stderr);
   assert.equal(JSON.parse(readFileSync(path.join(root, 'docs/pipeline/12/run.json'), 'utf8')).runs[0].tokens.input, null);
 });
@@ -259,13 +259,12 @@ test('CLI run-record with a transcript that is gone writes null usage', () => {
 test('CLI run-record counts earlier fix runs and refuses a malformed run.json without touching it', () => {
   const { root, base } = changedRepo();
   const runDir = tempDir('run-');
-  const env = { GITHUB_RUN_ID: '' };
-  assert.equal(runCli(recordArgs(runDir, root, base, ['--kind', 'fix']), { env }).code, 0);
-  assert.equal(runCli(recordArgs(runDir, root, base), { env }).code, 0);
+  assert.equal(runCli(recordArgs(runDir, root, base, ['--kind', 'fix'])).code, 0);
+  assert.equal(runCli(recordArgs(runDir, root, base)).code, 0);
   const file = path.join(root, 'docs/pipeline/12/run.json');
   assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')).runs.map((x) => x.outcome.fixRunsBefore), [0, 1]);
   writeFileSync(file, '{"version":1,"runs":[');
-  const bad = runCli(recordArgs(runDir, root, base), { env });
+  const bad = runCli(recordArgs(runDir, root, base));
   assert.equal(bad.code, 1);
   assert.match(bad.stderr, /run\.json/);
   assert.equal(readFileSync(file, 'utf8'), '{"version":1,"runs":[');
@@ -293,7 +292,7 @@ test('CLI run-record never aborts on an unreadable transcript', () => {
   const dir = path.join(runDir, 'a-directory.jsonl');
   mkdirSync(dir);
   writeFileSync(path.join(runDir, 'session.json'), JSON.stringify({ sessions: [{ sessionId: 's1', transcriptPath: dir, firstSeen: '2026-10-20T10:00:00Z' }] }));
-  const r = runCli(recordArgs(runDir, root, base), { env: { GITHUB_RUN_ID: '' } });
+  const r = runCli(recordArgs(runDir, root, base));
   assert.equal(r.code, 0, r.stderr);
   assert.equal(JSON.parse(readFileSync(path.join(root, 'docs/pipeline/12/run.json'), 'utf8')).runs[0].usd, null);
 });
@@ -303,7 +302,7 @@ test('CLI run-record and run-summary refuse a run.json whose runs hold a null, a
   const file = path.join(root, 'docs/pipeline/12/run.json');
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, '{"version":1,"runs":[null]}');
-  const record = runCli(recordArgs(tempDir('run-'), root, base), { env: { GITHUB_RUN_ID: '' } });
+  const record = runCli(recordArgs(tempDir('run-'), root, base));
   assert.equal(record.code, 1);
   assert.match(record.stderr, /docs\/pipeline\/12\/run\.json.*fix or remove it/);
   const summary = runCli(['run-summary', '--file', file]);
@@ -323,10 +322,9 @@ test('CLI run-record refuses an --out that leaves --cwd through a symlinked dire
   const dangling = path.join(tempDir('gone-'), 'missing');
   symlinkSync(dangling, path.join(root, 'ghost'), 'dir');
   const runDir = tempDir('run-');
-  const env = { GITHUB_RUN_ID: '' };
   for (const out of ['docs/pipeline/12/run.json', 'docs/run.json', 'ghost/run.json']) {
     const args = recordArgs(runDir, root, base);
-    const r = runCli(args.map((a, i) => (args[i - 1] === '--out' ? out : a)), { env });
+    const r = runCli(args.map((a, i) => (args[i - 1] === '--out' ? out : a)));
     assert.equal(r.code, 2, out);
     assert.match(r.stderr, /--out must be inside --cwd/);
   }
@@ -337,7 +335,7 @@ test('CLI run-record refuses an --out that leaves --cwd through a symlinked dire
 test('CLI run-record accepts a directory whose name starts with two dots', () => {
   const { root, base } = changedRepo();
   const args = recordArgs(tempDir('run-'), root, base);
-  const r = runCli(args.map((a, i) => (args[i - 1] === '--out' ? '..foo/run.json' : a)), { env: { GITHUB_RUN_ID: '' } });
+  const r = runCli(args.map((a, i) => (args[i - 1] === '--out' ? '..foo/run.json' : a)));
   assert.equal(r.code, 0, r.stderr);
   assert.equal(JSON.parse(readFileSync(path.join(root, '..foo/run.json'), 'utf8')).runs.length, 1);
 });
@@ -345,14 +343,13 @@ test('CLI run-record accepts a directory whose name starts with two dots', () =>
 test('CLI run-record twice for one run dir gives one run; a different kind appends; a fix retry does not count itself', () => {
   const { root, base } = changedRepo();
   const runDir = tempDir('run-');
-  const env = { GITHUB_RUN_ID: '' };
   const file = path.join(root, 'docs/pipeline/12/run.json');
   const runs = () => JSON.parse(readFileSync(file, 'utf8')).runs;
-  assert.equal(runCli(recordArgs(runDir, root, base), { env }).code, 0);
-  assert.equal(runCli(recordArgs(runDir, root, base), { env }).code, 0);
+  assert.equal(runCli(recordArgs(runDir, root, base)).code, 0);
+  assert.equal(runCli(recordArgs(runDir, root, base)).code, 0);
   assert.deepEqual(runs().map((r) => r.kind), ['ship']);
-  assert.equal(runCli(recordArgs(runDir, root, base, ['--kind', 'fix']), { env }).code, 0);
-  assert.equal(runCli(recordArgs(runDir, root, base, ['--kind', 'fix']), { env }).code, 0);
+  assert.equal(runCli(recordArgs(runDir, root, base, ['--kind', 'fix'])).code, 0);
+  assert.equal(runCli(recordArgs(runDir, root, base, ['--kind', 'fix'])).code, 0);
   assert.deepEqual(runs().map((r) => [r.kind, r.outcome.fixRunsBefore]), [['ship', 0], ['fix', 0]]);
   assert.deepEqual(readdirSync(path.dirname(file)).filter((f) => f.endsWith('.tmp')), []);
 });
@@ -373,7 +370,7 @@ test('CLI run-record with run.json.tmp committed as a symlink exits 1 and writes
   const victim = outsideFile();
   const out = path.join(root, 'docs/pipeline/12/run.json');
   symlinkSync(victim, `${out}.tmp`);
-  const r = runCli(recordArgs(runDir, root, base), { env: { GITHUB_RUN_ID: '' } });
+  const r = runCli(recordArgs(runDir, root, base));
   assert.equal(r.code, 1, r.stderr);
   assert.match(r.stderr, /run\.json\.tmp is a symlink/);
   assert.equal(readFileSync(victim, 'utf8'), OUTSIDE_BODY);
@@ -414,7 +411,7 @@ test('CLI run-record refuses an --out that is itself a symlink and writes nothin
   mkdirSync(path.dirname(out), { recursive: true });
   symlinkSync(victim, out);
   const runDir = tempDir('run-');
-  const r = runCli(recordArgs(runDir, root, base), { env: { GITHUB_RUN_ID: '' } });
+  const r = runCli(recordArgs(runDir, root, base));
   assert.equal(r.code, 1, r.stderr);
   assert.match(r.stderr, /docs\/pipeline\/12\/run\.json is a symlink/);
   assert.equal(readFileSync(victim, 'utf8'), body);
@@ -428,7 +425,7 @@ test('CLI run-record refuses an --out that is itself a symlink and writes nothin
   const farFile = outsideFile();
   symlinkSync(farFile, away);
   const args = recordArgs(runDir, root, base);
-  assert.equal(runCli(args.map((a, i) => (args[i - 1] === '--out' ? 'docs/pipeline/13/run.json' : a)), { env: { GITHUB_RUN_ID: '' } }).code, 2);
+  assert.equal(runCli(args.map((a, i) => (args[i - 1] === '--out' ? 'docs/pipeline/13/run.json' : a))).code, 2);
   assert.equal(readFileSync(farFile, 'utf8'), OUTSIDE_BODY);
 });
 
@@ -447,7 +444,7 @@ test('appendRun writes only { version, runs }: unknown top-level keys of a hand-
 test('CLI run-record leaves no .tmp in the run dir or beside run.json', () => {
   const { root, base } = changedRepo();
   const runDir = tempDir('run-');
-  assert.equal(runCli(recordArgs(runDir, root, base), { env: { GITHUB_RUN_ID: '' } }).code, 0);
+  assert.equal(runCli(recordArgs(runDir, root, base)).code, 0);
   assert.deepEqual(noTmp(runDir), []);
   assert.deepEqual(noTmp(path.join(root, 'docs/pipeline/12')), []);
 });
@@ -524,7 +521,7 @@ test('buildRun never finishes before its last stage mark, so startedAt does not 
   const { root, base: ref } = changedRepo();
   const runDir = tempDir('run-');
   stageMark(runDir, { stage: '0', now: new Date('2026-10-20T11:00:00Z') });
-  const r = runCli(recordArgs(runDir, root, ref), { env: { GITHUB_RUN_ID: '' } });
+  const r = runCli(recordArgs(runDir, root, ref));
   assert.equal(r.code, 0, r.stderr);
   const rec = JSON.parse(readFileSync(path.join(root, 'docs/pipeline/12/run.json'), 'utf8')).runs[0];
   assert.deepEqual([rec.startedAt, rec.finishedAt, rec.seconds], ['2026-10-20T11:00:00Z', '2026-10-20T11:00:00Z', 0]);
@@ -537,7 +534,7 @@ test('CLI run-record warns about a missing grade or verdict file with one JSON l
   const runDir = tempDir('run-');
   const grade = path.join(runDir, 'grade.json');
   const verdict = path.join(runDir, 'verdict.json');
-  const r = runCli(recordArgs(runDir, root, base, ['--grade-file', grade, '--verdict-file', verdict]), { env: { GITHUB_RUN_ID: '' } });
+  const r = runCli(recordArgs(runDir, root, base, ['--grade-file', grade, '--verdict-file', verdict]));
   assert.equal(r.code, 0, r.stderr);
   const lines = r.stderr.trim().split('\n').map((l) => JSON.parse(l));
   assert.deepEqual(lines, [{ warning: `${grade} not found, recorded null` }, { warning: `${verdict} not found, recorded null` }]);
@@ -548,7 +545,7 @@ test('CLI run-record with a directory as --grade-file exits 1: only ENOENT means
   const runDir = tempDir('run-');
   const dir = path.join(runDir, 'grade.json');
   mkdirSync(dir);
-  const r = runCli(recordArgs(runDir, root, base, ['--grade-file', dir]), { env: { GITHUB_RUN_ID: '' } });
+  const r = runCli(recordArgs(runDir, root, base, ['--grade-file', dir]));
   assert.equal(r.code, 1);
   assert.match(r.stderr, /EISDIR/);
   assert.match(r.stderr, /grade\.json cannot be read/, 'the error names the file');
@@ -562,7 +559,7 @@ test('CLI run-record with a grade or verdict file that is not a JSON object exit
     const file = path.join(runDir, 'g.json');
     writeFileSync(file, content);
     for (const flag of ['--grade-file', '--verdict-file']) {
-      const r = runCli(recordArgs(runDir, root, base, [flag, file]), { env: { GITHUB_RUN_ID: '' } });
+      const r = runCli(recordArgs(runDir, root, base, [flag, file]));
       assert.equal(r.code, 1, `${flag} ${content}`);
       assert.equal(JSON.parse(r.stderr.trim().split('\n').at(-1)).error, `${file} is not a JSON object with a verdict`);
     }
@@ -570,7 +567,7 @@ test('CLI run-record with a grade or verdict file that is not a JSON object exit
   // An object without a verdict key still reads as null.
   const file = path.join(runDir, 'ok.json');
   writeFileSync(file, '{}');
-  assert.equal(runCli(recordArgs(runDir, root, base, ['--grade-file', file]), { env: { GITHUB_RUN_ID: '' } }).code, 0);
+  assert.equal(runCli(recordArgs(runDir, root, base, ['--grade-file', file])).code, 0);
 });
 
 // --- metrics --since
@@ -608,7 +605,7 @@ test('CLI run-record writes its temp file in --run-dir: a regular run.json.tmp i
   const out = path.join(root, 'docs/pipeline/12/run.json');
   mkdirSync(path.dirname(out), { recursive: true });
   writeFileSync(`${out}.tmp`, 'keep');
-  const r = runCli(recordArgs(tempDir('run-'), root, base), { env: { GITHUB_RUN_ID: '' } });
+  const r = runCli(recordArgs(tempDir('run-'), root, base));
   assert.equal(r.code, 0, r.stderr);
   assert.equal(readFileSync(`${out}.tmp`, 'utf8'), 'keep');
   assert.equal(JSON.parse(readFileSync(out, 'utf8')).runs.length, 1);
@@ -621,7 +618,7 @@ test('CLI run-record refuses an --out reached through a symlinked directory insi
   // docs/pipeline/12 -> ../../config: inside the repo, so a containment check alone passes it, and the
   // write would land in config/run.json while `git add docs/pipeline/12/run.json` refuses the path.
   symlinkSync('../../config', path.join(root, 'docs/pipeline/12'), 'dir');
-  const r = runCli(recordArgs(tempDir('run-'), root, made.base), { env: { GITHUB_RUN_ID: '' } });
+  const r = runCli(recordArgs(tempDir('run-'), root, made.base));
   assert.equal(r.code, 2, r.stderr);
   assert.match(r.stderr, /--out must be inside --cwd/);
   assert.equal(readFileSync(path.join(root, 'config/run.json'), 'utf8'), '{"version":1,"runs":[],"keep":"me"}\n');
