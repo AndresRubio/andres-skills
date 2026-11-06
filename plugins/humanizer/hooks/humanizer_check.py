@@ -17,7 +17,10 @@ Modes, picked by the first argument:
           unclosed quote) is read whole, flags aside. A `git commit` is also
           denied while a line it adds to a .md/.txt/.rst file has any tell,
           whatever tool wrote it (a Bash heredoc never reaches the post hook); text
-          already in HEAD never blocks. The files are what the commit would take:
+          already in HEAD never blocks. That covers the lines of a prose file
+          the same commit moves, renames or removes, and a line of a changed
+          file whose prose is the same as before (only a code span, a URL or
+          the indent differs). The files are what the commit would take:
           the index, the working tree for -a or a named path, and whatever a `git
           add` earlier in the command is about to stage, in the repo a `cd` or
           `git -C` leads to. A folder given as a variable cannot be followed, and
@@ -537,13 +540,13 @@ def added_lines(top, names, cached):
     return lineas
 
 
-def index_texts(top, names):
-    """{name: its text in the index} from one `git cat-file --batch`. A name holding a
-    newline cannot be asked for this way and is left out."""
+def index_texts(top, names, rev=""):
+    """{name: its text in the index, or in `rev`} from one `git cat-file --batch`. A name
+    holding a newline cannot be asked for this way and is left out."""
     names = [n for n in names if "\n" not in n]
     if not names:
         return {}
-    raw = run_git(top, "cat-file", "--batch", stdin="".join(f":{n}\n" for n in names).encode())
+    raw = run_git(top, "cat-file", "--batch", stdin="".join(f"{rev}:{n}\n" for n in names).encode())
     texts, pos = {}, 0
     for name in names:
         end = raw.index(b"\n", pos)
@@ -556,13 +559,51 @@ def index_texts(top, names):
     return texts
 
 
+MAX_HEAD_FILES = 500
+
+
+def prose_form(line):
+    """A line as the checks read it: inline code, URLs and link targets are placeholders,
+    and the indent is gone. Two lines with the same form say the same thing in prose."""
+    return strip_layout(strip_code(line)).strip()
+
+
+def head_prose(top, takes_index, trees, kept):
+    """What HEAD already says, as prose forms: (the lines of every prose file the commit
+    removes, {name: the lines HEAD has for a file the commit changes}). A moved or renamed
+    file is one path removed and another added, so its text is already in HEAD however git
+    pairs the two; and a line whose only change is inside a code span is no new writing.
+    `trees` are the (folder, specs) whose working-tree deletions the commit takes. Both
+    are empty when git cannot answer."""
+    gone = []
+    base = ("diff", "--no-renames", "--name-only", "--diff-filter=D", "-z")
+    try:
+        if takes_index:
+            gone += git_names(top, *base, "--cached")
+        for where, specs in trees:
+            gone += git_names(where, *base, "HEAD", "--", *specs)
+        gone = [n for n in dict.fromkeys(gone) if is_prose_file(os.path.join(top, n))]
+        names = list(dict.fromkeys(gone + list(kept)))[:MAX_HEAD_FILES]
+        texts = index_texts(top, names, rev="HEAD")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return set(), {}
+
+    def forms(text):
+        return {f for f in map(prose_form, text.split("\n")) if f}
+
+    moved = set().union(*(forms(texts[n]) for n in gone if n in texts))
+    return moved, {n: forms(texts[n]) for n in kept if n in texts}
+
+
 def scope_prose(where, takes_index, tree_specs, adds):
     """{(repo, name): the lines the commit would add} for one commit's prose files. The
     working tree's copy wins over the index's for a file a -a, a named path or an add
     will take. Fences are blanked over the whole file first, so an added line inside one
-    stays code. Text already in HEAD never comes back, so old tells cannot block."""
+    stays code. Text already in HEAD never comes back, so old tells cannot block: that
+    covers the lines of a file the commit moves, which leave one path and arrive at another."""
     top = git_top(where)
     index, tree, new = [], [], []
+    trees = [(where, tree_specs)] if tree_specs else []
     if takes_index:
         index = git_names(top, "diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z")
     if tree_specs:
@@ -570,6 +611,7 @@ def scope_prose(where, takes_index, tree_specs, adds):
     for add_where, tracked_only, specs in adds:
         if git_top(add_where) != top:
             continue
+        trees.append((add_where, specs))
         tree += changed_names(add_where, specs)
         if not tracked_only:
             new += git_names(add_where, "ls-files", "-o", "--exclude-standard", "--full-name", "-z", "--", *specs)
@@ -583,6 +625,7 @@ def scope_prose(where, takes_index, tree_specs, adds):
     index = prose(index, new, tree)
     cached, worked = added_lines(top, index, cached=True), added_lines(top, tree, cached=False)
     index_text = index_texts(top, index)
+    moved, own = head_prose(top, takes_index, trees, tree + index)
     out = {}
     for name in new + tree + index:
         path = os.path.join(top, name)
@@ -596,10 +639,14 @@ def scope_prose(where, takes_index, tree_specs, adds):
         except (OSError, UnicodeDecodeError, KeyError):
             continue
         lines = cached if name in index else worked
-        if name not in new and lines is not None:
-            nuevas = lines.get(name, set())
+        whole = name in new or lines is None
+        said = moved | own.get(name, set())
+        if not whole or said:
+            nuevas = None if whole else lines.get(name, set())
+            crudas = text.split("\n")
             todas = blank_fences(text).split("\n")
-            text = "\n".join(l for i, l in enumerate(todas, 1) if i in nuevas)
+            text = "\n".join(l for i, (l, cruda) in enumerate(zip(todas, crudas), 1)
+                             if (nuevas is None or i in nuevas) and prose_form(cruda) not in said)
         out[top, name] = text
     return out
 

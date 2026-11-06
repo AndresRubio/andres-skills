@@ -540,7 +540,105 @@ class CommitStagedFiles(unittest.TestCase):
         git(self.repo, "add", ".")
         with mock.patch.object(hc.subprocess, "run", wraps=subprocess.run) as run:
             self.assertEqual("", self.commit())
-        self.assertLessEqual(run.call_count, 5)
+        # Six fixed calls whatever the number of files; the sixth reads HEAD's copies in one batch.
+        self.assertLessEqual(run.call_count, 6)
+
+    # A moved file: the commit removes the old path, so its text is already in HEAD.
+
+    def legado(self, nombre="docs/old.md", texto=None):
+        """A committed file that has a tell, as old docs do."""
+        self.escribir(nombre, texto or self.MALO)
+        git(self.repo, "commit", "-q", "-m", "legacy")
+
+    def mover(self, viejo, nuevo):
+        os.makedirs(os.path.dirname(os.path.join(self.repo, nuevo)), exist_ok=True)
+        os.rename(os.path.join(self.repo, viejo), os.path.join(self.repo, nuevo))
+
+    def test_a_file_moved_with_git_mv_does_not_bring_its_old_tells_back(self):
+        self.legado()
+        os.makedirs(os.path.join(self.repo, "guide"))
+        git(self.repo, "mv", "docs/old.md", "guide/new.md")
+        self.assertEqual("", self.commit())
+
+    def test_a_move_staged_by_an_add_in_the_same_command_passes_too(self):
+        self.legado()
+        self.mover("docs/old.md", "guide/new.md")
+        for cmd in ('git add -A && git commit -m "move"', 'git add . && git commit -m "move"',
+                    'git add docs guide && git commit -m "move"'):
+            self.assertEqual("", self.commit(cmd), cmd)
+
+    def test_a_moved_file_is_still_checked_on_the_lines_the_commit_writes(self):
+        self.legado()
+        os.makedirs(os.path.join(self.repo, "guide"))
+        git(self.repo, "mv", "docs/old.md", "guide/new.md")
+        self.escribir("guide/new.md", self.MALO + "\nA second point -- also new.\n")
+        out = self.commit()
+        self.assertIn("deny", out)
+        self.assertIn("guide/new.md", out)
+        self.assertIn("A second point", out)
+        self.assertNotIn("The tool works", out)
+
+    def test_a_moved_file_with_a_new_tell_is_denied_when_an_add_stages_the_move(self):
+        self.legado()
+        self.mover("docs/old.md", "guide/new.md")
+        self.escribir("guide/new.md", self.MALO + "\nA second point -- also new.\n", stage=False)
+        out = self.commit('git add -A && git commit -m "move"')
+        self.assertIn("A second point", out)
+        self.assertNotIn("The tool works", out)
+
+    def test_a_heavily_edited_move_still_passes_on_the_lines_it_kept(self):
+        # Too different for git to call it a rename; the kept line is in HEAD all the same.
+        self.legado(texto="One.\n\nThe tool works -- mostly.\n\nThree.\n")
+        self.mover("docs/old.md", "guide/new.md")
+        self.escribir("guide/new.md", "Uno.\n\nThe tool works -- mostly.\n\nTres.\nCuatro.\nCinco.\nSeis.\n")
+        git(self.repo, "add", "-A")  # stages the old path's removal as well
+        self.assertEqual("", self.commit())
+
+    def test_a_tell_copied_from_a_file_that_stays_is_new_writing(self):
+        self.legado()
+        self.escribir("guide/new.md", self.MALO)
+        self.assertIn("deny", self.commit())
+
+    def test_adding_only_the_new_path_leaves_the_old_file_in_place_so_it_counts(self):
+        self.legado()
+        self.mover("docs/old.md", "guide/new.md")
+        self.assertIn("deny", self.commit('git add guide/new.md && git commit -m "copy"'))
+
+    def test_a_moved_code_file_does_not_excuse_a_prose_line(self):
+        self.escribir("src/old.py", "x = 1  # The tool works -- mostly.\n")
+        git(self.repo, "commit", "-q", "-m", "legacy")
+        git(self.repo, "rm", "-q", "src/old.py")
+        self.escribir("notes.md", "x = 1  # The tool works -- mostly.\n")
+        self.assertIn("deny", self.commit())
+
+    # A changed line whose prose is the same as before: only a name in a code span moved.
+
+    CON_CODIGO = "Intro.\n\n- `old-name` -- the first command.\n"
+
+    def test_a_line_whose_only_change_is_inside_a_code_span_is_not_new_writing(self):
+        self.legado("notes.md", self.CON_CODIGO)
+        self.escribir("notes.md", self.CON_CODIGO.replace("old-name", "new-name"))
+        self.assertEqual("", self.commit())
+        self.escribir("notes.md", self.CON_CODIGO.replace("old-name", "newer-name"), stage=False)
+        self.assertEqual("", self.commit('git commit -q -a -m "rename"'))
+
+    def test_a_line_whose_prose_changed_is_checked_even_with_the_same_code(self):
+        self.legado("notes.md", self.CON_CODIGO)
+        self.escribir("notes.md", self.CON_CODIGO.replace("the first command", "the only command"))
+        out = self.commit()
+        self.assertIn("deny", out)
+        self.assertIn("the only command", out)
+
+    def test_a_moved_file_with_renamed_code_spans_passes(self):
+        self.legado("docs/old.md", self.CON_CODIGO)
+        self.mover("docs/old.md", "guide/new.md")
+        self.escribir("guide/new.md", self.CON_CODIGO.replace("old-name", "new-name"), stage=False)
+        self.assertEqual("", self.commit('git add -A && git commit -m "move and rename"'))
+
+    def test_the_same_prose_in_another_file_that_stays_does_not_excuse_a_line(self):
+        self.legado("notes.md", self.CON_CODIGO)
+        self.escribir("other.md", self.CON_CODIGO.replace("old-name", "new-name"))
+        self.assertIn("deny", self.commit())
 
     def test_a_file_at_this_plugins_skill_path_can_be_committed(self):
         self.escribir("plugins/humanizer/skills/humanizer/SKILL.md", self.MALO)
