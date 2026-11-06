@@ -74,10 +74,13 @@ It is a seatbelt, not a security boundary. It doesn't cover a `.git/config` or a
 ## Develop
 
 ```bash
+npm run check                                               # the tests, then the strict validation below
 npm test
 claude plugin validate . --strict                          # validates the marketplace
 claude plugin validate .claude-plugin/plugin.json --strict  # validates the plugin
 ```
+
+CI runs `npm run check` on a pinned Claude Code version. From the repository root, `git config core.hooksPath .githooks` turns on a pre-commit hook that runs it for commits that touch this folder.
 
 ## Testing
 

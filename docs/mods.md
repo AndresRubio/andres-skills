@@ -78,4 +78,4 @@ A guard is a hook that refuses a tool call or asks the person first. Review ever
 
 ## The pinned Claude Code version
 
-The mod API changes between releases, so CI installs a fixed version, `@anthropic-ai/claude-code@2.1.317`, and the README names the version the mods were tested on. To move to a newer release, install it locally, run `scripts/check-mods.sh` and the type-check on it, fix what breaks, then change the version in `.github/workflows/mods.yml` and in the README in the same commit.
+The mod API changes between releases, so CI installs a fixed version, `@anthropic-ai/claude-code@2.1.317`, and the README names the version the mods were tested on. To move to a newer release, install it locally, run `scripts/check-mods.sh` and the type-check on it, fix what breaks, then change the version in `.github/workflows/mods.yml` and in the README in the same commit. `.github/workflows/ci.yml` pins the same version for the issue-pipeline check; run `npm run check` in `plugins/issue-pipeline` on the new release and move that pin with the others.
