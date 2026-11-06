@@ -18,7 +18,7 @@ Install from the marketplace: `claude plugin marketplace add https://github.com/
 
 ## Mods
 
-Mods are plugins whose TypeScript hooks module runs inside the Claude Code session: it can refuse or rewrite tool calls, add a slash command, and draw a pane, a band above the prompt, a status line entry or a toast. Most of these are tied to one of my repos and do nothing anywhere else. They need a Claude Code version with mod support (tested on 2.1.317).
+Mods are plugins whose TypeScript hooks module runs inside the Claude Code session: it can refuse or rewrite tool calls, add a slash command, and draw a pane, a band above the prompt, a status line entry or a toast. The exception is `humanizer`, which uses Python command hooks. Most of these are tied to one of my repos and do nothing anywhere else. They need a Claude Code version with mod support (tested on 2.1.317).
 
 | Mod | Where it acts | What it does |
 |---|---|---|
@@ -30,6 +30,7 @@ Mods are plugins whose TypeScript hooks module runs inside the Claude Code sessi
 | [`mcp-inspector`](plugins/mcp-inspector/) | mcp-lab | A pane listing each MCP tool call with its duration, JSON-RPC error code and the start of its result, with a toast when an email or phone number got past redaction. Keeps a prompt-to-tool log; `/mcp-inspector export <path>` writes it as JSONL. |
 | [`jev-status`](plugins/jev-status/) | every session | Shows `local-jev: up` or `down` in the status line, checked every minute, with a toast when the server goes down. `/jev-start` starts the server, or prints the `launchctl` command to start it when a login agent manages it. |
 | [`pipeline-pane`](plugins/pipeline-pane/) | any repo running claude-pipeline | A pane showing the current `/claude-pipeline:ship` run: the stage running and its time, finished stages, subagents and the last events, with a toast when the run ends. |
+| [`humanizer`](plugins/humanizer/) | every session | Python command hooks, so it needs `python3`. Adds a reminder of the writing rules to each prompt and tells the model to rewrite tells it just wrote to a `.md`, `.markdown`, `.mdx`, `.txt` or `.rst` file. Refuses `git commit` and `gh pr create` or `edit` when the message, title or body has a strong tell. Refuses `git commit` when a line it would add to a prose file has any tell, counting the index, `-a`, paths named on the commit and an earlier `git add` in the same command, in the repo a `cd` or `git -C` leads to. It lets the commit through when git can't answer or the folder is a shell variable. Prefix the command with `HUMANIZER_OK=1` for a deliberate quotation. Shows the person any tells in the closing message of a turn. Checks English and Spanish, and skips files under `node_modules`, `.superpowers`, session scratchpads, `~/.claude/skills` and `~/.claude/hooks`, plus `~/.claude/CLAUDE.md` and this mod's own skill. Includes the `humanizer` rewriting skill, based on [blader/humanizer](https://github.com/blader/humanizer) (MIT). |
 
 Install one with `claude plugin install <mod>@andres-skills` once the marketplace is added. `scripts/check-mods.sh` validates and tests every mod, and CI runs it on each pull request and push to main that touches `plugins/`. [`docs/mods.md`](docs/mods.md) has the rules for changing or adding a mod and how to type-check one.
 

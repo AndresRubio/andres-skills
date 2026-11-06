@@ -47,6 +47,11 @@
       "name": "pipeline-pane",
       "source": "./plugins/pipeline-pane",
       "description": "Mod: a pane showing where a claude-pipeline /ship run stands."
+    },
+    {
+      "name": "humanizer",
+      "source": "./plugins/humanizer",
+      "description": "Mod: a writing reminder on each prompt, rewrite feedback on prose files, a refusal when a commit message or PR text has a strong tell or a commit adds a prose line with any tell, a note on closing messages, and the humanizer rewriting skill."
     }
   ]
 }

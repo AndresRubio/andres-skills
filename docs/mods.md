@@ -1,8 +1,16 @@
 # Working on the mods
 
-Every folder in `plugins/` except `claude-pipeline/` is a mod: a Claude Code plugin whose TypeScript hooks module runs inside the session, where it can refuse or rewrite tool calls, add slash commands and draw UI. Load the `plugin-authoring` skill before writing mod code. It has the API summary, the examples and the path to this build's types file (about 22,000 lines: grep it for the name at hand, such as `'tool.call'` or `Pane: {`). This file holds what the skill leaves out: rules these mods learned from failed runs, how their tests are built, and what to run before you push.
+Every folder in `plugins/` except `claude-pipeline/` is a mod: a Claude Code plugin whose TypeScript hooks module runs inside the session, where it can refuse or rewrite tool calls, add slash commands and draw UI. `plugins/humanizer/` uses Python command hooks instead, as described below. Load the `plugin-authoring` skill before writing mod code. It has the API summary, the examples and the path to this build's types file (about 22,000 lines: grep it for the name at hand, such as `'tool.call'` or `Pane: {`). This file holds what the skill leaves out: rules these mods learned from failed runs, how their tests are built, and what to run before you push.
 
 `plugins/check-gate/` is the reference mod. It has a gate on Bash calls, a band above the prompt, a background process with streamed output, a slash command, a `$.state` atom, `$.store`, and tests that mock the engine. Copy its patterns.
+
+## The Python mod
+
+`plugins/humanizer/` is the one mod with no TypeScript module. Its `hooks/hooks.json` declares Python command hooks, because the checks are text parsing that needs nothing from the engine, and a port would mean rewriting the code and its tests with no change anyone could see. Write new mods in TypeScript.
+
+`scripts/check-mods.sh` recognises this kind of mod by a `hooks/hooks.json` with no `"modules"` and tests at `tests/test_*.py`. It validates the plugin and runs those tests with `python3 -m unittest`. A mod that loses its tests fails the run. The numbered rules and the Tests section below are about the TypeScript API and don't apply to it.
+
+Its commit check is an exception to the Guards section. The commit goes through when git can't answer, when a file named by `-F` can't be read, when the folder is a shell variable, or when the hook's input isn't JSON. This is deliberate, since it checks writing style and a broken check shouldn't stop work.
 
 ## A mod's folder
 
@@ -61,8 +69,8 @@ A guard is a hook that refuses a tool call or asks the person first. Review ever
 
 ## Before you push
 
-1. Bump `version` in the mod's `plugin.json` when its `hooks/` change. `claude plugin update` goes by that number, so with the same number installed copies keep the old code and the update reports "already at the latest version". To install the new version on this machine, run `claude plugin marketplace update andres-skills`, then `claude plugin update <mod>@andres-skills`.
-2. Run `scripts/check-mods.sh`. It validates and tests every mod, or only the ones you name (`scripts/check-mods.sh check-gate boe-guard`), and fails a mod whose hooks changed while its version didn't. CI runs the same script on each pull request and push to main that touches `plugins/`. It runs `claude plugin validate` without `--strict`, which would turn the missing plugin icon (ICON_MISSING) into an error.
+1. Bump `version` in the mod's `plugin.json` when its `hooks/` or `skills/` change. `claude plugin update` goes by that number, so with the same number installed copies keep the old code and the update reports "already at the latest version". To install the new version on this machine, run `claude plugin marketplace update andres-skills`, then `claude plugin update <mod>@andres-skills`.
+2. Run `scripts/check-mods.sh`. It validates and tests every mod, or only the ones you name (`scripts/check-mods.sh check-gate boe-guard`), and fails a mod whose hooks or skills changed while its version didn't. CI runs the same script on each pull request and push to main that touches `plugins/`. It runs `claude plugin validate` without `--strict`, which would turn the missing plugin icon (ICON_MISSING) into an error.
 3. Type-check with `npx -p typescript tsc -p plugins/<mod>`. The mod's `tsconfig.json` extends `.claude-plugin/types/tsconfig.json`, which Claude Code writes (and git ignores) once it has loaded the mod from an install or a `--plugin-dir` session. Before that, the `plugin-authoring` skill says how to type-check against its types file. CI skips this step because those types only exist where the engine has loaded the mod.
 4. When the mod parses a command's output, feed the parser real output and keep it as a fixture. Capture it from a command that only reads: a status or list command, `--help`, or a dry run. When the only command that produces the output spends money or changes something (a GPU rental, a push, a sent message), build the fixture from the tool's docs or ask the person for a sample.
 

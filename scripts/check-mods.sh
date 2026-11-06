@@ -1,7 +1,9 @@
 #!/bin/sh
-# Validates and tests each mod: every plugins/<name>/ whose hooks/hooks.json
-# names a hooks module. CI runs this on pull requests and pushes to main that
-# touch plugins/.
+# Validates and tests each mod: every plugins/<name>/ except claude-pipeline.
+# A mod's hooks/hooks.json names a hooks module, or it has command hooks with
+# Python tests at tests/test_*.py. A folder that is neither fails the run, so a
+# mod can't drop out of CI by losing its tests. CI runs this on pull requests
+# and pushes to main that touch plugins/.
 # Name mods to check only those: scripts/check-mods.sh check-gate boe-guard
 # validate runs without --strict, which would fail every mod for its missing icon.
 set -u
@@ -33,22 +35,30 @@ checked=0
 
 for dir in $dirs; do
   name=${dir#plugins/}
-  if ! grep -q '"modules"' "$dir/hooks/hooks.json" 2>/dev/null; then
-    # Without names this skips claude-pipeline. A named folder must be a mod.
+  if [ "$name" = claude-pipeline ]; then
+    # Skipped in a full run. A named folder must be a mod.
     if [ $# -gt 0 ]; then
-      echo "$name: not a mod (no hooks module in $dir/hooks/hooks.json)"
+      echo "$name: not a mod"
       failed="$failed $name"
     fi
+    continue
+  elif grep -q '"modules"' "$dir/hooks/hooks.json" 2>/dev/null; then
+    kind=module
+  elif [ -f "$dir/hooks/hooks.json" ] && ls "$dir"/tests/test_*.py >/dev/null 2>&1; then
+    kind=python
+  else
+    echo "$name: FAILED, it has no hooks module in hooks/hooks.json and no Python tests at tests/test_*.py"
+    failed="$failed $name"
     continue
   fi
   checked=$((checked + 1))
 
-  if ! git diff --quiet "$base" -- "$dir/hooks"; then
+  if ! git diff --quiet "$base" -- "$dir/hooks" "$dir/skills"; then
     before=$(git show "$base:$dir/.claude-plugin/plugin.json" 2>/dev/null | version_of)
     now=$(version_of <"$dir/.claude-plugin/plugin.json")
     # A mod that is new since the base has no installed copies to reach.
     if [ -n "$before" ] && [ "$before" = "$now" ]; then
-      echo "$name: FAILED, its hooks changed but its version is still $now, so installed copies won't update. Bump the version in plugin.json."
+      echo "$name: FAILED, its hooks/ or skills/ changed but its version is still $now, so installed copies won't update. Bump the version in plugin.json."
       failed="$failed $name"
       continue
     fi
@@ -66,6 +76,17 @@ for dir in $dirs; do
     cat "$log"
     echo "$name: validate FAILED"
     failed="$failed $name"
+    continue
+  fi
+
+  if [ "$kind" = python ]; then
+    if python3 -m unittest discover -s "$dir/tests" -p 'test_*.py' >"$log" 2>&1; then
+      echo "$name: tests $(grep -E '^Ran ' "$log")"
+    else
+      cat "$log"
+      echo "$name: tests FAILED"
+      failed="$failed $name"
+    fi
     continue
   fi
 
