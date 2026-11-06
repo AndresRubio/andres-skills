@@ -1,16 +1,18 @@
 # Working on the mods
 
-Every folder in `plugins/` except `claude-pipeline/` is a mod: a Claude Code plugin whose TypeScript hooks module runs inside the session, where it can refuse or rewrite tool calls, add slash commands and draw UI. `plugins/humanizer/` uses Python command hooks instead, as described below. Load the `plugin-authoring` skill before writing mod code. It has the API summary, the examples and the path to this build's types file (about 22,000 lines: grep it for the name at hand, such as `'tool.call'` or `Pane: {`). This file holds what the skill leaves out: rules these mods learned from failed runs, how their tests are built, and what to run before you push.
+Every folder in `plugins/` except `claude-pipeline/` is a mod: a Claude Code plugin whose TypeScript hooks module runs inside the session, where it can refuse or rewrite tool calls, add slash commands and draw UI. `plugins/humanizer/` and `plugins/guards/` use Python command hooks instead, as described below. Load the `plugin-authoring` skill before writing mod code. It has the API summary, the examples and the path to this build's types file (about 22,000 lines: grep it for the name at hand, such as `'tool.call'` or `Pane: {`). This file holds what the skill leaves out: rules these mods learned from failed runs, how their tests are built, and what to run before you push.
 
 `plugins/check-gate/` is the reference mod. It has a gate on Bash calls, a band above the prompt, a background process with streamed output, a slash command, a `$.state` atom, `$.store`, and tests that mock the engine. Copy its patterns.
 
-## The Python mod
+## The Python mods
 
-`plugins/humanizer/` is the one mod with no TypeScript module. Its `hooks/hooks.json` declares Python command hooks, because the checks are text parsing that needs nothing from the engine, and a port would mean rewriting the code and its tests with no change anyone could see. Write new mods in TypeScript.
+`plugins/humanizer/` and `plugins/guards/` are the mods with no TypeScript module. Their `hooks/hooks.json` declares Python command hooks, because the checks are text parsing that needs nothing from the engine, and a port would mean rewriting the code and its tests with no change anyone could see. Write new mods in TypeScript.
 
-`scripts/check-mods.sh` recognises this kind of mod by a `hooks/hooks.json` with no `"modules"` and tests at `tests/test_*.py`. It validates the plugin and runs those tests with `python3 -m unittest`. A mod that loses its tests fails the run. The numbered rules and the Tests section below are about the TypeScript API and don't apply to it.
+`scripts/check-mods.sh` recognises this kind of mod by a `hooks/hooks.json` with no `"modules"` and tests at `tests/test_*.py`. It validates the plugin and runs those tests with `python3 -m unittest`. A mod that loses its tests fails the run. The numbered rules and the Tests section below are about the TypeScript API and don't apply to them.
 
-Its commit check is an exception to the Guards section. The commit goes through when git can't answer, when a file named by `-F` can't be read, when the folder is a shell variable, or when the hook's input isn't JSON. This is deliberate, since it checks writing style and a broken check shouldn't stop work.
+`guards` runs its four Bash checks from one entry point, `hooks/guards.py`, so Python starts once per Bash call. Each check stays a module of its own with a `check(payload)` function, its `DECISION`, and its own tests. A check that raises counts as no objection, as it did when each check was a hook of its own, and the entry point exits 1 so Claude Code still reports the error. The same holds for hook input that isn't a JSON object. These two cases are exceptions to the Guards section, kept from the hooks in `~/.claude/hooks` this mod was ported from. `merge_guard` fails closed when it can't read GitHub or can't tell which pull request a merge names.
+
+The humanizer commit check is an exception to the Guards section. The commit goes through when git can't answer, when a file named by `-F` can't be read, when the folder is a shell variable, or when the hook's input isn't JSON. This is deliberate, since it checks writing style and a broken check shouldn't stop work.
 
 ## A mod's folder
 

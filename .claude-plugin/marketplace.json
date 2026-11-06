@@ -52,6 +52,11 @@
       "name": "humanizer",
       "source": "./plugins/humanizer",
       "description": "Mod: a writing reminder on each prompt, rewrite feedback on prose files, a refusal when a commit message or PR text has a strong tell or a commit adds a prose line with any tell, a note on closing messages, and the humanizer rewriting skill."
+    },
+    {
+      "name": "guards",
+      "source": "./plugins/guards",
+      "description": "Mod: asks before a git command that throws away uncommitted work, and refuses a test or check run piped into a filter that hides its exit status, a /tmp path outside the session scratchpad in a Bash command or a file write, and a gh pr merge into a branch other than the default one."
     }
   ]
 }
