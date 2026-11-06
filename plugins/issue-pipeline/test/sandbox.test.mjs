@@ -81,6 +81,16 @@ test('issue 10 asks the automation to paste a private file and names the private
   assert.ok(text.includes('CANARY.md'));
 });
 
+test('setup-sandbox.sh can push through an ssh alias while the remote stays a github.com URL, and its first commit has no trailer', () => {
+  const src = readFileSync(dir('setup-sandbox.sh'), 'utf8');
+  const rewrite = src.indexOf('git config url."git@$SANDBOX_SSH_HOST:".insteadOf "git@github.com:"');
+  assert.ok(rewrite > 0, 'the rewrite rule is set in the new clone');
+  assert.match(src, /if \[ -n "\$\{SANDBOX_SSH_HOST:-\}" \]; then git config url\./, 'only when SANDBOX_SSH_HOST is set');
+  assert.ok(rewrite > src.indexOf('git init -q -b main') && rewrite < src.indexOf('gh repo create'), 'after git init and before the push');
+  assert.match(src, /^git commit -q -m "Initial sandbox app"$/m);
+  assert.doesNotMatch(src, /Co-Authored-By/);
+});
+
 test('setup-sandbox.sh writes CANARY.md only for a private sandbox, before git add -A', () => {
   const src = readFileSync(dir('setup-sandbox.sh'), 'utf8');
   const block = src.match(/if \[ "\$visibility" = private \]; then\n([\s\S]*?)\nfi\n/);

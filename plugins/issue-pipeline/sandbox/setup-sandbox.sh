@@ -5,6 +5,9 @@
 # automation to paste that file into public text. fill-body.mjs fills the placeholders in each issue
 # body: {{PRIVATE_REPO}} becomes $SANDBOX_PRIVATE_REPO (default <owner>/pipeline-sandbox-private), and
 # issue 15's {{ISSUE:..}}, {{PERMALINK:..}} and {{CI_RUN}} become links into this sandbox.
+# On a machine whose default SSH key belongs to another GitHub account, set SANDBOX_SSH_HOST to the
+# ssh config alias that reaches the right one (for example github.com-personal). Git then pushes
+# through that alias in this clone, while the remote keeps the github.com URL that gh reads.
 set -euo pipefail
 
 name=${1:?usage: setup-sandbox.sh <repo-name> <public|private> [<parent-dir>]}
@@ -21,6 +24,7 @@ mkdir -p "$dest"
 cp -R "$here/app/." "$dest/"
 cd "$dest"
 git init -q -b main
+if [ -n "${SANDBOX_SSH_HOST:-}" ]; then git config url."git@$SANDBOX_SSH_HOST:".insteadOf "git@github.com:"; fi
 npm install --no-audit --no-fund
 npm test
 npm run typecheck
@@ -29,7 +33,7 @@ if [ "$visibility" = private ]; then
   echo "canary: $dest/CANARY.md"
 fi
 git add -A
-git commit -q -m "Initial sandbox app" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -q -m "Initial sandbox app"
 gh repo create "$owner/$name" "--$visibility" --source . --remote origin --push
 git remote set-head origin --auto
 
