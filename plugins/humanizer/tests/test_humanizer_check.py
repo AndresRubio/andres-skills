@@ -129,6 +129,98 @@ class CommitQuoting(unittest.TestCase):
         self.assertIn("deny", commit('git commit -m "a — b'))
 
 
+class CommitHeredocOwner(unittest.TestCase):
+    """A heredoc or here-string is message text only when it feeds the commit or PR call:
+    it sits in the call's own pipeline, or in a pipeline that writes the file the call
+    reads with -F or --body-file. A script fed to python3 in the same command is not."""
+
+    PY = "python3 - <<'PY'\nprint('one — two')\nPY\n"
+
+    def setUp(self):
+        self.carpeta = tempfile.mkdtemp()
+
+    def escribir(self, nombre, texto):
+        with open(os.path.join(self.carpeta, nombre), "w") as f:
+            f.write(texto)
+
+    def commit(self, cmd):
+        """The hook's output with its dashes written out, so a report can be searched
+        for the line it quotes. json.dumps alone would print them as \\u2014."""
+        out = salida(hc.mode_commit, {"tool_input": {"command": cmd}, "cwd": self.carpeta})
+        return json.dumps(json.loads(out), ensure_ascii=False) if out else out
+
+    def test_a_python_heredoc_next_to_a_commit_file_is_not_the_message(self):
+        # 2026-11-06: refused over a dash in a patch script; the message was in cm.txt.
+        self.escribir("cm.txt", "Fix the gate\n")
+        self.assertEqual("", self.commit(self.PY + "git commit -F cm.txt"))
+
+    def test_the_commit_file_on_disk_is_still_read(self):
+        self.escribir("cm.txt", "Fix the gate -- at last\n")
+        out = self.commit(self.PY + "git commit -F cm.txt")
+        self.assertIn("deny", out)
+        self.assertIn("cm.txt", out)
+        self.assertNotIn("one — two", out)
+
+    def test_other_heredocs_are_not_the_message(self):
+        for cmd in ("node - <<'EOF'\nconsole.log('a — b')\nEOF\ngit commit -m 'Fix it'",
+                    "tee other.txt <<'EOF'\na — b\nEOF\ngit commit -m 'Fix it'",
+                    "cat > other.txt <<'EOF'\na — b\nEOF\ngit commit -F - <<<'Fix it'",
+                    "sort <<'EOF' | uniq && git commit -m 'Fix it'\na — b\nEOF"):
+            with self.subTest(cmd=cmd):
+                self.assertEqual("", self.commit(cmd))
+
+    def test_a_heredoc_feeding_the_commit_is_the_message(self):
+        for cmd in ("git commit -F - <<'EOF'\nFix — it\nEOF",
+                    "cat <<'EOF' | git commit -F -\nFix — it\nEOF",
+                    "cat <<'EOF' |\nFix — it\nEOF\n  git commit -F -",
+                    "gh pr create --title 'Fix it' --body-file - <<'EOF'\nA body — dashed\nEOF"):
+            with self.subTest(cmd=cmd):
+                self.assertIn("the heredoc:", self.commit(cmd))
+
+    def test_a_heredoc_writing_the_file_the_commit_reads_is_read_not_the_disk(self):
+        self.escribir("m.txt", "A clean old message\n")
+        for cmd in ("cat > m.txt <<'EOF' && git commit -F m.txt\nFix — it\nEOF",
+                    "cat <<'EOF' > ./m.txt\nFix — it\nEOF\ngit commit --file=m.txt",
+                    "cat >> m.txt <<'EOF'\nFix — it\nEOF\ngh pr edit 5 --body-file m.txt"):
+            with self.subTest(cmd=cmd):
+                out = self.commit(cmd)
+                self.assertIn("the heredoc:", out)
+                self.assertNotIn(os.path.join(self.carpeta, "m.txt"), out)
+
+    def test_only_the_heredoc_that_feeds_the_commit_is_reported(self):
+        for cmd in (self.PY + "git commit -F - <<'EOF'\nFix -- it\nEOF",
+                    "python3 - <<'PY'; git commit -F - <<'EOF'\nprint('one — two')\nPY\nFix -- it\nEOF"):
+            with self.subTest(cmd=cmd):
+                out = self.commit(cmd)
+                self.assertIn("Fix -- it", out)
+                self.assertNotIn("one — two", out)
+                self.assertEqual(1, out.count("the heredoc:"))
+
+    def test_a_here_string_counts_only_when_it_feeds_the_commit(self):
+        self.assertEqual("", self.commit("grep -q x <<<'a — b' && git commit -m 'Fix it'"))
+        self.assertIn("the here-string:", self.commit("git commit -F - <<<'Fix — it'"))
+
+    def test_a_heredoc_in_a_command_substitution_is_the_message(self):
+        # The variable can carry the body to the commit, so it counts.
+        cmd = self.PY + "msg=$(cat <<'EOF'\nFix -- it\nEOF\n) && git commit -m \"$msg\""
+        out = self.commit(cmd)
+        self.assertIn("deny", out)
+        self.assertEqual(1, out.count("the heredoc:"))
+        self.assertIn("Fix -- it", out)
+        self.assertNotIn("one — two", out)
+
+    def test_any_heredoc_in_a_substitution_counts_next_to_a_commit(self):
+        # The price of the rule: a script whose output lands in a variable is read too.
+        cmd = "x=$(python3 - <<'PY'\nprint('one — two')\nPY\n)\ngit commit -m 'Fix it'"
+        self.assertIn("one — two", self.commit(cmd))
+
+    def test_a_cat_heredoc_inside_the_message_word_is_still_read(self):
+        out = self.commit(self.PY + "git commit -m \"$(cat <<'EOF'\nFix -- it\nEOF\n)\"")
+        self.assertIn("the message:", out)
+        self.assertIn("Fix -- it", out)
+        self.assertNotIn("one — two", out)
+
+
 def post(ruta, tool_name, tool_input):
     entrada = {"file_path": ruta, **tool_input}
     return salida(hc.mode_post, {"tool_name": tool_name, "tool_input": entrada})
