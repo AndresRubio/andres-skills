@@ -11,6 +11,8 @@ import { makeRepoWithOrigin } from './helpers/git.mjs';
 const REPO = 'o/r';
 const HEAD = 'a'.repeat(40);
 const NOW = new Date('2026-10-07T10:00:00Z');
+// Every runReady call below names its run: the default reads GITHUB_RUN_ID, and inside GitHub
+// Actions that would put the CI run's URL in the markers these tests compare.
 const config = validateConfig({ tracker: { type: 'github' }, ciChecks: ['test'], mergeDeploys: false });
 const run = (name, conclusion) => ({ __typename: 'CheckRun', name, conclusion, status: 'COMPLETED' });
 const basePr = (over = {}) => ({
@@ -48,7 +50,7 @@ function fakeDeps({ prs, comments = [], issue: iss = issue(), files = ['src/list
 test('a green, accepted, current PR gets the ready label and reports on PR and issue, then the loop stops', async () => {
   const second = basePr({ number: 8, headRefName: 'pipeline/6-y', body: 'Fixes #6' });
   const { deps, calls } = fakeDeps({ prs: [basePr(), second], comments: verdictComment('accepted') });
-  const r = await runReady({ repo: REPO, config, now: NOW }, deps);
+  const r = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, deps);
   assert.deepEqual(r.actions.map((a) => [a.pr, a.action]), [[7, 'ready']]);
   assert.deepEqual(calls, [
     ['comment', 'pr', 7, '**[issue-pipeline]** ready · 2026-10-07T10:00:00Z · local'],
@@ -60,10 +62,10 @@ test('a green, accepted, current PR gets the ready label and reports on PR and i
 test('revision needed labels pipeline-fix once; a second pass does nothing', async () => {
   const pr = basePr({ statusCheckRollup: [run('test', 'SUCCESS'), run('pipeline-review', 'FAILURE')] });
   const first = fakeDeps({ prs: [pr], comments: verdictComment('revision-needed', [{ file: 'a', line: 1, severity: 'Important', kind: 'unambiguous', problem: 'p', impact: 'i', correction: 'c' }]) });
-  await runReady({ repo: REPO, config, now: NOW }, first.deps);
+  await runReady({ repo: REPO, config, now: NOW, run: 'local' }, first.deps);
   assert.deepEqual(first.calls, [['addLabel', 'pr', 7, 'pipeline-fix']]);
   const second = fakeDeps({ prs: [{ ...pr, labels: ['pipeline-fix'] }], comments: first.deps.fetchPrComments() });
-  await runReady({ repo: REPO, config, now: NOW }, second.deps);
+  await runReady({ repo: REPO, config, now: NOW, run: 'local' }, second.deps);
   assert.deepEqual(second.calls, []);
 });
 
@@ -71,19 +73,19 @@ test('human decision needed posts the judgment findings on the issue once per he
   const judgment = { file: 'src/list.ts', line: 40, severity: 'Critical', kind: 'judgment', problem: 'archive deletes', impact: 'data loss', correction: 'decide', options: ['hide', 'delete'], recommendation: 'hide' };
   const pr = basePr({ statusCheckRollup: [run('test', 'SUCCESS'), run('pipeline-review', 'FAILURE')] });
   const first = fakeDeps({ prs: [pr], comments: verdictComment('human-decision-needed', [judgment]) });
-  await runReady({ repo: REPO, config, now: NOW }, first.deps);
+  await runReady({ repo: REPO, config, now: NOW, run: 'local' }, first.deps);
   assert.deepEqual(first.calls.map((c) => c.slice(0, 3)), [['comment', 'issue', 5], ['addLabel', 'issue', 5, 'needs-decision'].slice(0, 3)]);
   assert.equal(first.calls[1][3], 'needs-decision');
   const posted = normalizeComments([{ id: 9, user: { login: 'github-actions[bot]' }, author_association: 'NONE', created_at: '2026-10-07T10:00:00Z', body: `**[issue-pipeline]** blocked · 2026-10-07T10:00:00Z · local\n\nReview verdict on PR #7: human decision needed at head \`${HEAD.slice(0, 7)}\`.` }]);
   const second = fakeDeps({ prs: [pr], comments: first.deps.fetchPrComments(), issue: issue(['pipeline', 'needs-decision'], posted) });
-  await runReady({ repo: REPO, config, now: NOW }, second.deps);
+  await runReady({ repo: REPO, config, now: NOW, run: 'local' }, second.deps);
   assert.deepEqual(second.calls, []);
 });
 
 test('a missing verdict with a failed review check is a human decision', async () => {
   const pr = basePr({ statusCheckRollup: [run('test', 'SUCCESS'), run('pipeline-review', 'FAILURE')] });
   const { deps, calls } = fakeDeps({ prs: [pr], comments: [] });
-  const r = await runReady({ repo: REPO, config, now: NOW }, deps);
+  const r = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, deps);
   assert.equal(r.actions[0].action, 'needs-decision');
   assert.equal(calls[0][0], 'comment');
   assert.equal(calls[1][3], 'needs-decision');
@@ -91,30 +93,30 @@ test('a missing verdict with a failed review check is a human decision', async (
 
 test('behind base removes ready and updates the branch; conflict removes ready and asks for a fix', async () => {
   const behind = fakeDeps({ prs: [basePr({ mergeStateStatus: 'BEHIND', labels: ['ready'] })], comments: verdictComment('accepted') });
-  await runReady({ repo: REPO, config, now: NOW }, behind.deps);
+  await runReady({ repo: REPO, config, now: NOW, run: 'local' }, behind.deps);
   assert.deepEqual(behind.calls, [['removeLabel', 'pr', 7, 'ready'], ['updateBranch', 7]]);
   const conflict = fakeDeps({ prs: [basePr({ mergeable: 'CONFLICTING', labels: ['ready'] })], comments: verdictComment('accepted') });
-  await runReady({ repo: REPO, config, now: NOW }, conflict.deps);
+  await runReady({ repo: REPO, config, now: NOW, run: 'local' }, conflict.deps);
   assert.deepEqual(conflict.calls, [['removeLabel', 'pr', 7, 'ready'], ['addLabel', 'pr', 7, 'pipeline-fix']]);
 });
 
 test('red CI asks for a fix; pending waits; drafts, forks and other branches are skipped; disabled does nothing', async () => {
   const red = fakeDeps({ prs: [basePr({ statusCheckRollup: [run('test', 'FAILURE'), run('pipeline-review', 'SUCCESS')] })], comments: verdictComment('accepted') });
-  await runReady({ repo: REPO, config, now: NOW }, red.deps);
+  await runReady({ repo: REPO, config, now: NOW, run: 'local' }, red.deps);
   assert.deepEqual(red.calls, [['addLabel', 'pr', 7, 'pipeline-fix']]);
   const pending = fakeDeps({ prs: [basePr({ statusCheckRollup: [run('test', 'SUCCESS'), { __typename: 'CheckRun', name: 'pipeline-review', status: 'IN_PROGRESS', conclusion: null }] })], comments: [] });
-  const r = await runReady({ repo: REPO, config, now: NOW }, pending.deps);
+  const r = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, pending.deps);
   assert.deepEqual([r.actions[0].action, pending.calls], ['wait', []]);
   const skipped = fakeDeps({ prs: [basePr({ isDraft: true }), basePr({ number: 8, isCrossRepository: true }), basePr({ number: 9, headRefName: 'feat/x' })] });
-  const s = await runReady({ repo: REPO, config, now: NOW }, skipped.deps);
+  const s = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, skipped.deps);
   assert.deepEqual([s.actions, skipped.calls], [[], []]);
-  const off = await runReady({ repo: REPO, config: { ...config, enabled: false }, now: NOW }, red.deps);
+  const off = await runReady({ repo: REPO, config: { ...config, enabled: false }, now: NOW, run: 'local' }, red.deps);
   assert.deepEqual(off, { actions: [], disabled: true });
 });
 
 test('dry run decides without acting', async () => {
   const { deps, calls } = fakeDeps({ prs: [basePr()], comments: verdictComment('accepted') });
-  const r = await runReady({ repo: REPO, config, now: NOW, dryRun: true }, deps);
+  const r = await runReady({ repo: REPO, config, now: NOW, run: 'local', dryRun: true }, deps);
   assert.deepEqual([r.actions[0].action, r.actions[0].done, calls], ['ready', ['would comment on PR 7', 'would comment on issue 5', 'would add label ready'], []]);
 });
 
@@ -125,11 +127,11 @@ test('without a linked issue the blocked comment goes on the PR once per head', 
   const pr = basePr({ body: 'no link', statusCheckRollup: [run('test', 'SUCCESS'), run('pipeline-review', 'FAILURE')] });
   const verdicts = verdictComment('human-decision-needed', [judgmentFinding]);
   const first = fakeDeps({ prs: [pr], comments: verdicts });
-  await runReady({ repo: REPO, config, now: NOW }, first.deps);
+  await runReady({ repo: REPO, config, now: NOW, run: 'local' }, first.deps);
   assert.deepEqual(first.calls, [['comment', 'pr', 7, '**[issue-pipeline]** blocked · 2026-10-07T10:00:00Z · local']]);
   const posted = asComment(9, `**[issue-pipeline]** blocked · 2026-10-07T10:00:00Z · local\n\nReview verdict on PR #7: human decision needed at head \`${HEAD.slice(0, 7)}\`.`);
   const second = fakeDeps({ prs: [pr], comments: [...verdicts, ...posted] });
-  await runReady({ repo: REPO, config, now: NOW }, second.deps);
+  await runReady({ repo: REPO, config, now: NOW, run: 'local' }, second.deps);
   assert.deepEqual(second.calls, []);
 });
 
@@ -137,14 +139,14 @@ test('a missed needs-decision label is repaired even when the blocked comment al
   const pr = basePr({ statusCheckRollup: [run('test', 'SUCCESS'), run('pipeline-review', 'FAILURE')] });
   const posted = asComment(9, `**[issue-pipeline]** blocked · 2026-10-07T10:00:00Z · local\n\nReview verdict on PR #7: human decision needed at head \`${HEAD.slice(0, 7)}\`.`);
   const { deps, calls } = fakeDeps({ prs: [pr], comments: verdictComment('human-decision-needed', [judgmentFinding]), issue: issue(['pipeline'], posted) });
-  await runReady({ repo: REPO, config, now: NOW }, deps);
+  await runReady({ repo: REPO, config, now: NOW, run: 'local' }, deps);
   assert.deepEqual(calls, [['addLabel', 'issue', 5, 'needs-decision']]);
 });
 
 test('a ready report already on the PR is not posted twice, and the label is still added', async () => {
   const report = asComment(9, `**[issue-pipeline]** ready · 2026-10-07T09:30:00Z · local\n\n**Ready to merge** at head \`${HEAD.slice(0, 7)}\`.`);
   const { deps, calls } = fakeDeps({ prs: [basePr()], comments: [...verdictComment('accepted'), ...report] });
-  await runReady({ repo: REPO, config, now: NOW }, deps);
+  await runReady({ repo: REPO, config, now: NOW, run: 'local' }, deps);
   assert.deepEqual(calls, [
     ['comment', 'issue', 5, '**[issue-pipeline]** ready · 2026-10-07T10:00:00Z · local'],
     ['addLabel', 'pr', 7, 'ready'],
@@ -157,7 +159,7 @@ test('an error on one PR is recorded and the queue continues', async () => {
   const { deps, calls } = fakeDeps({ prs: [bad, good], comments: verdictComment('human-decision-needed', [judgmentFinding]) });
   deps.fetchIssue = (r, n) => { if (n === 999) throw new Error('issue 999 not found'); return issue(); };
   deps.fetchPrComments = (r, n) => (n === 8 ? verdictComment('accepted') : verdictComment('human-decision-needed', [judgmentFinding]));
-  const r = await runReady({ repo: REPO, config, now: NOW }, deps);
+  const r = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, deps);
   assert.deepEqual(r.actions.map((a) => [a.pr, a.action]), [[7, 'error'], [8, 'ready']]);
   assert.equal(r.actions[0].reason, 'issue 999 not found');
   assert.deepEqual(calls.map((c) => c.slice(0, 3)), [['comment', 'pr', 8], ['comment', 'issue', 6], ['addLabel', 'pr', 8]]);
@@ -192,10 +194,10 @@ test('the CLI no longer takes --config-file and requires --repo-root', () => {
 
 test('a stale ready label is removed when the head is no longer green', async () => {
   const red = fakeDeps({ prs: [basePr({ labels: ['ready'], statusCheckRollup: [run('test', 'FAILURE'), run('pipeline-review', 'SUCCESS')] })], comments: verdictComment('accepted') });
-  await runReady({ repo: REPO, config, now: NOW }, red.deps);
+  await runReady({ repo: REPO, config, now: NOW, run: 'local' }, red.deps);
   assert.deepEqual(red.calls, [['removeLabel', 'pr', 7, 'ready'], ['addLabel', 'pr', 7, 'pipeline-fix']]);
   const pending = fakeDeps({ prs: [basePr({ labels: ['ready'], statusCheckRollup: [run('test', 'SUCCESS'), { __typename: 'CheckRun', name: 'pipeline-review', status: 'IN_PROGRESS', conclusion: null }] })], comments: [] });
-  const r = await runReady({ repo: REPO, config, now: NOW }, pending.deps);
+  const r = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, pending.deps);
   assert.deepEqual([r.actions[0].action, pending.calls], ['wait', [['removeLabel', 'pr', 7, 'ready']]]);
 });
 
@@ -211,7 +213,7 @@ test('a fix, update or needs-decision waits with no writes at all while the link
     [reviewRed(), verdictComment('human-decision-needed', [judgmentFinding])],
   ]) {
     const { deps, calls } = fakeDeps({ prs: [pr], comments, issue: working });
-    const r = await runReady({ repo: REPO, config, now: NOW }, deps);
+    const r = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, deps);
     assert.deepEqual(r.actions.map((a) => [a.action, a.reason]), [['wait', 'fix run in progress (pipeline-working on issue 5)']]);
     assert.deepEqual(calls, []);
   }
@@ -220,7 +222,7 @@ test('a fix, update or needs-decision waits with no writes at all while the link
 test('without pipeline-working, or with a lock older than lockTtlHours, the fix request goes ahead', async () => {
   for (const iss of [issue(['pipeline'], lockAt('2026-10-07T09:30:00Z')), issue(['pipeline', 'pipeline-working'], lockAt('2026-10-07T05:00:00Z'))]) {
     const { deps, calls } = fakeDeps({ prs: [reviewRed()], comments: revision, issue: iss });
-    const r = await runReady({ repo: REPO, config, now: NOW }, deps);
+    const r = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, deps);
     assert.equal(r.actions[0].action, 'fix');
     assert.deepEqual(calls, [['removeLabel', 'pr', 7, 'ready'], ['addLabel', 'pr', 7, 'pipeline-fix']]);
   }
@@ -229,29 +231,29 @@ test('without pipeline-working, or with a lock older than lockTtlHours, the fix 
 test('a PR without a linked issue is not gated by any lock', async () => {
   const { deps, calls } = fakeDeps({ prs: [basePr({ body: 'no link', statusCheckRollup: [run('test', 'SUCCESS'), run('pipeline-review', 'FAILURE')] })], comments: revision });
   deps.fetchIssue = () => { throw new Error('should not fetch'); };
-  const r = await runReady({ repo: REPO, config, now: NOW }, deps);
+  const r = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, deps);
   assert.equal(r.actions[0].action, 'fix');
   assert.deepEqual(calls, [['addLabel', 'pr', 7, 'pipeline-fix']]);
 });
 
 test('a PR that would be ready but is behind its base (compare API) gets a branch update instead (final review I8)', async () => {
   const plain = fakeDeps({ prs: [basePr()], comments: verdictComment('accepted'), behindBy: 2 });
-  const r = await runReady({ repo: REPO, config, now: NOW }, plain.deps);
+  const r = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, plain.deps);
   assert.deepEqual(r.actions.map((a) => [a.action, a.reason]), [['update', 'behind base']]);
   assert.deepEqual(plain.compares, [[REPO, 'main', HEAD]]);
   assert.deepEqual(plain.calls, [['updateBranch', 7]]);
   const labelled = fakeDeps({ prs: [basePr({ labels: ['ready'] })], comments: verdictComment('accepted'), behindBy: 1 });
-  await runReady({ repo: REPO, config, now: NOW }, labelled.deps);
+  await runReady({ repo: REPO, config, now: NOW, run: 'local' }, labelled.deps);
   assert.deepEqual(labelled.calls, [['removeLabel', 'pr', 7, 'ready'], ['updateBranch', 7]]);
   const locked = fakeDeps({ prs: [basePr({ labels: ['ready'] })], comments: verdictComment('accepted'), behindBy: 1, issue: issue(['pipeline', 'pipeline-working'], lockAt('2026-10-07T09:30:00Z')) });
-  const w = await runReady({ repo: REPO, config, now: NOW }, locked.deps);
+  const w = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, locked.deps);
   assert.equal(w.actions[0].action, 'wait');
   assert.deepEqual(locked.calls, []);
 });
 
 test('a ready PR that is not behind stays ready; already-ready is checked too', async () => {
   const current = fakeDeps({ prs: [basePr({ labels: ['ready'] })], comments: verdictComment('accepted') });
-  const r = await runReady({ repo: REPO, config, now: NOW }, current.deps);
+  const r = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, current.deps);
   assert.equal(r.actions[0].action, 'already-ready');
   assert.deepEqual([current.compares, current.calls], [[[REPO, 'main', HEAD]], []]);
 });
@@ -260,17 +262,17 @@ test('a sampled PR gets pipeline-score dispatched after the ready label; others 
   const sampled = basePr({ body: 'Fixes #8', headRefName: 'pipeline/8-x' });
   const a = fakeDeps({ prs: [sampled], comments: verdictComment('accepted'), issue: { number: 8, labels: ['pipeline'], comments: [] } });
   a.deps.dispatchScore = (n) => a.calls.push(['dispatchScore', n]);
-  await runReady({ repo: REPO, config, now: NOW }, a.deps);
+  await runReady({ repo: REPO, config, now: NOW, run: 'local' }, a.deps);
   assert.deepEqual(a.calls.slice(-2), [['addLabel', 'pr', 7, 'ready'], ['dispatchScore', 7]]);
 
   const b = fakeDeps({ prs: [basePr()], comments: verdictComment('accepted') });
   b.deps.dispatchScore = (n) => b.calls.push(['dispatchScore', n]);
-  await runReady({ repo: REPO, config, now: NOW }, b.deps);
+  await runReady({ repo: REPO, config, now: NOW, run: 'local' }, b.deps);
   assert.ok(!b.calls.some((c) => c[0] === 'dispatchScore'));
 
   const c = fakeDeps({ prs: [sampled], comments: verdictComment('accepted'), issue: { number: 8, labels: ['pipeline'], comments: [] } });
   c.deps.dispatchScore = () => { throw new Error('HTTP 403'); };
-  const r = await runReady({ repo: REPO, config, now: NOW }, c.deps);
+  const r = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, c.deps);
   assert.equal(r.actions[0].action, 'ready');
   assert.ok(r.actions[0].done.includes('score dispatch failed: HTTP 403'));
   assert.ok(!r.actions[0].done.includes('dispatch pipeline-score'), 'a failed dispatch is not recorded as done');
@@ -281,18 +283,18 @@ test('the score dispatch is recorded as done only after it succeeds; a dry run s
   const issue = { number: 8, labels: ['pipeline'], comments: [] };
   const ok = fakeDeps({ prs: [sampled], comments: verdictComment('accepted'), issue });
   ok.deps.dispatchScore = (n) => ok.calls.push(['dispatchScore', n]);
-  const okRun = await runReady({ repo: REPO, config, now: NOW }, ok.deps);
+  const okRun = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, ok.deps);
   assert.ok(okRun.actions[0].done.includes('dispatch pipeline-score'));
   const seen = [];
   const order = fakeDeps({ prs: [sampled], comments: verdictComment('accepted'), issue });
   order.deps.dispatchScore = () => { throw new Error('boom'); };
-  const bad = await runReady({ repo: REPO, config, now: NOW }, order.deps);
+  const bad = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, order.deps);
   seen.push(...bad.actions[0].done);
   assert.deepEqual(seen.filter((d) => /pipeline-score/.test(d)), [], 'nothing about pipeline-score is recorded except the failure');
   assert.ok(seen.includes('score dispatch failed: boom'));
   const dry = fakeDeps({ prs: [sampled], comments: verdictComment('accepted'), issue });
   dry.deps.dispatchScore = () => { throw new Error('must not run'); };
-  const dryRun = await runReady({ repo: REPO, config, now: NOW, dryRun: true }, dry.deps);
+  const dryRun = await runReady({ repo: REPO, config, now: NOW, run: 'local', dryRun: true }, dry.deps);
   assert.ok(dryRun.actions[0].done.includes('would dispatch pipeline-score'));
 });
 
@@ -302,7 +304,7 @@ test('the ready report carries the run summary from run.json at the head SHA', a
   const { deps } = fakeDeps({ prs: [basePr()], comments: verdictComment('accepted') });
   deps.comment = (kind, n, body) => bodies.push([kind, body]);
   deps.runJson = (repo, sha, key) => { runJsonCalls.push([repo, sha, key]); return { version: 1, runs: [{ kind: 'ship', seconds: 1800, tokens: { input: 1000, output: 1000, cacheRead: 8000, cacheWrite: 0 }, usd: 2.5 }] }; };
-  await runReady({ repo: REPO, config, now: NOW }, deps);
+  await runReady({ repo: REPO, config, now: NOW, run: 'local' }, deps);
   assert.deepEqual(runJsonCalls, [[REPO, HEAD, '5']]);
   assert.match(bodies[0][1], /\nRun: 1 run \(1 ship, 0 fix\), 30 min, 10k tokens \(80% cache reads\), \$2\.50\n/);
 });
@@ -313,7 +315,7 @@ test('a missing or broken run.json leaves the report without a run line and the 
     const { deps, calls } = fakeDeps({ prs: [basePr()], comments: verdictComment('accepted') });
     deps.comment = (kind, n, body) => { bodies.push(body); calls.push(['comment', kind, n]); };
     deps.runJson = runJson;
-    const r = await runReady({ repo: REPO, config, now: NOW }, deps);
+    const r = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, deps);
     assert.equal(r.actions[0].action, 'ready');
     assert.doesNotMatch(bodies[0], /\nRun: /);
     assert.ok(calls.some((c) => c[0] === 'addLabel' && c[3] === 'ready'));
@@ -324,7 +326,7 @@ test('a branch whose key is not a plain id is skipped before run.json is looked 
   const runJsonCalls = [];
   const { deps, calls } = fakeDeps({ prs: [basePr({ headRefName: 'pipeline/../../secrets' }), basePr({ number: 8, headRefName: 'pipeline/5%2f..-x' })], comments: verdictComment('accepted') });
   deps.runJson = (...args) => { runJsonCalls.push(args); return null; };
-  const r = await runReady({ repo: REPO, config, now: NOW }, deps);
+  const r = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, deps);
   assert.deepEqual(r.actions, []);
   assert.deepEqual(runJsonCalls, []);
   assert.deepEqual(calls, []);
