@@ -27,16 +27,8 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from shell_words import simple_commands  # noqa: E402
+from shell_words import ASSIGNMENT, BEFORE, SHELLS, WRAPPERS, moved, simple_commands  # noqa: E402
 
-ASSIGNMENT = re.compile(r"^([A-Za-z_]\w*)=(.*)$", re.DOTALL)
-# Shell words that may stand before a command without being it.
-BEFORE = {"then", "do", "else", "elif", "if", "while", "until", "!", "{", "}"}
-# Commands that run the command given to them. Their own options and values come
-# first, so the `gh` is looked for among the words that follow.
-WRAPPERS = {"time", "timeout", "command", "exec", "nohup", "env", "sudo", "nice", "xargs",
-            "caffeinate", "watch", "find", "uv", "npx"}
-SHELLS = {"bash", "sh", "zsh"}
 ALLOWED = re.compile(r"^\s*(?:[A-Za-z_]\w*=\S*\s+)*MERGE_BASE_OK=1(?:\s|$)")
 # What the words look like in a text the shell words could not be read from.
 LOOSE = re.compile(r"(?<![\w-])gh\s[^\n;|&]*?\bpr\s[^\n;|&]*?\bmerge(?![\w-])")
@@ -75,21 +67,6 @@ def merge_target(words):
         elif selector is None:
             selector = word
     return None if expected else (selector, repo, wants_help)
-
-
-def moved(cwd, words):
-    """The folder after `cd words`, or None when the text does not say."""
-    if "-" in words:
-        return None
-    targets = [word for word in words if not word.startswith("-")]
-    path = os.path.expanduser(targets[0] if targets else "~")
-    if re.search(r"[$`*?]", path):
-        return None
-    if not os.path.isabs(path):
-        if cwd is None:
-            return None
-        path = os.path.join(cwd, path)
-    return path if os.path.isdir(path) else None
 
 
 def gh(args, cwd):

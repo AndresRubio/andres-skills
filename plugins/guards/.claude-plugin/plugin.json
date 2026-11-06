@@ -1,6 +1,6 @@
 {
   "name": "guards",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": { "name": "AndresRubio" },
-  "description": "Checks Bash commands and file writes before they run: asks before a git command that throws away uncommitted work, refuses a test or check run piped into a filter that hides its exit status, refuses a path under /tmp outside the session scratchpad, and refuses a gh pr merge whose pull request does not merge into the default branch."
+  "description": "Checks Bash commands and file writes before they run: asks before a git command that throws away uncommitted work, refuses a test or check run piped into a filter that hides its exit status, refuses a path under /tmp outside the session scratchpad, refuses a git commit whose message is the same as the last commit's, and refuses a gh pr merge whose pull request does not merge into the default branch."
 }

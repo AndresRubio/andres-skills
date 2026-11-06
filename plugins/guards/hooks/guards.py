@@ -2,8 +2,8 @@
 """Run the guard hooks in one process, reading the hook input once.
 
 Modes, picked by the first argument:
-  bash   PreToolUse on Bash: discard_guard, pipe_guard, tmp_guard and merge_guard,
-         in that order.
+  bash   PreToolUse on Bash: discard_guard, pipe_guard, tmp_guard, message_guard and
+         merge_guard, in that order.
   files  PreToolUse on Write, Edit, MultiEdit and NotebookEdit: tmp_guard alone.
 
 Each guard decides the way it did when it ran as a hook of its own. When one guard
@@ -16,7 +16,8 @@ merge_guard asks GitHub only about a `gh pr merge` it finds in the command, so f
 any other command no check waits on the network. It runs last and must finish
 MERGE_DEADLINE seconds after the hook started, which leaves time under the hook's
 40 second timeout to print the other guards' answers. A merge still unchecked at
-the deadline is denied.
+the deadline is denied. message_guard runs git, with a 5 second limit, only for a
+`git commit` whose message it can read.
 
 A guard that raises an error counts as no objection, as it did when each guard ran
 alone and Claude Code ran the command after a crashed hook. The error goes to
@@ -36,7 +37,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # Each guard is imported on its own when it runs, so one that fails to import
 # stops only itself, as when every guard was a script of its own.
 MODES = {
-    "bash": ("discard_guard", "pipe_guard", "tmp_guard", "merge_guard"),
+    "bash": ("discard_guard", "pipe_guard", "tmp_guard", "message_guard", "merge_guard"),
     "files": ("tmp_guard",),
 }
 # Seconds from the start of the hook. hooks/hooks.json gives the Bash hook 40.
