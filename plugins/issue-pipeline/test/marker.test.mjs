@@ -1,0 +1,66 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { formatMarker, parseMarker, defaultRun, MARKER_KINDS } from '../skills/ship/scripts/lib/marker.mjs';
+import { runCli } from './helpers/cli.mjs';
+
+const NOW = new Date('2026-09-25T10:00:00.123Z');
+
+test('formatMarker writes the exact marker line without milliseconds', () => {
+  assert.equal(formatMarker('lock', { now: NOW, run: 'local' }), '**[issue-pipeline]** lock · 2026-09-25T10:00:00Z · local');
+});
+
+test('formatMarker rejects unknown kinds', () => {
+  assert.throws(() => formatMarker('hello', { now: NOW, run: 'local' }), /unknown marker kind/);
+});
+
+test('parseMarker reads the first line only', () => {
+  const body = '**[issue-pipeline]** grade · 2026-09-25T10:00:00Z · https://x/runs/1\n\n**Verdict:** `ready`';
+  assert.deepEqual(parseMarker(body), { kind: 'grade', at: '2026-09-25T10:00:00Z', run: 'https://x/runs/1' });
+  assert.equal(parseMarker('hello\n**[issue-pipeline]** lock · 2026-09-25T10:00:00Z · local'), null);
+  assert.equal(parseMarker('**[issue-pipeline]** bogus · 2026-09-25T10:00:00Z · local'), null);
+  assert.equal(parseMarker(undefined), null);
+});
+
+test('every kind round-trips', () => {
+  for (const kind of MARKER_KINDS) {
+    assert.equal(parseMarker(formatMarker(kind, { now: NOW, run: 'local' })).kind, kind);
+  }
+});
+
+test('deferred is the last kind and round-trips', () => {
+  assert.ok(MARKER_KINDS.includes('deferred'));
+  const line = formatMarker('deferred', { now: NOW, run: 'local' });
+  assert.equal(line, '**[issue-pipeline]** deferred · 2026-09-25T10:00:00Z · local');
+  assert.deepEqual(parseMarker(`${line}\n\nWaiting for: 7`), { kind: 'deferred', at: '2026-09-25T10:00:00Z', run: 'local' });
+});
+
+test('defaultRun uses the Actions run URL when present', () => {
+  assert.equal(defaultRun({}), 'local');
+  assert.equal(
+    defaultRun({ GITHUB_RUN_ID: '42', GITHUB_REPOSITORY: 'o/r', GITHUB_SERVER_URL: 'https://github.com' }),
+    'https://github.com/o/r/actions/runs/42',
+  );
+});
+
+test('CLI marker prints the line; parse-marker reads stdin', () => {
+  const r = runCli(['marker', 'report', '--now', '2026-09-25T10:00:00Z'], { env: { GITHUB_RUN_ID: '' } });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.stdout, '**[issue-pipeline]** report · 2026-09-25T10:00:00Z · local\n');
+  const p = runCli(['parse-marker'], { input: r.stdout });
+  assert.deepEqual(p.json(), { kind: 'report', at: '2026-09-25T10:00:00Z', run: 'local' });
+});
+
+test('verdict and ready are marker kinds and round-trip', () => {
+  assert.ok(MARKER_KINDS.includes('verdict'));
+  assert.ok(MARKER_KINDS.includes('ready'));
+  for (const kind of ['verdict', 'ready']) {
+    const line = formatMarker(kind, { now: NOW, run: 'local' });
+    assert.deepEqual(parseMarker(`${line}\n\n**Verdict:** \`accepted\``), { kind, at: '2026-09-25T10:00:00Z', run: 'local' });
+  }
+});
+
+test('score is a marker kind and round-trips', () => {
+  assert.ok(MARKER_KINDS.includes('score'));
+  const line = formatMarker('score', { now: NOW, run: 'local' });
+  assert.deepEqual(parseMarker(`${line}\n\n**Score** at head \`aaaaaaa\``), { kind: 'score', at: '2026-09-25T10:00:00Z', run: 'local' });
+});

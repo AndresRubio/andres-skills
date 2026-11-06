@@ -6,11 +6,11 @@ on:
   pull_request:
 
 jobs:
-  claude-pipeline:
+  issue-pipeline:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: plugins/claude-pipeline
+        working-directory: plugins/issue-pipeline
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -4,12 +4,12 @@ import type { On } from 'claude-code'
 import type { PipelineRun } from '../types'
 
 const T0 = Date.parse('2026-10-30T06:40:00Z')
-const RUN_DIR = '/Users/me/.claude-pipeline/runs/run-Ab12Cd'
+const RUN_DIR = '/Users/me/.issue-pipeline/runs/run-Ab12Cd'
 const PREFIX = `. '${RUN_DIR}/vars.sh' && `
-const PIPELINE = '/Users/me/andres-skills/plugins/claude-pipeline/skills/ship/scripts/pipeline.mjs'
+const PIPELINE = '/Users/me/andres-skills/plugins/issue-pipeline/skills/ship/scripts/pipeline.mjs'
 // SKILL.md, Setup step 1.
 const SETUP =
-  'mkdir -p "${CLAUDE_PIPELINE_HOME:-$HOME/.claude-pipeline}/runs" && RUN_DIR=$(mktemp -d "${CLAUDE_PIPELINE_HOME:-$HOME/.claude-pipeline}/runs/run-XXXXXX") && mkdir "$RUN_DIR/logs" && ' +
+  'mkdir -p "${ISSUE_PIPELINE_HOME:-$HOME/.issue-pipeline}/runs" && RUN_DIR=$(mktemp -d "${ISSUE_PIPELINE_HOME:-$HOME/.issue-pipeline}/runs/run-XXXXXX") && mkdir "$RUN_DIR/logs" && ' +
   `printf "set -u\\nPIPELINE='%s'\\nRUN_DIR='%s'\\n" "${PIPELINE}" "$RUN_DIR" > "$RUN_DIR/vars.sh" && echo "$RUN_DIR"`
 const VARS_SH = [
   'set -u',
@@ -18,7 +18,7 @@ const VARS_SH = [
   "KEY='12'",
   "NUMBER='12'",
   "REPO='AndresRubio/sandbox-app'",
-  "BRANCH='claude/12-archive-toggle'",
+  "BRANCH='pipeline/12-archive-toggle'",
   "MODE='interactive'",
   '',
 ].join('\n')
@@ -134,14 +134,14 @@ test('a simulated run: start, two stage changes, a subagent, the finish; drawn o
   w.outputs['gh pr create'] = 'https://github.com/AndresRubio/sandbox-app/pull/31\n'
   await $.session.start(start)
 
-  // The person types /claude-pipeline:ship #12: the pane opens by itself.
-  await $.command.run(typed('claude-pipeline:ship', '#12'))
+  // The person types /issue-pipeline:ship #12: the pane opens by itself.
+  await $.command.run(typed('issue-pipeline:ship', '#12'))
   expect(w.opened).toEqual(['pipeline-pane'])
-  await $.skill.prompt({ skill: 'claude-pipeline:ship', text: '# ship', pluginName: 'claude-pipeline' })
+  await $.skill.prompt({ skill: 'issue-pipeline:ship', text: '# ship', pluginName: 'issue-pipeline' })
   await $.tool.call({ tool: 'Bash', command: SETUP })
   w.files[`${RUN_DIR}/vars.sh`] = VARS_SH
   await $.tool.call({ tool: 'Bash', command: mark('0') })
-  await $.tool.call({ tool: 'Bash', command: `${PREFIX}gh issue edit "$NUMBER" --repo "$REPO" --add-label "claude-working"` })
+  await $.tool.call({ tool: 'Bash', command: `${PREFIX}gh issue edit "$NUMBER" --repo "$REPO" --add-label "pipeline-working"` })
   await w.clock.advance(62_000)
 
   // Stage change: research, with its subagent.
@@ -155,7 +155,7 @@ test('a simulated run: start, two stage changes, a subagent, the finish; drawn o
     const ui = await $.ui.mount({ ...PANE, surface })
     const texts = (await ui.findAll({ type: 'Text' })).map(found => found.text)
     expect(texts).toContain('#12 Archive toggle hides the list')
-    expect(texts).toContain('AndresRubio/sandbox-app · claude/12-archive-toggle · interactive')
+    expect(texts).toContain('AndresRubio/sandbox-app · pipeline/12-archive-toggle · interactive')
     expect(texts).toContain('Running for 4m 12s')
     expect(texts).toContain('▸ 2 Research')
     expect(texts).toContain('3m 10s')
@@ -173,7 +173,7 @@ test('a simulated run: start, two stage changes, a subagent, the finish; drawn o
   await $.tool.call({ tool: 'Bash', command: `${PREFIX}node "$PIPELINE" marker report > "$RUN_DIR/comment.md"` })
   await $.tool.call({ tool: 'Bash', command: `${PREFIX}gh issue comment "$NUMBER" --repo "$REPO" --body-file "$RUN_DIR/comment.md"` })
   await w.clock.advance(30_000)
-  await $.tool.call({ tool: 'Bash', command: `${PREFIX}gh issue edit "$NUMBER" --repo "$REPO" --remove-label "claude-working"` })
+  await $.tool.call({ tool: 'Bash', command: `${PREFIX}gh issue edit "$NUMBER" --repo "$REPO" --remove-label "pipeline-working"` })
 
   expect(w.toasts).toEqual(['Pipeline #12 finished in 4m 42s: PR #31 opened.'])
   for (const surface of SURFACES) {
@@ -199,7 +199,7 @@ test('nothing happens while no pipeline runs', async ($, on) => {
   const w = world(on)
   await $.session.start(start)
   await $.tool.call({ tool: 'Bash', command: 'git status' })
-  await $.tool.call({ tool: 'Bash', command: 'ls ~/.claude-pipeline/runs/' })
+  await $.tool.call({ tool: 'Bash', command: 'ls ~/.issue-pipeline/runs/' })
   await $.tool.call({ tool: 'Bash', command: 'gh issue edit 3 --add-label bug' })
   await $.tool.call({ tool: 'Write', file_path: '/repo/docs/pipeline/12/notes.md', content: 'x' })
   await $.skill.prompt({ skill: 'superpowers:brainstorming', text: 'x' })
@@ -218,7 +218,7 @@ test('nothing happens while no pipeline runs', async ($, on) => {
     await ui.unmount()
   }
   const out = await $.command.run(typed('pipeline-pane'))
-  expect(out.text).toBe('No pipeline run yet. Start one with /claude-pipeline:ship #N.')
+  expect(out.text).toBe('No pipeline run yet. Start one with /issue-pipeline:ship #N.')
 })
 
 const FINISHED: PipelineRun = {
@@ -283,7 +283,7 @@ test('the run folder: stages.jsonl, vars.sh and issue.json fill the pane, and it
   const w = world(on)
   w.outputs.mktemp = `${RUN_DIR}\n`
   await $.session.start(start)
-  await $.tool.call({ tool: 'Skill', skill: 'claude-pipeline:ship', args: '#12 --mode auto' })
+  await $.tool.call({ tool: 'Skill', skill: 'issue-pipeline:ship', args: '#12 --mode auto' })
   expect(w.opened).toEqual(['pipeline-pane'])
   await $.tool.call({ tool: 'Bash', command: SETUP })
 
@@ -302,7 +302,7 @@ test('the run folder: stages.jsonl, vars.sh and issue.json fill the pane, and it
     const ui = await $.ui.mount({ ...PANE, surface })
     const texts = (await ui.findAll({ type: 'Text' })).map(found => found.text)
     expect(texts).toContain('#12 Archive toggle hides the list')
-    expect(texts).toContain('AndresRubio/sandbox-app · claude/12-archive-toggle · auto')
+    expect(texts).toContain('AndresRubio/sandbox-app · pipeline/12-archive-toggle · auto')
     expect(texts).toContain('▸ 2 Research')
     expect(texts).toContain('13s')
     expect(texts).toContain('✓ 1 Isolate')
@@ -319,7 +319,7 @@ test('an interactive run waits for the person between turns, and a /clear stops 
   const w = world(on)
   w.outputs.mktemp = `${RUN_DIR}\n`
   await $.session.start(start)
-  await $.command.run(typed('claude-pipeline:ship', '#12'))
+  await $.command.run(typed('issue-pipeline:ship', '#12'))
   await $.tool.call({ tool: 'Bash', command: SETUP })
   w.files[`${RUN_DIR}/vars.sh`] = VARS_SH
   await $.tool.call({ tool: 'Bash', command: mark('5') })
@@ -331,5 +331,5 @@ test('an interactive run waits for the person between turns, and a /clear stops 
   await ui.unmount()
 
   await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
-  expect(w.toasts).toEqual(['Pipeline #12 stopped at Plan after 2m 00s: session cleared; /claude-pipeline:ship 12 resumes it.'])
+  expect(w.toasts).toEqual(['Pipeline #12 stopped at Plan after 2m 00s: session cleared; /issue-pipeline:ship 12 resumes it.'])
 })

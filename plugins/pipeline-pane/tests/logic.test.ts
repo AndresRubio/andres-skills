@@ -26,13 +26,13 @@ import {
 } from '../hooks/logic'
 import type { Signal } from '../hooks/logic'
 
-const RUN_DIR = '/Users/me/.claude-pipeline/runs/run-GlP2ar'
+const RUN_DIR = '/Users/me/.issue-pipeline/runs/run-GlP2ar'
 const PREFIX = `. '${RUN_DIR}/vars.sh' && `
-const PIPELINE = '/Users/me/andres-skills/plugins/claude-pipeline/skills/ship/scripts/pipeline.mjs'
+const PIPELINE = '/Users/me/andres-skills/plugins/issue-pipeline/skills/ship/scripts/pipeline.mjs'
 
 // SKILL.md, Setup step 1, with the skill's base directory filled in as the model writes it.
 const SETUP =
-  'mkdir -p "${CLAUDE_PIPELINE_HOME:-$HOME/.claude-pipeline}/runs" && RUN_DIR=$(mktemp -d "${CLAUDE_PIPELINE_HOME:-$HOME/.claude-pipeline}/runs/run-XXXXXX") && mkdir "$RUN_DIR/logs" && ' +
+  'mkdir -p "${ISSUE_PIPELINE_HOME:-$HOME/.issue-pipeline}/runs" && RUN_DIR=$(mktemp -d "${ISSUE_PIPELINE_HOME:-$HOME/.issue-pipeline}/runs/run-XXXXXX") && mkdir "$RUN_DIR/logs" && ' +
   `printf "set -u\\nPIPELINE='%s'\\nRUN_DIR='%s'\\n" "${PIPELINE}" "$RUN_DIR" > "$RUN_DIR/vars.sh" && echo "$RUN_DIR"`
 
 // What the real Setup, stages 0 and 1 and stage-mark wrote in a scratch run folder.
@@ -43,8 +43,8 @@ const VARS_SH = [
   "KEY='12'",
   "NUMBER='12'",
   "REPO='AndresRubio/sandbox-app'",
-  "BRANCH='claude/12-archive-toggle'",
-  "WT='/Users/me/.claude-pipeline/worktrees/sandbox app/12'",
+  "BRANCH='pipeline/12-archive-toggle'",
+  "WT='/Users/me/.issue-pipeline/worktrees/sandbox app/12'",
   "MODE='interactive'",
   "LANE='manual'",
   '',
@@ -73,18 +73,18 @@ describe('bashSignals', () => {
   })
 
   test('reads labels set and removed through gh (trackers/github.md)', async () => {
-    expect(bashSignals(`${PREFIX}gh issue edit "$NUMBER" --repo "$REPO" --add-label "claude-working"`)).toEqual([
-      { kind: 'label', action: 'add', labels: ['claude-working'], target: { on: 'issue', ref: '$NUMBER' } },
+    expect(bashSignals(`${PREFIX}gh issue edit "$NUMBER" --repo "$REPO" --add-label "pipeline-working"`)).toEqual([
+      { kind: 'label', action: 'add', labels: ['pipeline-working'], target: { on: 'issue', ref: '$NUMBER' } },
     ])
-    expect(bashSignals(`${PREFIX}gh issue edit "$NUMBER" --repo "$REPO" --remove-label "claude-working,claude-go"`)).toEqual([
-      { kind: 'label', action: 'remove', labels: ['claude-working', 'claude-go'], target: { on: 'issue', ref: '$NUMBER' } },
+    expect(bashSignals(`${PREFIX}gh issue edit "$NUMBER" --repo "$REPO" --remove-label "pipeline-working,pipeline-go"`)).toEqual([
+      { kind: 'label', action: 'remove', labels: ['pipeline-working', 'pipeline-go'], target: { on: 'issue', ref: '$NUMBER' } },
     ])
-    expect(bashSignals(`${PREFIX}gh issue edit "$NUMBER" --repo "$REPO" --add-label "needs-decision" && gh issue edit "$NUMBER" --repo "$REPO" --remove-label "claude-working"`)).toEqual([
+    expect(bashSignals(`${PREFIX}gh issue edit "$NUMBER" --repo "$REPO" --add-label "needs-decision" && gh issue edit "$NUMBER" --repo "$REPO" --remove-label "pipeline-working"`)).toEqual([
       { kind: 'label', action: 'add', labels: ['needs-decision'], target: { on: 'issue', ref: '$NUMBER' } },
-      { kind: 'label', action: 'remove', labels: ['claude-working'], target: { on: 'issue', ref: '$NUMBER' } },
+      { kind: 'label', action: 'remove', labels: ['pipeline-working'], target: { on: 'issue', ref: '$NUMBER' } },
     ])
-    expect(bashSignals(`${PREFIX}gh pr edit 31 --repo "$REPO" --remove-label "claude-fix"`)).toEqual([
-      { kind: 'label', action: 'remove', labels: ['claude-fix'], target: { on: 'pr', ref: '31' } },
+    expect(bashSignals(`${PREFIX}gh pr edit 31 --repo "$REPO" --remove-label "pipeline-fix"`)).toEqual([
+      { kind: 'label', action: 'remove', labels: ['pipeline-fix'], target: { on: 'pr', ref: '31' } },
     ])
   })
 
@@ -113,7 +113,7 @@ describe('bashSignals', () => {
     expect(bashSignals(`${PREFIX}find "$RUN_DIR/inflight/7" -type f -empty -delete`)).toEqual([])
     expect(bashSignals('git commit -m "docs(pipeline): spec for #12" -m "Co-Authored-By: Claude"')).toEqual([])
     expect(bashSignals('echo marker report')).toEqual([])
-    expect(bashSignals('ls ~/.claude-pipeline/runs/')).toEqual([])
+    expect(bashSignals('ls ~/.issue-pipeline/runs/')).toEqual([])
     expect(bashSignals('npm test')).toEqual([])
   })
 })
@@ -121,7 +121,7 @@ describe('bashSignals', () => {
 describe('the run folder', () => {
   test('Setup is recognised and its output names the folder', async () => {
     expect(isSetupCommand(SETUP)).toBe(true)
-    expect(isSetupCommand('ls ~/.claude-pipeline/runs/')).toBe(false)
+    expect(isSetupCommand('ls ~/.issue-pipeline/runs/')).toBe(false)
     expect(runDirFromOutput(`${RUN_DIR}\n`)).toBe(RUN_DIR)
     expect(bashToSignals({ command: SETUP, output: `${RUN_DIR}\n` })).toEqual([{ kind: 'start', via: 'setup', runDir: RUN_DIR }])
   })
@@ -136,8 +136,8 @@ describe('the run folder', () => {
   test('vars.sh, stages.jsonl and issue.json parse as the plugin writes them', async () => {
     const vars = parseVars(`${VARS_SH}NOTE='it'\\''s'\n`)
     expect(vars.KEY).toBe('12')
-    expect(vars.BRANCH).toBe('claude/12-archive-toggle')
-    expect(vars.WT).toBe('/Users/me/.claude-pipeline/worktrees/sandbox app/12')
+    expect(vars.BRANCH).toBe('pipeline/12-archive-toggle')
+    expect(vars.WT).toBe('/Users/me/.issue-pipeline/worktrees/sandbox app/12')
     expect(vars.NOTE).toBe("it's")
     // A torn last line (a killed write) is no mark, as run-record.mjs reads it.
     const marks = parseStageLines(`${STAGES_JSONL}{"stage":"3","at":"2026-10-3`)
@@ -148,7 +148,7 @@ describe('the run folder', () => {
   })
 
   test('only files under docs/pipeline/<KEY>/ count as the run writing', async () => {
-    expect(pipelineFile('/Users/me/.claude-pipeline/worktrees/app/12/docs/pipeline/12/research.md')).toBe('research.md')
+    expect(pipelineFile('/Users/me/.issue-pipeline/worktrees/app/12/docs/pipeline/12/research.md')).toBe('research.md')
     expect(pipelineFile('/wt/docs/pipeline/12/screenshots/after.png')).toBe('screenshots/after.png')
     expect(pipelineFile('/wt/src/list.ts')).toBeUndefined()
     expect(pipelineFile(undefined)).toBeUndefined()
@@ -160,10 +160,10 @@ test('the /ship arguments and the skill', async () => {
   expect(parseShipArgs('#12 --mode auto')).toEqual({ source: '#12', mode: 'auto', isFix: false })
   expect(parseShipArgs('https://github.com/o/r/pull/31 --fix')).toEqual({ source: 'https://github.com/o/r/pull/31', mode: 'interactive', isFix: true })
   expect(parseShipArgs('"add a dark mode toggle"')).toEqual({ source: 'add a dark mode toggle', mode: 'interactive', isFix: false })
-  expect(isShipSkill('claude-pipeline:ship')).toBe(true)
-  expect(isShipSkill('ship', undefined, '/x/plugins/claude-pipeline/skills/ship/SKILL.md')).toBe(true)
+  expect(isShipSkill('issue-pipeline:ship')).toBe(true)
+  expect(isShipSkill('ship', undefined, '/x/plugins/issue-pipeline/skills/ship/SKILL.md')).toBe(true)
   expect(isShipSkill('ship')).toBe(false)
-  expect(isShipSkill('claude-pipeline:review', 'claude-pipeline')).toBe(false)
+  expect(isShipSkill('issue-pipeline:review', 'issue-pipeline')).toBe(false)
 })
 
 const T0 = 1_000_000
@@ -191,12 +191,12 @@ describe('reduce', () => {
       ...at(2_000, bash(SETUP, `${RUN_DIR}\n`)),
       [3_000, { kind: 'vars', vars: parseVars(VARS_SH.replace("MODE='interactive'", "MODE='auto'")) }],
       ...at(4_000, bash(`${PREFIX}node "$PIPELINE" stage-mark --run-dir "$RUN_DIR" --stage 0`)),
-      ...at(60_000, bash(`${PREFIX}gh issue edit "$NUMBER" --repo "$REPO" --add-label "claude-working"`)),
+      ...at(60_000, bash(`${PREFIX}gh issue edit "$NUMBER" --repo "$REPO" --add-label "pipeline-working"`)),
       ...at(120_000, bash(`${PREFIX}node "$PIPELINE" stage-mark --run-dir "$RUN_DIR" --stage 3`)),
       ...at(300_000, bash(`${PREFIX}node "$PIPELINE" marker questions > "$RUN_DIR/comment.md"`)),
       ...at(301_000, bash(`${PREFIX}gh issue comment "$NUMBER" --repo "$REPO" --body-file "$RUN_DIR/comment.md"`)),
       ...at(302_000, bash(`${PREFIX}gh issue edit "$NUMBER" --repo "$REPO" --add-label "needs-decision"`)),
-      ...at(303_000, bash(`${PREFIX}gh issue edit "$NUMBER" --repo "$REPO" --remove-label "claude-working"`)),
+      ...at(303_000, bash(`${PREFIX}gh issue edit "$NUMBER" --repo "$REPO" --remove-label "pipeline-working"`)),
     ])
 
     expect(run).toBeNull()
@@ -221,7 +221,7 @@ describe('reduce', () => {
       ...at(5_000, bash(`${PREFIX}node "$PIPELINE" stage-mark --run-dir "$RUN_DIR" --stage 10`)),
       ...at(6_000, bash(`${PREFIX}node "$PIPELINE" marker report > "$RUN_DIR/comment.md"`)),
       ...at(7_000, bash(`${PREFIX}gh issue comment "$NUMBER" --repo "$REPO" --body-file "$RUN_DIR/comment.md"`)),
-      ...at(8_000, bash(`${PREFIX}gh issue edit "$NUMBER" --repo "$REPO" --remove-label "claude-working"`)),
+      ...at(8_000, bash(`${PREFIX}gh issue edit "$NUMBER" --repo "$REPO" --remove-label "pipeline-working"`)),
     ])
 
     expect(closed[0]?.status).toBe('finished')
@@ -277,12 +277,12 @@ describe('reduce', () => {
     const again = play(
       [
         [600_000, { kind: 'start', via: 'skill-prompt' }],
-        [601_000, { kind: 'start', via: 'setup', runDir: '/Users/me/.claude-pipeline/runs/run-New123' }],
+        [601_000, { kind: 'start', via: 'setup', runDir: '/Users/me/.issue-pipeline/runs/run-New123' }],
       ],
       first.run,
     )
     expect(again.closed).toEqual([])
-    expect(again.run?.runDir).toBe('/Users/me/.claude-pipeline/runs/run-New123')
+    expect(again.run?.runDir).toBe('/Users/me/.issue-pipeline/runs/run-New123')
     expect(again.run?.marks.map(mark => mark.stage)).toEqual(['4'])
 
     const replaced = play([[700_000, { kind: 'start', via: 'command', args: '#13' }]], again.run)

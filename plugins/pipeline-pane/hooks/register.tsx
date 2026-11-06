@@ -189,7 +189,7 @@ export const register: Register = on => {
     await safely($, async () => {
       await $.command.register({
         name: 'pipeline-pane',
-        description: 'Show the claude-pipeline run in a pane: the stage now running, the finished stages and the last event',
+        description: 'Show the issue-pipeline run in a pane: the stage now running, the finished stages and the last event',
       })
       // A reload keeps $.state: a run this session still runs stays open.
       const run = await read($, active)
@@ -205,8 +205,8 @@ export const register: Register = on => {
     return started
   })
 
-  // The person's /claude-pipeline:ship. Its arguments say what the run is for.
-  on('command.run', { command: 'claude-pipeline:ship' }, async ($, e, next) => {
+  // The person's /issue-pipeline:ship. Its arguments say what the run is for.
+  on('command.run', { command: 'issue-pipeline:ship' }, async ($, e, next) => {
     await safely($, () => apply($, [{ kind: 'start', via: 'command', args: e.args }]))
     return next(e)
   }).catch(($, e, next) => next(e))

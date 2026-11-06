@@ -1,5 +1,5 @@
 #!/bin/sh
-# Validates and tests each mod: every plugins/<name>/ except claude-pipeline.
+# Validates and tests each mod: every plugins/<name>/ except issue-pipeline.
 # A mod's hooks/hooks.json names a hooks module, or it has command hooks with
 # Python tests at tests/test_*.py. A folder that is neither fails the run, so a
 # mod can't drop out of CI by losing its tests. CI runs this on pull requests
@@ -35,7 +35,7 @@ checked=0
 
 for dir in $dirs; do
   name=${dir#plugins/}
-  if [ "$name" = claude-pipeline ]; then
+  if [ "$name" = issue-pipeline ]; then
     # Skipped in a full run. A named folder must be a mod.
     if [ $# -gt 0 ]; then
       echo "$name: not a mod"
