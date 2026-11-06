@@ -4,6 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Run } from '../types'
 import {
   FINGERPRINT,
+  GRACE_MS,
   bandLine,
   basename,
   createParser,
@@ -15,7 +16,9 @@ import {
   noRepoText,
   outerScript,
   pendingText,
+  movedText,
   reportText,
+  restartedText,
   summary,
   unplacedText,
 } from './logic'
@@ -34,9 +37,20 @@ const COLOR = {
   error: 'warning',
 } as const
 
-// Checks running in the background, one per repo root. `owed`: a commit was
-// refused while this run goes on, so its end is reported to the model.
-const background = new Map<string, { tree: string; owed: boolean; stop: () => void }>()
+// A check running in the background. `owed`: a commit was refused while this
+// run goes on, so its end is reported to the model. `ended` resolves when the
+// run's result is stored, and never for a run that was stopped.
+type Job = { tree: string; owed: boolean; ended: Promise<void>; stop: () => void }
+
+// One per repo root.
+const background = new Map<string, Job>()
+// Per repo root, the commits of the main conversation inside the gate's wait
+// right now. Each reads the result itself, so a run that ends while one is
+// there sends no report. The count is the root's and not the run's, since the
+// run may be started over during the wait. A subagent's commit is not
+// counted: the report is a message to the main conversation, which a
+// subagent reading the result does not replace.
+const reading = new Map<string, number>()
 // Folders of the files edited since the last turn ended.
 const touched = new Set<string>()
 let host: { shell: string; home: string } | undefined
@@ -92,6 +106,9 @@ const fingerprint = async ($: Engine, root: string) => {
   const found = await $.process.run(['/bin/sh', '-c', FINGERPRINT], { cwd: root, timeoutMs: 60_000 })
   return found.exitCode === 0 ? found.stdout.trim() || undefined : undefined
 }
+
+const unreadText = (root: string) =>
+  `Check gate: couldn't read the working tree of ${basename(root)}, so this commit was stopped. Tell the user.`
 
 const stored = async ($: Engine, root: string) => {
   const value = await $.store.get(STORE_PREFIX + root)
@@ -156,10 +173,11 @@ const tellSession = async ($: Engine, run: Run) => {
 }
 
 // Streams the check in the background, the band following its steps. Returns
-// the run as it starts. A run replaced while a report was owed owes it too:
-// the model is waiting on this root's next result, whichever run gives it.
+// the run as it starts and the job that follows it. A run replaced while a
+// report was owed owes it too: the model is waiting on this root's next
+// result, whichever run gives it.
 const startBackground = async ($: Engine, root: string, command: string, tree: string, trigger: Run['trigger']) => {
-  const owed = trigger === 'commit' || (background.get(root)?.owed ?? false)
+  const owed = background.get(root)?.owed ?? false
   stopBackground(root)
   const { shell } = await hostInfo($)
   const parser = createParser(outerScript(command))
@@ -168,9 +186,14 @@ const startBackground = async ($: Engine, root: string, command: string, tree: s
 
   const stream = $.process.spawn({ argv: [shell, '-ic', `${command} 2>&1`], cwd: root })
   let isStopped = false
-  const job = {
+  let settle: () => void = () => undefined
+  const ended = new Promise<void>(resolve => {
+    settle = resolve
+  })
+  const job: Job = {
     tree,
     owed,
+    ended,
     stop: () => {
       isStopped = true
       stream.return({ code: null, signal: 'SIGTERM' }).catch(() => undefined)
@@ -200,12 +223,38 @@ const startBackground = async ($: Engine, root: string, command: string, tree: s
       run = { ...base, status: 'error', reason: errorText(error), tail: parser.tail() }
     }
     if (isStopped || background.get(root) !== job) return
+    // A result that could not be stored still ends the run: the job leaves the
+    // map below, and the next commit starts the checks again.
+    await record($, run).catch(error =>
+      $.ui.log(`check-gate: the result was not stored: ${errorText(error)}`, { to: 'debug' }),
+    )
+    // A run replaced while its result was stored leaves the report to its
+    // replacement, which took the flag over.
+    if (isStopped || background.get(root) !== job) return
+    // The job leaves the map in the step that reads `owed`, with the result
+    // already stored: a commit whose wait ran out either still finds the job
+    // and sets the flag in time, or finds the result.
     background.delete(root)
-    await record($, run)
+    settle()
     if (run.status === 'failed') $.ui.toast(bandLine(run))
-    if (job.owed) await tellSession($, run)
+    if (job.owed && (reading.get(root) ?? 0) === 0) await tellSession($, run)
   })().catch(error => $.ui.log(`check-gate: ${errorText(error)}`, { to: 'debug' }))
-  return base
+  return { run: base, job }
+}
+
+// Waits for the run to end, for as long as the gate allows. A wait the
+// engine refuses counts as one that ran out, and so does one the hook's own
+// dispatch ends, as an interrupt does.
+const endOrGrace = async ($: Engine, job: Job, dispatch: AbortSignal) => {
+  const wait = new AbortController()
+  const stop = () => wait.abort()
+  if (dispatch.aborted) stop()
+  dispatch.addEventListener('abort', stop, { once: true })
+  const waited = $.clock.sleep(GRACE_MS, { signal: wait.signal }).catch(() => undefined)
+  await Promise.race([job.ended, waited])
+  // Ends a wait the run beat, so no timer outlives the call.
+  dispatch.removeEventListener('abort', stop)
+  stop()
 }
 
 // `auto` after a turn: reuses a result for the same tree, and leaves a
@@ -280,9 +329,7 @@ export const register: Register = on => {
     if (command === undefined) return next(e)
 
     const tree = await fingerprint($, root)
-    if (tree === undefined) {
-      return { deny: `Check gate: couldn't read the working tree of ${basename(root)}, so this commit was stopped. Tell the user.` }
-    }
+    if (tree === undefined) return { deny: unreadText(root) }
     const done = await known($, root, command, tree)
     if (done?.status === 'passed') {
       await setRun($, done)
@@ -290,15 +337,41 @@ export const register: Register = on => {
     }
     if (done) return { deny: denyText(done) }
     // No result for this tree: the checks run in the background and the
-    // commit is refused now, instead of waiting on them inside the tool call,
-    // whose timeout would end the run and the commit together.
-    const job = background.get(root)
-    const running = (await read($, runs))[root]
-    if (job?.tree === tree && running?.status === 'running') {
-      job.owed = true
-      return { deny: pendingText(running, false) }
+    // commit waits a few seconds for them. A check that ends within that wait,
+    // as a script that remembers the trees it passed does, settles the commit
+    // in this call. A longer run is refused and reports back when it ends:
+    // waiting on it inside the tool call would let the call's timeout end the
+    // run and the commit together.
+    const going = (await read($, runs))[root]
+    const current = background.get(root)
+    const isNew = current === undefined || current.tree !== tree || going?.status !== 'running'
+    const { run, job } =
+      isNew || going === undefined ? await startBackground($, root, command, tree, 'commit') : { run: going, job: current }
+    const isMain = e.agentId === undefined
+    if (isMain) reading.set(root, (reading.get(root) ?? 0) + 1)
+    try {
+      await endOrGrace($, job, next.signal)
+      // Everything is read again after the wait. The tree first: a result for
+      // the tree as it was says nothing about files that changed since.
+      const after = await fingerprint($, root)
+      if (after === undefined) return { deny: unreadText(root) }
+      if (after !== tree) return { deny: movedText(run) }
+      const ended = await known($, root, command, tree)
+      if (ended?.status === 'passed') return next(e)
+      if (ended) return { deny: denyText(ended) }
+      const row = (await read($, runs))[root]
+      if (row?.status === 'error' && row.tree === tree) return { deny: denyText(row) }
+      // Still running, this run or one that replaced it: that one owes the
+      // report. With none in the map, a run ended or started over while the
+      // lines above read, so the commit is asked for again and nothing is
+      // promised.
+      const owing = background.get(root)
+      if (owing === undefined) return { deny: restartedText(run) }
+      owing.owed = true
+      return { deny: pendingText(run, isNew) }
+    } finally {
+      if (isMain) reading.set(root, (reading.get(root) ?? 1) - 1)
     }
-    return { deny: pendingText(await startBackground($, root, command, tree, 'commit'), true) }
   }).catch(($, e, next) =>
     next.called
       ? next(e)
