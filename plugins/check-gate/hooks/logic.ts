@@ -140,9 +140,14 @@ function readWord(text: string, start: number): { word: Word; end: number } | { 
   return { word: { text: out, isDynamic, hasBareVariable }, end: i }
 }
 
+type Heredoc = { tag: string; isTabbed: boolean }
+// The heredocs a text ends inside the bodies of. `newline` ends the line that opened
+// them. `isReadByShell`: the pipeline of one of their marks names a shell.
+type OpenBody = { text: string; newline: number; heredocs: readonly Heredoc[]; isReadByShell: boolean }
+
 // The line after a run of heredocs whose bodies start after `newline`, or -1
 // when the text ends inside a body.
-function afterHeredocs(text: string, newline: number, heredocs: readonly { tag: string; isTabbed: boolean }[]): number {
+function afterHeredocs(text: string, newline: number, heredocs: readonly Heredoc[]): number {
   let at = newline + 1
   for (const { tag, isTabbed } of heredocs) {
     let isClosed = false
@@ -157,14 +162,29 @@ function afterHeredocs(text: string, newline: number, heredocs: readonly { tag: 
   return at
 }
 
+// A word that runs what it reads: a shell by name or by variable, `source`, `.` or `eval`.
+const READS_COMMANDS = /(?:^|\/)(?:(?:ba|z|da|k)?sh|source|\.|eval)$|^\$\{?(?:SHELL|BASH)\}?$/
+// These don't end a pipeline. A parenthesis stays in, for `bash <(cat <<EOF`.
+const WITHIN_PIPELINE = new Set(['|', '|&', '(', ')'])
+
+// Whether the pipeline around token `at` has a word that runs what it reads. Any word
+// counts, so `echo bash <<EOF` stays gated too, which only costs a check.
+function pipelineReadsCommands(tokens: readonly Token[], at: number): boolean {
+  const endsPipeline = (token: Token) => 'op' in token && !WITHIN_PIPELINE.has(token.op)
+  const start = tokens.slice(0, at).findLastIndex(endsPipeline) + 1
+  const length = tokens.slice(at).findIndex(endsPipeline)
+  const pipeline = tokens.slice(start, length === -1 ? tokens.length : at + length)
+  return pipeline.some(token => !('op' in token) && READS_COMMANDS.test(token.text))
+}
+
 // Splits shell text into words and operators, dropping comments, redirections
 // and heredoc bodies. `openQuote` is where it stopped at a quote that never
-// closes, as when the text ends inside a string; `inHeredoc`, that it ended
-// inside a heredoc body. `stopAt: 'operator'` ends it at the first operator;
+// closes, as when the text ends inside a string; `openBody`, the heredocs it
+// ended inside the bodies of. `stopAt: 'operator'` ends it at the first operator;
 // `'paren'`, at the first `)` it didn't open, and `closesAt` says where.
-function lex(text: string, stopAt?: 'operator' | 'paren'): { tokens: Token[]; openQuote?: number; inHeredoc?: boolean; closesAt?: number } {
+function lex(text: string, stopAt?: 'operator' | 'paren'): { tokens: Token[]; openQuote?: number; openBody?: OpenBody; closesAt?: number } {
   const tokens: Token[] = []
-  let heredocs: { tag: string; isTabbed: boolean }[] = []
+  let heredocs: (Heredoc & { at: number })[] = []
   let depth = 0
   let i = 0
   while (i < text.length) {
@@ -173,8 +193,12 @@ function lex(text: string, stopAt?: 'operator' | 'paren'): { tokens: Token[]; op
       const last = tokens.at(-1)
       if (last === undefined || !('op' in last) || !CONTINUES_LIST.has(last.op)) tokens.push({ op: '\n' })
       if (stopAt === 'operator') return { tokens }
-      i = afterHeredocs(text, i, heredocs)
-      if (i === -1) return { tokens, inHeredoc: true }
+      const after = afterHeredocs(text, i, heredocs)
+      if (after === -1) {
+        const isReadByShell = heredocs.some(({ at }) => pipelineReadsCommands(tokens, at))
+        return { tokens, openBody: { text, newline: i, heredocs, isReadByShell } }
+      }
+      i = after
       heredocs = []
     } else if (/\s/.test(c)) {
       i += 1
@@ -210,7 +234,7 @@ function lex(text: string, stopAt?: 'operator' | 'paren'): { tokens: Token[]; op
       i = read.end
       if (redirect === undefined) tokens.push(read.word)
       else if (redirect.includes('<<') && !redirect.includes('<<<')) {
-        heredocs.push({ tag: read.word.text, isTabbed: redirect.endsWith('-') })
+        heredocs.push({ tag: read.word.text, isTabbed: redirect.endsWith('-'), at: tokens.length })
       }
     }
   }
@@ -233,6 +257,10 @@ type Place = {
   unplaced?: string
   // The text ends inside a string or a heredoc, so this "commit" is likely a mention.
   isMention?: boolean
+  // The heredoc body the text ends inside, when no shell reads it.
+  openBody?: OpenBody
+  // The text sits in a substitution whose output a shell runs, as in `eval "$(...)"`.
+  outputRuns?: boolean
   // The command has defined a function, so a block still open may be its body.
   definesFunction?: boolean
   // The quote that ends the string this text sits in. A `$(...)` needs none: its `)` ends it.
@@ -385,7 +413,7 @@ function runCommand(place: Place, words: readonly Word[], connector: string | un
 
 // Walks the text before a commit and says where it leaves the shell.
 function followFolder(before: string, start: Place): Place {
-  const { tokens, openQuote, inHeredoc } = lex(before)
+  const { tokens, openQuote, openBody } = lex(before)
   const subshells: Place[] = []
   let place = start
   let words: Word[] = []
@@ -430,6 +458,7 @@ function followFolder(before: string, start: Place): Place {
     const inside = quote === '"' ? scanString(before, openQuote).inside : undefined
     if (inside !== undefined) {
       place.closer = before.charAt(inside - 1) === '`' ? '`' : undefined
+      if (NESTED_SHELL.test(before.slice(0, openQuote))) place.outputRuns = true
       return followFolder(before.slice(inside), place)
     }
     place.closer = quote
@@ -444,7 +473,10 @@ function followFolder(before: string, start: Place): Place {
     }
     place.isMention = true
   }
-  if (inHeredoc) place.isMention = true
+  if (openBody !== undefined) {
+    place.isMention = true
+    if (!openBody.isReadByShell && !place.outputRuns) place.openBody = openBody
+  }
   return place
 }
 
@@ -566,15 +598,23 @@ function isDryRun(rest: string, closer: string | undefined): boolean {
   return isDry
 }
 
+// Whether a body reaches its closing line in the text after the commit. One that
+// doesn't may be a `<<` the walk misread, as in `$[1<<2]`, with a real commit below it.
+function bodyCloses({ text, newline, heredocs }: OpenBody, rest: string, closer: string | undefined): boolean {
+  return afterHeredocs(text + ownText(rest, closer), newline, heredocs) !== -1
+}
+
 // Finds a `git commit` in a Bash command and the folder it lands in, following
 // `git -C`, `cd`, `pushd`, variables the command sets, subshells, substitutions, if
-// blocks and `bash -c` strings. A `--dry-run` commit is no commit. When the text can't
-// say (a variable it doesn't set, a cd that may not run, GIT_DIR, a commit in a function,
-// commits in two folders) the target is `unplaced`, and the gate refuses it. Text inside a
-// string or a heredoc may only mention a commit: it's still gated, and never
-// refused for its folder. Reads the command's text, so it still misses a commit
-// or a move hidden behind an alias, a variable or a script, or a commit split by
-// a line continuation inside a heredoc fed to a shell.
+// blocks and `bash -c` strings. A `--dry-run` commit is no commit, and neither is text in
+// a heredoc body that closes, unless a shell reads that body. When the text can't say (a
+// variable it doesn't set, a cd that may not run, GIT_DIR, a commit in a function, commits
+// in two folders) the target is `unplaced`, and the gate refuses it. Text inside any other
+// string, a body a shell reads, or a body with no closing line may only mention a commit:
+// it's still gated, in the folder the body's command runs in, and never refused for its
+// folder. Reads the command's text, so it still misses a commit or a move hidden behind an
+// alias, a variable or a script, or in a body whose shell comes only after the body ends,
+// as in `echo "$(cat <<EOF ...)" | bash`.
 export function findCommit(command: string): CommitTarget | undefined {
   const { joined: text, splitsOperator } = joinContinuedLines(command)
   let found: CommitTarget | undefined
@@ -591,6 +631,7 @@ export function findCommit(command: string): CommitTarget | undefined {
       blocks: [],
       closer: undefined,
     })
+    if (place.openBody !== undefined && bodyCloses(place.openBody, text.slice(start + opener.length), place.closer)) continue
     if (isDryRun(text.slice(start + whole.length), place.closer)) continue
 
     const target = targetOf(place, gitOptions)
