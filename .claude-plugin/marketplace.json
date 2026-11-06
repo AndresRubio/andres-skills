@@ -51,7 +51,7 @@
     {
       "name": "humanizer",
       "source": "./plugins/humanizer",
-      "description": "Mod: flags AI-writing tells in prose files, closing messages, commit messages and PR text, refuses commits and PR commands with strong tells, and adds the humanizer rewriting skill."
+      "description": "Mod: a writing reminder on each prompt, rewrite feedback on prose files, a refusal when a commit message or PR text has a strong tell or a commit adds a prose line with any tell, a note on closing messages, and the humanizer rewriting skill."
     }
   ]
 }

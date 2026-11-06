@@ -11,8 +11,9 @@ import os
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
-_HOOKS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks")
+_HOOKS =os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks")
 _RUTA = os.path.join(_HOOKS, "humanizer_check.py")
 _spec = importlib.util.spec_from_file_location("humanizer_check", _RUTA)
 hc = importlib.util.module_from_spec(_spec)
@@ -316,6 +317,238 @@ class CommitStagedFiles(unittest.TestCase):
         git(self.repo, "commit", "-q", "-m", "legacy")
         self.escribir("notes.md", self.MALO + "\nA clean new line.\n", stage=False)
         self.assertEqual("", self.commit('git commit -q -a -m "update notes"'))
+
+    def limpio(self, nombre="notes.md"):
+        """A committed clean file, so the next write to it is an unstaged change."""
+        self.escribir(nombre, self.BUENO)
+        git(self.repo, "commit", "-q", "-m", "clean")
+
+    # From a subfolder: git names files from the repo root, the hook runs in the subfolder.
+
+    def test_a_staged_tell_is_denied_from_a_subfolder(self):
+        self.escribir("docs/notes.md", self.MALO)
+        out = self.commit(cwd=os.path.join(self.repo, "docs"))
+        self.assertIn("deny", out)
+        self.assertIn("docs/notes.md", out)
+
+    def test_dash_a_is_denied_from_a_subfolder(self):
+        self.limpio("docs/notes.md")
+        self.escribir("docs/notes.md", self.MALO, stage=False)
+        self.assertIn("deny", self.commit('git commit -a -m "x"', cwd=os.path.join(self.repo, "docs")))
+
+    def test_a_relative_leading_cd_is_followed(self):
+        self.escribir("docs/notes.md", self.MALO)
+        self.assertIn("deny", self.commit('cd docs && git commit -m "x"'))
+
+    # Combined short flags.
+
+    def test_combined_am_takes_the_working_tree(self):
+        self.limpio()
+        self.escribir("notes.md", self.MALO, stage=False)
+        self.assertIn("deny", self.commit('git commit -am "x"'))
+        self.assertIn("deny", self.commit('git commit -qam "x"'))
+
+    def test_a_dash_a_inside_a_message_is_not_the_flag(self):
+        self.limpio()
+        self.escribir("notes.md", self.MALO, stage=False)
+        self.assertEqual("", self.commit('git commit -m "-a"'))
+        self.assertEqual("", self.commit("git commit --message=-a"))
+
+    # git add earlier in the same command: the hook runs before the add does.
+
+    def test_git_add_then_commit_checks_the_added_file(self):
+        self.limpio()
+        self.escribir("notes.md", self.MALO, stage=False)
+        for cmd in ('git add notes.md && git commit -m "x"',
+                    'git add notes.md; git commit -m "x"',
+                    'git add notes.md\ngit commit -m "x"',
+                    'git add . && git commit -m "x"',
+                    'git add -A && git commit -m "x"',
+                    'git add --all && git commit -m "x"',
+                    'git add -u && git commit -m "x"',
+                    'git add "$F" && git commit -m "x"'):
+            self.assertIn("deny", self.commit(cmd), cmd)
+
+    def test_git_add_of_a_new_file_checks_all_of_it(self):
+        self.escribir("nuevo.md", self.MALO, stage=False)
+        self.limpio()
+        self.assertIn("deny", self.commit('git add nuevo.md && git commit -m "x"'))
+
+    def test_git_add_on_a_repo_with_no_commits_checks_the_file(self):
+        self.escribir("notes.md", self.MALO, stage=False)
+        self.assertIn("deny", self.commit('git add notes.md && git commit -m "x"'))
+
+    def test_git_add_from_a_folder_it_moved_to(self):
+        self.limpio("docs/notes.md")
+        self.escribir("docs/notes.md", self.MALO, stage=False)
+        self.assertIn("deny", self.commit('cd docs && git add notes.md && git commit -m "x"'))
+
+    def test_git_add_of_another_file_leaves_this_one_out(self):
+        self.limpio("otro.md")
+        self.limpio()
+        self.escribir("notes.md", self.MALO, stage=False)
+        self.escribir("otro.md", self.BUENO + "More.\n", stage=False)
+        self.assertEqual("", self.commit('git add otro.md && git commit -m "x"'))
+
+    def test_git_add_u_leaves_new_files_out(self):
+        self.limpio()
+        self.escribir("nuevo.md", self.MALO, stage=False)
+        self.assertEqual("", self.commit('git add -u && git commit -m "x"'))
+
+    def test_git_add_dot_leaves_ignored_files_out(self):
+        self.limpio()
+        self.escribir(".gitignore", "secreto.md\n")
+        git(self.repo, "commit", "-q", "-m", "ignore")
+        self.escribir("secreto.md", self.MALO, stage=False)
+        self.assertEqual("", self.commit('git add . && git commit -m "x"'))
+
+    def test_a_dry_run_add_adds_nothing(self):
+        self.limpio()
+        self.escribir("notes.md", self.MALO, stage=False)
+        self.assertEqual("", self.commit('git add -n notes.md && git commit -m "x"'))
+
+    def test_git_add_after_the_commit_does_not_count(self):
+        self.limpio()
+        self.escribir("notes.md", self.MALO, stage=False)
+        self.assertEqual("", self.commit('git commit --allow-empty -m "x" && git add notes.md'))
+
+    def test_git_add_in_another_repo_does_not_count(self):
+        otro = tempfile.mkdtemp()
+        git(otro, "init", "-q")
+        with open(os.path.join(otro, "notes.md"), "w") as f:
+            f.write(self.MALO)
+        self.assertEqual("", self.commit(f'git -C {otro} add notes.md && git commit --allow-empty -m "x"'))
+
+    def test_a_heredoc_body_is_not_a_git_add(self):
+        self.limpio()
+        self.escribir("notes.md", self.MALO, stage=False)
+        self.assertEqual("", self.commit("git commit --allow-empty -F - <<EOF\ngit add notes.md\nEOF"))
+
+    # Paths named on the commit.
+
+    def test_a_named_path_takes_the_working_tree(self):
+        self.limpio()
+        self.escribir("notes.md", self.MALO, stage=False)
+        self.assertIn("deny", self.commit('git commit notes.md -m "x"'))
+        self.assertIn("deny", self.commit('git commit -m "x" -- notes.md'))
+
+    def test_a_named_path_that_is_already_staged_is_checked(self):
+        self.limpio()
+        self.escribir("notes.md", self.MALO)
+        self.assertIn("deny", self.commit('git commit notes.md -m "x"'))
+
+    def test_a_named_path_leaves_other_staged_files_out(self):
+        self.limpio("bien.md")
+        self.escribir("mal.md", self.MALO)
+        self.escribir("bien.md", self.BUENO + "More.\n", stage=False)
+        self.assertEqual("", self.commit('git commit bien.md -m "x"'))
+
+    def test_include_keeps_the_staged_files(self):
+        self.limpio("bien.md")
+        self.escribir("mal.md", self.MALO)
+        self.escribir("bien.md", self.BUENO + "More.\n", stage=False)
+        self.assertIn("deny", self.commit('git commit -i bien.md -m "x"'))
+
+    def test_flag_values_are_not_paths(self):
+        self.escribir("notes.md", self.MALO)
+        self.escribir("autor.md", self.BUENO, stage=False)
+        self.assertIn("deny", self.commit('git commit --author "autor.md" -m "x"'))
+
+    def test_a_quoted_message_from_a_cat_heredoc_is_not_paths(self):
+        self.escribir("notes.md", self.MALO)
+        cmd = 'git commit -m "$(cat <<\'EOF\'\nsay "a b" ok\nEOF\n)"'
+        self.assertIn("deny", self.commit(cmd))
+
+    def test_a_redirect_is_not_a_path(self):
+        self.escribir("notes.md", self.MALO)
+        self.assertIn("deny", self.commit('git commit -m "x" 2>&1'))
+        self.assertIn("deny", self.commit('git commit -m "x" > salida.txt'))
+
+    def test_a_comment_is_not_a_path(self):
+        self.escribir("notes.md", self.MALO)
+        self.assertIn("deny", self.commit('git commit -m "x" # notes.md is in it'))
+
+    # git -C.
+
+    def otro_repo(self, nombre="mi repo"):
+        otro = os.path.join(tempfile.mkdtemp(), nombre)
+        os.makedirs(otro)
+        git(otro, "init", "-q")
+        return otro
+
+    def test_git_c_reads_the_repo_it_names(self):
+        otro = self.otro_repo("otro")
+        with open(os.path.join(otro, "notes.md"), "w") as f:
+            f.write(self.MALO)
+        git(otro, "add", "notes.md")
+        self.assertIn("deny", self.commit(f'git -C {otro} commit -m "x"'))
+
+    def test_git_c_with_a_quoted_path(self):
+        otro = self.otro_repo()
+        with open(os.path.join(otro, "notes.md"), "w") as f:
+            f.write(self.MALO)
+        git(otro, "add", "notes.md")
+        self.assertIn("deny", self.commit(f'git -C "{otro}" commit -m "x"'))
+
+    def test_git_c_ignores_a_tell_staged_in_the_cwd_repo(self):
+        otro = self.otro_repo("otro")
+        self.escribir("notes.md", self.MALO)
+        self.assertEqual("", self.commit(f'git -C {otro} commit --allow-empty -m "x"'))
+
+    def test_a_relative_git_c_is_followed(self):
+        self.escribir("docs/notes.md", self.MALO)
+        self.assertIn("deny", self.commit('git -C docs commit -m "x"'))
+
+    def test_git_c_add_then_git_c_commit(self):
+        otro = self.otro_repo("otro")
+        with open(os.path.join(otro, "notes.md"), "w") as f:
+            f.write(self.MALO)
+        self.assertIn("deny", self.commit(f'git -C {otro} add notes.md && git -C {otro} commit -m "x"'))
+
+    # File names git quotes or treats as patterns.
+
+    def test_odd_file_names_are_still_read(self):
+        for nombre in ("con espacio.md", "año.md", "a[1].md", 'co"mi"lla.md'):
+            repo = tempfile.mkdtemp()
+            git(repo, "init", "-q")
+            with open(os.path.join(repo, nombre), "w") as f:
+                f.write(self.MALO)
+            git(repo, "add", "--", nombre)
+            payload = {"tool_input": {"command": 'git commit -m "x"'}, "cwd": repo}
+            self.assertIn("deny", salida(hc.mode_commit, payload), nombre)
+
+    def test_a_diff_line_that_looks_like_a_header_is_not_one(self):
+        self.limpio()
+        self.escribir("notes.md", self.BUENO + "++ b/other.md\ndiff --git a/x b/x\nPlain.\n")
+        self.assertEqual("", self.commit())
+
+    def test_each_file_is_judged_on_its_own_added_lines(self):
+        self.escribir("a.md", self.MALO)
+        self.escribir("b.md", self.BUENO)
+        git(self.repo, "commit", "-q", "-m", "legacy")
+        self.escribir("a.md", self.MALO + "A clean new line.\n")
+        self.escribir("b.md", self.BUENO + "New -- line.\n")
+        out = self.commit()
+        self.assertIn("b.md", out)
+        self.assertNotIn("a.md", out)
+
+    # Git processes per commit, so a large commit stays inside the hook's 10 seconds.
+
+    def test_the_number_of_git_calls_does_not_grow_with_the_files(self):
+        for i in range(40):
+            self.escribir(f"doc{i}.md", self.BUENO, stage=False)
+        git(self.repo, "add", ".")
+        with mock.patch.object(hc.subprocess, "run", wraps=subprocess.run) as run:
+            self.assertEqual("", self.commit())
+        self.assertLessEqual(run.call_count, 5)
+
+    def test_a_file_at_this_plugins_skill_path_can_be_committed(self):
+        self.escribir("plugins/humanizer/skills/humanizer/SKILL.md", self.MALO)
+        self.assertEqual("", self.commit())
+
+    def test_an_unscannable_command_still_checks_what_is_staged(self):
+        self.escribir("notes.md", self.MALO)
+        self.assertIn("deny", self.commit('git commit -m "x'))
 
 
 class FileMode(unittest.TestCase):
@@ -747,10 +980,13 @@ class Links(unittest.TestCase):
 class PluginLayout(unittest.TestCase):
     """The hook runs from the install cache and has to know the repo copy of its own files."""
 
-    def test_this_plugins_own_files_are_skipped(self):
+    def test_this_plugins_skill_is_skipped(self):
         for ruta in ("/repo/plugins/humanizer/skills/humanizer/SKILL.md",
-                     "/home/x/.claude/plugins/marketplaces/andres-skills/plugins/humanizer/README.md"):
+                     "/home/x/.claude/plugins/marketplaces/andres-skills/plugins/humanizer/skills/humanizer/SKILL.md"):
             self.assertFalse(hc.is_prose_file(ruta), ruta)
+
+    def test_this_plugins_other_prose_is_still_checked(self):
+        self.assertTrue(hc.is_prose_file("/repo/plugins/humanizer/README.md"))
 
     def test_another_plugins_prose_is_still_checked(self):
         self.assertTrue(hc.is_prose_file("/repo/plugins/check-gate/README.md"))

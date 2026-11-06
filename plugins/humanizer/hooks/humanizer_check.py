@@ -15,11 +15,14 @@ Modes, picked by the first argument:
           read). The command's other words, flags and paths are not read, so a
           bare `--` cannot count as a dash; a command that cannot be scanned (an
           unclosed quote) is read whole, flags aside. A `git commit` is also
-          denied while a line it adds to a staged .md/.txt/.rst file has any
-          tell, whatever tool wrote it (a Bash heredoc never reaches the post
-          hook); text already in HEAD never blocks. Prefix the command with
-          HUMANIZER_OK=1 to pass a message or added lines whose tells are
-          deliberate (a quote).
+          denied while a line it adds to a .md/.txt/.rst file has any tell,
+          whatever tool wrote it (a Bash heredoc never reaches the post hook); text
+          already in HEAD never blocks. The files are what the commit would take:
+          the index, the working tree for -a or a named path, and whatever a `git
+          add` earlier in the command is about to stage, in the repo a `cd` or
+          `git -C` leads to. A folder given as a variable cannot be followed, and
+          the check then passes. Prefix the command with HUMANIZER_OK=1 to pass a
+          message or added lines whose tells are deliberate (a quote).
   stop    Stop: check the closing message of the turn, with code stripped as in
           the other modes, and show any tells to the owner as a systemMessage.
           Claude never sees it and the turn ends as usual. The owner chose this on
@@ -189,9 +192,9 @@ def is_prose_file(path):
         return False
     if "/node_modules/" in full:
         return False
-    # This plugin's own files quote the tells. The hook runs from the install cache,
-    # so its own location says nothing about where the repo copy being edited lives.
-    if "/plugins/humanizer/" in full:
+    # This plugin's skill quotes the tells. The hook runs from the install cache, so
+    # its own location says nothing about where the repo copy being edited lives.
+    if "/plugins/humanizer/skills/humanizer/" in full:
         return False
     # Agent working notes, never a deliverable: SDD ledgers and briefs under a
     # repo's git-ignored .superpowers/, and files in a session's scratchpad.
@@ -243,18 +246,20 @@ COMMIT_CALL = re.compile(
 HEREDOC = re.compile(r"""<<(-?)[ \t]*(?:'([^'\n]*)'|"([^"\n]*)"|([^\s;&|()<>'"]+))""")
 
 
-def command_skeleton(cmd, bodies=None):
+def command_skeleton(cmd, bodies=None, keep_words=False):
     """The command with every quoted string turned into Q, escaped characters into _,
     line continuations into a space and heredoc bodies dropped, so COMMIT_CALL sees
     only real command starts. A heredoc body is never read as a command, whatever
     command takes it (so `bash <<EOF` holding a commit is not caught, like `bash -c`);
-    each body goes into `bodies` when a list is given, in order.
+    each body goes into `bodies` when a list is given, in order. With `keep_words`
+    quoted strings and escapes stay as written and the heredoc marks go, which leaves
+    the shell words for shell_steps.
     Returns None when the command cannot be scanned (an unclosed quote or heredoc)."""
     out, pending, i, n = [], [], 0, len(cmd)
     while i < n:
         c = cmd[i]
         if c == "\\":
-            out.append(" " if cmd[i + 1:i + 2] == "\n" else "_")
+            out.append(" " if cmd[i + 1:i + 2] == "\n" else cmd[i:i + 2] if keep_words else "_")
             i += 2
         elif c == "'" or cmd.startswith("$'", i):
             j = i + (2 if c == "$" else 1)
@@ -262,7 +267,7 @@ def command_skeleton(cmd, bodies=None):
                 j += 2 if c == "$" and cmd[j] == "\\" else 1
             if j >= n:
                 return None
-            out.append("Q")
+            out.append(cmd[i:j + 1] if keep_words else "Q")
             i = j + 1
         elif c == '"':
             j = i + 1
@@ -270,7 +275,7 @@ def command_skeleton(cmd, bodies=None):
                 j += 2 if cmd[j] == "\\" else 1
             if j >= n:
                 return None
-            out.append("Q")
+            out.append(cmd[i:j + 1] if keep_words else "Q")
             i = j + 1
         elif cmd.startswith("<<<", i):  # a here-string: its word is scanned as usual
             out.append("<<<")
@@ -278,7 +283,7 @@ def command_skeleton(cmd, bodies=None):
         elif c == "<" and (m := HEREDOC.match(cmd, i)):
             word = next(w for w in m.group(2, 3, 4) if w is not None).replace("\\", "")
             pending.append((word, m.group(1) == "-"))
-            out.append("H")
+            out.append("" if keep_words else "H")
             i = m.end()
         elif c == "\n" and pending:
             # The heredoc bodies start on the next line, one after the other.
@@ -318,74 +323,297 @@ def file_text(path):
 LEADING_CD = re.compile(r"^\s*cd\s+(?:\"([^\"]+)\"|'([^']+)'|(\S+))\s*(?:&&|;)")
 
 
-def repo_dir(cmd, payload):
-    """Where the commit runs: a leading `cd DIR &&`, else the hook's cwd."""
-    m = LEADING_CD.match(cmd)
-    if m:
-        target = os.path.expanduser(next(d for d in m.groups() if d is not None))
-        if os.path.isabs(target):
-            return target
-    return payload.get("cwd") or os.getcwd()
+def shell_steps(cmd):
+    """Each simple command in `cmd`, in order, as its list of unquoted words, with
+    redirects and comments dropped. None when the command cannot be scanned."""
+    text = command_skeleton(cmd, keep_words=True)
+    if text is None:
+        return None
+    steps, pos, after_redirect = [[]], 0, False
+    while pos < len(text):
+        m = SHELL_TOKEN.match(text, pos)
+        if not m:
+            if text[pos:].strip():
+                return None
+            break
+        pos = m.end()
+        operator, redirect, word = m.groups()
+        if operator:
+            steps.append([])
+            after_redirect = False
+        elif redirect:
+            after_redirect = True
+        elif after_redirect:
+            after_redirect = False
+        elif word.startswith("#"):
+            end = text.find("\n", pos)
+            pos = end if end != -1 else len(text)
+        else:
+            steps[-1].append(unquote(word))
+    return [step for step in steps if step]
 
 
-def added_lines(cwd, name, cached):
-    """The new-file line numbers a commit of `name` would add, read from a -U0 diff
-    against HEAD (the index with `cached`, the working tree without, for -a). None when
-    the diff cannot be read, such as a repo with no commits: the whole file counts then."""
-    base = ["git", "-C", cwd, "diff", "-U0"] + (["--cached"] if cached else ["HEAD"])
+def expands(word):
+    """A word the shell fills in, so the hook cannot know what it will be."""
+    return "$" in word or "`" in word
+
+
+def git_call(words, cwd):
+    """(folder, subcommand, its arguments) for a git command, else None."""
+    if words[0] != "git":
+        return None
+    i = 1
+    while i < len(words):
+        word = words[i]
+        if word == "-C":
+            cwd = os.path.join(cwd, os.path.expanduser(words[i + 1])) if i + 1 < len(words) else cwd
+            i += 2
+        elif word == "-c":
+            i += 2
+        elif word.startswith("-"):
+            i += 1
+        else:
+            return cwd, word, words[i + 1:]
+    return None
+
+
+# Options of `git commit` that take the next word as their value.
+COMMIT_LONG_VALUES = {"--message", "--file", "--author", "--date", "--template", "--reuse-message",
+                      "--reedit-message", "--fixup", "--squash", "--trailer", "--cleanup",
+                      "--pathspec-from-file"}
+COMMIT_SHORT_VALUES = "mFCct"
+# Short options whose optional value can only be stuck to them.
+COMMIT_SHORT_STUCK = "Su"
+
+
+def commit_options(args):
+    """(-a or --all given, the paths named, -i or --include given) for `git commit`."""
+    takes_all, include, paths, i = False, False, [], 0
+    while i < len(args):
+        word = args[i]
+        i += 1
+        if word == "--":
+            paths += args[i:]
+            break
+        if word.startswith("--"):
+            takes_all = takes_all or word == "--all"
+            include = include or word == "--include"
+            if word in COMMIT_LONG_VALUES:
+                i += 1
+        elif word.startswith("-") and len(word) > 1:
+            for k, letter in enumerate(word[1:], 2):
+                takes_all = takes_all or letter == "a"
+                include = include or letter == "i"
+                if letter in COMMIT_SHORT_VALUES:
+                    # A value stuck to the letter (-mFix) leaves the next word alone.
+                    i += 0 if k < len(word) else 1
+                    break
+                if letter in COMMIT_SHORT_STUCK:
+                    break
+        else:
+            paths.append(word)
+    return takes_all, paths, include
+
+
+def add_options(args):
+    """(tracked files only, pathspecs) for `git add`, or None when it stages nothing."""
+    tracked_only, whole, specs, literal = False, False, [], False
+    for word in args:
+        if literal or not word.startswith("-") or word == "-":
+            specs.append(":/" if expands(word) else word)
+        elif word == "--":
+            literal = True
+        elif word == "--dry-run":
+            return None
+        elif word.startswith("--"):
+            tracked_only = tracked_only or word == "--update"
+            whole = whole or word == "--all" or word.startswith("--pathspec-from-file")
+        else:
+            if "n" in word:
+                return None
+            tracked_only = tracked_only or "u" in word
+            whole = whole or "A" in word
+    if not specs and (whole or tracked_only):
+        specs = [":/"]
+    return (tracked_only, specs) if specs else None
+
+
+def commit_scopes(cmd, payload):
+    """One (folder, takes the index, working-tree pathspecs, earlier adds) for each commit
+    in the command, following `cd` and `git -C`. A `git add` runs after this hook, so what
+    it will stage has to be worked out here; each add is (folder, tracked only, pathspecs).
+    A command that cannot be read counts as a plain commit in the hook's cwd."""
+    start = cwd = os.path.expanduser(payload.get("cwd") or os.getcwd())
+    scopes, adds = [], []
+    for words in shell_steps(cmd) or []:
+        while words and ENV_WORD.match(words[0]):
+            words = words[1:]
+        if not words:
+            continue
+        if words[0] == "cd":
+            targets = [w for w in words[1:] if not w.startswith("-")]
+            if targets and not expands(targets[0]):
+                cwd = os.path.join(cwd, os.path.expanduser(targets[0]))
+            continue
+        call = git_call(words, cwd)
+        if call is None:
+            continue
+        where, subcommand, args = call
+        if subcommand == "add":
+            add = add_options(args)
+            if add:
+                adds.append((where, *add))
+        elif subcommand == "commit":
+            takes_all, named, include = commit_options(args)
+            # A word that is no file on disk is no path: a message whose inner quotes
+            # split it can leave stray words behind.
+            paths = [p for p in named if os.path.exists(os.path.join(where, p))]
+            tree = [":/"] if takes_all else paths
+            scopes.append((where, takes_all or include or not paths, tree, list(adds)))
+    return scopes or [(start, True, [], [])]
+
+
+def run_git(where, *args, stdin=None):
+    """Stdout of `git -C where args`, as bytes. Raises when git fails."""
+    return subprocess.run(["git", "-C", where, *args], input=stdin, capture_output=True,
+                          timeout=5, check=True).stdout
+
+
+def git_names(where, *args):
+    """The NUL-separated file names a git command prints."""
+    return [n for n in run_git(where, *args).decode("utf-8", "replace").split("\0") if n]
+
+
+def git_top(where):
+    return run_git(where, "rev-parse", "--show-toplevel").decode("utf-8", "replace").strip()
+
+
+def changed_names(where, specs):
+    """Files under `specs` whose working copy differs from HEAD, named from the repo root.
+    A repo with no commits has no HEAD, so there the index and the working tree are asked."""
+    base = ("diff", "--name-only", "--diff-filter=ACMR", "-z")
     try:
-        raw = subprocess.run(base + ["--", name], capture_output=True, timeout=5,
-                             check=True).stdout.decode("utf-8", "replace")
+        return git_names(where, *base, "HEAD", "--", *specs)
+    except subprocess.CalledProcessError:
+        return git_names(where, *base, "--cached", "--", *specs) + git_names(where, *base, "--", *specs)
+
+
+def diff_path(field):
+    """The file name in a diff's `+++ b/name` line. Git quotes a name with odd characters
+    and puts a tab after one with spaces."""
+    field = field.rstrip("\t")
+    if field.startswith('"'):
+        field = codecs.escape_decode(field[1:-1].encode())[0].decode("utf-8", "replace")
+    return field[2:] if field.startswith("b/") else field
+
+
+def added_lines(top, names, cached):
+    """{name: the new-file line numbers the commit adds} from one -U0 diff against HEAD
+    (the index with `cached`, the working tree without). None when the diff cannot be read,
+    such as a repo with no commits: the whole file counts then."""
+    if not names:
+        return {}
+    try:
+        raw = run_git(top, "-c", "core.quotepath=off", "--literal-pathspecs", "diff", "-U0", "--no-color",
+                      "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/",
+                      "--cached" if cached else "HEAD", "--", *names).decode("utf-8", "replace")
     except (OSError, subprocess.SubprocessError):
         return None
-    lineas = set()
-    for m in re.finditer(r"(?m)^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", raw):
-        inicio = int(m.group(1))
-        cuantas = 1 if m.group(2) is None else int(m.group(2))
-        lineas.update(range(inicio, inicio + cuantas))
+    lineas, actual, in_header = {}, None, False
+    # Every line of a hunk has a prefix, so these three shapes only match real headers.
+    for line in raw.split("\n"):
+        if line.startswith("diff --git "):
+            actual, in_header = None, True
+        elif in_header and line.startswith("+++ "):
+            actual = diff_path(line[4:])
+            lineas[actual] = set()
+        elif line.startswith("@@"):
+            in_header = False
+            m = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", line)
+            if m and actual is not None:
+                inicio = int(m.group(1))
+                cuantas = 1 if m.group(2) is None else int(m.group(2))
+                lineas[actual].update(range(inicio, inicio + cuantas))
     return lineas
 
 
-def staged_prose_files(cmd, payload):
-    """(path, text) for every prose file the commit would take, cut down to the lines
-    the commit adds (fences blanked over the whole file first, so an added line inside
-    one stays code). With -a or --all the tracked files changed in the working tree
-    count too. Text already in HEAD never comes back, so old tells cannot block."""
-    cwd = repo_dir(cmd, payload)
-    args = ["git", "-C", cwd, "diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z"]
+def index_texts(top, names):
+    """{name: its text in the index} from one `git cat-file --batch`. A name holding a
+    newline cannot be asked for this way and is left out."""
+    names = [n for n in names if "\n" not in n]
+    if not names:
+        return {}
+    raw = run_git(top, "cat-file", "--batch", stdin="".join(f":{n}\n" for n in names).encode())
+    texts, pos = {}, 0
+    for name in names:
+        end = raw.index(b"\n", pos)
+        header = raw[pos:end].split(b" ")
+        pos = end + 1
+        if len(header) == 3 and header[1] == b"blob":
+            size = int(header[2])
+            texts[name] = raw[pos:pos + size].decode("utf-8", "replace")
+            pos += size + 1
+    return texts
 
-    def listed(extra_args):
-        raw = subprocess.run(extra_args, capture_output=True, timeout=5).stdout
-        return [n for n in raw.decode("utf-8", "replace").split("\0") if n]
 
-    try:
-        staged = listed(args)
-        # -a commits the working tree's version of every changed tracked file.
-        worktree = (listed(args[:4] + args[5:])
-                    if re.search(r"(?<!\S)(?:-a|--all)(?!\S)", command_skeleton(cmd) or cmd) else [])
-    except (OSError, subprocess.SubprocessError):
-        return []
-    out = []
-    for name in dict.fromkeys(worktree + staged):
-        path = os.path.join(cwd, name)
-        if not is_prose_file(path):
+def scope_prose(where, takes_index, tree_specs, adds):
+    """{(repo, name): the lines the commit would add} for one commit's prose files. The
+    working tree's copy wins over the index's for a file a -a, a named path or an add
+    will take. Fences are blanked over the whole file first, so an added line inside one
+    stays code. Text already in HEAD never comes back, so old tells cannot block."""
+    top = git_top(where)
+    index, tree, new = [], [], []
+    if takes_index:
+        index = git_names(top, "diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z")
+    if tree_specs:
+        tree = changed_names(where, tree_specs)
+    for add_where, tracked_only, specs in adds:
+        if git_top(add_where) != top:
             continue
+        tree += changed_names(add_where, specs)
+        if not tracked_only:
+            new += git_names(add_where, "ls-files", "-o", "--exclude-standard", "--full-name", "-z", "--", *specs)
+
+    def prose(names, *taken):
+        return [n for n in dict.fromkeys(names)
+                if is_prose_file(os.path.join(top, n)) and not any(n in t for t in taken)]
+
+    new = prose(new)
+    tree = prose(tree, new)
+    index = prose(index, new, tree)
+    cached, worked = added_lines(top, index, cached=True), added_lines(top, tree, cached=False)
+    index_text = index_texts(top, index)
+    out = {}
+    for name in new + tree + index:
+        path = os.path.join(top, name)
         try:
-            if name in worktree:
-                text = file_text(path)
-            else:
-                text = subprocess.run(["git", "-C", cwd, "show", f":{name}"], capture_output=True,
-                                      timeout=5, check=True).stdout.decode("utf-8", "replace")
+            if name in index:
+                text = index_text[name]
                 if is_memory_index(path):
                     text = MEMORY_INDEX_DASH.sub(r"\1: ", text)
-        except (OSError, UnicodeDecodeError, subprocess.SubprocessError):
+            else:
+                text = file_text(path)
+        except (OSError, UnicodeDecodeError, KeyError):
             continue
-        nuevas = added_lines(cwd, name, cached=name not in worktree)
-        if nuevas is not None:
+        lines = cached if name in index else worked
+        if name not in new and lines is not None:
+            nuevas = lines.get(name, set())
             todas = blank_fences(text).split("\n")
             text = "\n".join(l for i, l in enumerate(todas, 1) if i in nuevas)
-        out.append((name, text))
+        out[top, name] = text
     return out
+
+
+def staged_prose_files(cmd, payload):
+    """(name, text) for every prose file the command's commits would take, cut down to the
+    lines they add. When git cannot answer for a commit, that commit's files are not read."""
+    found = {}
+    for scope in commit_scopes(cmd, payload):
+        try:
+            found.update(scope_prose(*scope))
+        except (OSError, ValueError, subprocess.SubprocessError):
+            continue
+    return [(name, text) for (_, name), text in found.items()]
 
 
 def deny(reason):
@@ -398,6 +626,9 @@ def deny(reason):
 
 # One shell word: plain characters, backslash escapes and quoted runs.
 SHELL_WORD = r"""(?:[^\s"'\\;&|()<>]|\\.|"(?:[^"\\]|\\.)*"|'[^']*'|\$'(?:[^'\\]|\\.)*')+"""
+# The next token of a command: what ends a step, a redirect (2>&1, >, <<<), or a word.
+SHELL_TOKEN = re.compile(r"[ \t]*(?:(\n|&&|\|\||[;&|()])|(\d*(?:<<<|[<>]+&?))|(" + SHELL_WORD + "))")
+ENV_WORD = re.compile(r"[A-Za-z_]\w*=")
 # A commit message, or a PR title or body, given inline as the option's word, which
 # may be stuck to a short option (-m"Fix" or -mFix).
 INLINE_TEXT = re.compile(
@@ -479,7 +710,7 @@ def message_texts(cmd, bodies, payload):
         try:
             with open(path, encoding="utf-8") as f:
                 texts.append((path, f.read(200_000)))
-        except (OSError, UnicodeDecodeError):
+        except (OSError, ValueError):  # ValueError covers bad UTF-8 and a NUL in the name
             pass
     return texts
 

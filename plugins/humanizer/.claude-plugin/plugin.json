@@ -2,5 +2,5 @@
   "name": "humanizer",
   "version": "0.1.0",
   "author": { "name": "AndresRubio" },
-  "description": "Flags AI-writing tells in prose Claude writes: a reminder on each prompt, feedback on prose files it writes, a refusal on commit messages and PR text with strong tells, and a note to the person on closing messages. Includes the humanizer rewriting skill."
+  "description": "Flags AI-writing tells in prose Claude writes: a reminder on each prompt, feedback on prose files it writes, a refusal when a commit message or PR text has a strong tell or a commit adds a prose line with any tell, and a note to the person on closing messages. Includes the humanizer rewriting skill."
 }
