@@ -1,0 +1,7 @@
+{
+  "name": "pipeline-pane",
+  "version": "0.1.0",
+  "author": { "name": "AndresRubio" },
+  "description": "Shows where a claude-pipeline /ship run stands in a pane: the stage running and its time, finished stages, the last event, and a toast when the run ends.",
+  "types": "./types/index.d.ts"
+}

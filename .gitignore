@@ -5,3 +5,5 @@ skills/*/evals/files/generated/
 __pycache__/
 .DS_Store
 .idea/
+# Claude Code writes these once it has loaded a mod; each mod's tsconfig.json extends them
+plugins/*/.claude-plugin/types/

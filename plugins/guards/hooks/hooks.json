@@ -1,0 +1,27 @@
+{
+  "description": "Guard checks. Python command hooks with no TypeScript module; docs/mods.md says why. One process runs all four Bash checks; merge_guard may ask GitHub, so the Bash hook keeps the 40 second timeout it had.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/guards.py\" bash",
+            "timeout": 40
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/guards.py\" files",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

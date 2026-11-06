@@ -1,0 +1,7 @@
+{
+  "name": "forja-cost-guard",
+  "version": "0.1.0",
+  "author": { "name": "AndresRubio" },
+  "description": "Asks the person before a forja run --yes rents a GPU, shows the running cost above the prompt, and reminds to run forja cleanup when remote resources may be left.",
+  "types": "./types/index.d.ts"
+}

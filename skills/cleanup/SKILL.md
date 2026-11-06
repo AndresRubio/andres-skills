@@ -41,6 +41,8 @@ a different job.
   guess it from `/tmp`.
 - When the session started: the time of the first message, or a safe earlier
   bound. Untracked files older than that are kept, so when in doubt go earlier.
+  Give it as ISO 8601. A trailing `Z` or an offset such as `+01:00` works, and
+  a time without either is read as local time.
 - Branches you created here that are not named `claude/...`: each goes in a
   `--branch` flag, or the script will not consider them session work.
 - Decisions the user already made in their message ("keep the report worktree",
@@ -144,3 +146,7 @@ which catches a one-commit squash or a rebase). Worktree verdicts: dirty means
 ASK; merged, or a detached HEAD already on the base, means SAFE; anything else
 means ASK with the number of commits at stake. A worktree whose folder is
 already gone is a SAFE prune, unless its branch still has unmerged commits.
+Two kinds of worktree are always KEEP. One lives outside `.claude/worktrees/`,
+even when `--branch` names its branch, because `--branch` covers branches only.
+The other has a symlink in `~/.claude/skills/` pointing into it (change the
+folder with `--skills-dir`), because removing it would uninstall that skill.

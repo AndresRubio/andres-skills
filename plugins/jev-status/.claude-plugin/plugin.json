@@ -1,0 +1,6 @@
+{
+  "name": "jev-status",
+  "version": "0.1.0",
+  "author": { "name": "AndresRubio" },
+  "description": "Shows whether the local-jev server is up in the status line, toasts when it goes down, and adds /jev-start to bring it back."
+}
