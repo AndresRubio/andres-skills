@@ -1,0 +1,21 @@
+{
+  "description": "issue-pipeline run guard and output trim: during a /ship run, allow only pushes of the run's pipeline/* branch, block PR merges, and (opt-in) trim long Bash output to a log",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.mjs\"", "timeout": 10 }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/trim.mjs\"", "timeout": 10 }
+        ]
+      }
+    ]
+  }
+}

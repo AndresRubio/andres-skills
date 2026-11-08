@@ -1,4 +1,4 @@
-// What claude-pipeline's /ship emits, and how it maps to a run's state. Every name here comes
+// What issue-pipeline's /ship emits, and how it maps to a run's state. Every name here comes
 // from the plugin's own source: skills/ship/SKILL.md (Setup, the Stages table), stages/*.md,
 // trackers/github.md, templates/progress.md, scripts/lib/run-record.mjs (stage-mark and
 // stages.jsonl), marker.mjs (comment kinds) and session.mjs (how a run folder is spelled).
@@ -6,7 +6,7 @@
 import type { Mode, PendingOutcome, PipelineEvent, PipelineRun, RunStatus, StageMark, Subagent } from '../types'
 
 // The command and skill that start a run.
-export const SHIP_COMMAND = 'claude-pipeline:ship'
+export const SHIP_COMMAND = 'issue-pipeline:ship'
 
 // templates/progress.md's stage list; `fix` is fix mode's own mark (run-record.mjs STAGE_POLICY).
 export const STAGE_NAMES: Readonly<Record<string, string>> = {
@@ -44,8 +44,8 @@ export const MARKER_KINDS = [
   'score',
 ] as const
 
-// README: the labels a target repo carries. `claude-working` is the run's lock.
-export const LOCK_LABEL = 'claude-working'
+// README: the labels a target repo carries. `pipeline-working` is the run's lock.
+export const LOCK_LABEL = 'pipeline-working'
 
 const MAX_EVENTS = 5
 export const MAX_RUNS = 5
@@ -304,7 +304,7 @@ export function parseShipArgs(args: string): ShipArgs {
 export function isShipSkill(skill: string, pluginName?: string, path?: string): boolean {
   if (skill === SHIP_COMMAND) return true
   const isShip = skill === 'ship' || skill.endsWith(':ship')
-  const isOurs = pluginName === 'claude-pipeline' || /(^|\/)claude-pipeline\/(.*\/)?skills\/ship\/SKILL\.md$/.test(path ?? '')
+  const isOurs = pluginName === 'issue-pipeline' || /(^|\/)issue-pipeline\/(.*\/)?skills\/ship\/SKILL\.md$/.test(path ?? '')
   return isShip && isOurs
 }
 

@@ -1,0 +1,21 @@
+#!/bin/sh
+# Runs scripts/check.sh before a commit that touches plugins/, scripts/check-mods.sh or a
+# workflow. Other commits pass straight through.
+# Turn it on once per clone: git config core.hooksPath .githooks
+# The check reads the working tree, so stage everything the commit needs before committing.
+root=$(git rev-parse --show-toplevel) || exit 0
+[ -f "$root/scripts/check.sh" ] || exit 0
+if git diff --cached --quiet HEAD -- plugins scripts/check-mods.sh .github/workflows 2>/dev/null; then exit 0; fi
+cd "$root" || exit 1
+# Git hands a hook its own index, config and author through the environment. The mod tests run
+# git in folders of their own and would read this commit's repository instead. The plugin's test
+# preload drops these for node; this covers the Python tests and claude plugin test as well.
+unset $(git rev-parse --local-env-vars) GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_AUTHOR_DATE GIT_EDITOR
+echo "pre-commit: scripts/check.sh" >&2
+out=$(sh scripts/check.sh 2>&1)
+code=$?
+if [ "$code" -ne 0 ]; then
+  printf '%s\n' "$out" | grep -E '^==>|^not ok|^# (tests|pass|fail)|FAILED|✘|❯' >&2
+  echo "pre-commit: the check failed; run scripts/check.sh for the full output" >&2
+fi
+exit "$code"

@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  issue-pipeline:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/issue-pipeline
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # pdftotext, for the hydrate test that reads a real PDF. Without it that test is skipped.
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
+      # Pinned to the version mods.yml uses: a new Claude Code release can change what
+      # `claude plugin validate` accepts. docs/mods.md says how to move it.
+      - run: npm install -g @anthropic-ai/claude-code@2.1.317
+      # The tests, then the strict validation: the same command the pre-commit hook runs.
+      - run: npm run check
+        env:
+          DISABLE_AUTOUPDATER: '1'
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
