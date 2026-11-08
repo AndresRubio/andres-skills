@@ -627,6 +627,49 @@ test('denies eval, however it is reached', () => {
   assertAllowed('ls evaluate.txt');
 });
 
+// Review of PR 15: the API rules ran on raw text, so a quote inside the endpoint got past them.
+test('denies a merge, review, refs or contents API call however the endpoint is quoted or cased', () => {
+  for (const [command, reason] of [
+    ['gh api -X PUT repos/o/r/pulls/1/mer"ge" -f merge_method=squash', /merge API/],
+    ["gh api -X PUT repos/o/r/pulls/1/mer'ge'", /merge API/],
+    ['gh api -X PUT repos/o/r/pulls/1/mer\\ge', /merge API/],
+    ['gh api -X PUT repos/o/r/pulls/1/MERGE', /merge API/],
+    ['gh api -X POST repos/o/r/pulls/1/revi"ews" -f event=APPROVE', /reviews API/],
+    ['gh api -X PATCH repos/o/r/git/re"fs"/heads/main -f sha=abc', /refs through the API/],
+    ['gh api -X PUT repos/o/r/cont"ents"/x -f message=m -f content=abc', /contents API/],
+    ['curl -X PUT -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/o/r/pulls/1/mer"ge"', /merge API/],
+    ['gh api graphql -f query="mutation { merge""PullRequest(input: {}) { x } }"', /GraphQL mutation that merges/],
+  ]) {
+    assertDenied(command, reason);
+    assertKind(command, 'forbidden');
+  }
+  assertAllowed('gh api repos/o/r/pulls/1');
+  assertAllowed('gh api -X POST repos/o/r/issues/1/sub_issues -F sub_issue_id=1');
+  assertAllowed('gh api repos/o/r/contents/README.md --jq .sha');
+});
+
+test('denies alias and shell function definitions', () => {
+  for (const command of [
+    'alias g=git',
+    'X=1 alias g=git',
+    'command alias g=git',
+    'true && alias g=git',
+    'function g { command git "$@"; }',
+    'g() { command git "$@"; }',
+    'g () { command git "$@"; }',
+    'true; g() { command git "$@"; }',
+  ]) {
+    assertDenied(command, /alias or a shell function/);
+    assertKind(command, 'forbidden');
+  }
+  assertAllowed('echo alias');
+  assertAllowed('git log --grep=alias');
+  assertAllowed('grep -rn "function" src');
+  assertAllowed('node -e "console.log(process.exit)"');
+  assertAllowed('x=$(date) && echo "$x"');
+  assertAllowed('echo $((1 + 2))');
+});
+
 test('counts push and git after an equals sign as words', () => {
   assertKind('g=push; git status', 'forbidden');
   assertKind('g=git; p=push; echo $g $p', 'forbidden');

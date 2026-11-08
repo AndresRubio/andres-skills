@@ -27,18 +27,21 @@ export function isActivating(command) {
   return command.includes('/runs/run-XXXXXX') || /\/runs\/run-[A-Za-z0-9]+\/vars\.sh/.test(command);
 }
 
-// --- merges and ref writes (raw text, including text inside quotes) ---
+// --- merges and ref writes (raw text, including text inside quotes, and dequoted words) ---
 
 // The API rules match endpoint paths (repos/<owner>/<repo>/…) and the GraphQL rule matches only
-// a command that mentions graphql, so file names like docs/git/refs.md don't trip them.
+// a command that mentions graphql, so file names like docs/git/refs.md don't trip them. They run
+// twice: over the raw text, and over the dequoted words once the command is tokenized, so
+// `pulls/1/mer"ge"` reassembles and is caught. GitHub's API paths are case-insensitive, so the
+// path rules are too.
 const MERGE_RULES = [
   [/\bpr\s+merge\b/, 'merging a pull request'],
   [/\bgh\s+alias\b/, 'gh aliases'],
-  [/repos\/[^\s'"]+\/(pulls\/[^\s/'"]+\/merge|merges)\b/, 'the merge API'],
-  [/repos\/[^\s'"]+\/git\/(refs|commits|trees|tags)\b/, 'git objects or refs through the API'],
+  [/repos\/[^\s'"]+\/(pulls\/[^\s/'"]+\/merge|merges)\b/i, 'the merge API'],
+  [/repos\/[^\s'"]+\/git\/(refs|commits|trees|tags)\b/i, 'git objects or refs through the API'],
   // Nothing in the pipeline approves or requests changes (an App approval may count toward required reviews).
   [/\bpr\s+review\b/, 'reviewing (approving or requesting changes on) a pull request'],
-  [/\/pulls\/[^/\s'"]+\/reviews\b/, 'the pull request reviews API'],
+  [/\/pulls\/[^/\s'"]+\/reviews\b/i, 'the pull request reviews API'],
 ];
 const GRAPHQL_MERGE = /\b(mergePullRequest|enablePullRequestAutoMerge|mergeBranch|createCommitOnBranch|updateRefs?)\b/;
 const GRAPHQL_REVIEW = /\b(addPullRequestReview|submitPullRequestReview|approvePullRequest)\b/;
@@ -59,7 +62,7 @@ function mergeProblem(command) {
   if (/graphql/i.test(command) && GRAPHQL_REVIEW.test(command)) {
     return 'a GraphQL mutation that reviews (approves or requests changes on) a pull request';
   }
-  if (/repos\/[^\s'"]+\/contents\//.test(command) && WRITE_FLAGS.some((flag) => flag.test(command))) {
+  if (/repos\/[^\s'"]+\/contents\//i.test(command) && WRITE_FLAGS.some((flag) => flag.test(command))) {
     return 'writing files through the contents API';
   }
   return null;
@@ -423,16 +426,21 @@ function hiddenSubcommandProblem(segments) {
   return null;
 }
 
-// eval builds commands from strings at run time, so nothing the guard reads is what runs. The
-// pipeline never uses it. The command word is the first word after assignments, compound-command
-// words and command/builtin.
+// eval builds commands from strings at run time, so nothing the guard reads is what runs. An
+// alias or a shell function gives git another name for a later call, where the guard would see
+// neither `git` nor `push`. The pipeline never uses any of them. The command word is the first
+// word after assignments, compound-command words and command/builtin.
 const COMMAND_PREFIXES = new Set(['{', '!', 'if', 'then', 'elif', 'else', 'while', 'until', 'do', 'time', 'command', 'builtin']);
+const DEFINES = 'defining an alias or a shell function';
+// `name()` or `name ()` where a command starts. `$(` and `$((` have no name in front of them.
+const FUNCTION_DEFINITION = /(?:^|[;&|\n])\s*[A-Za-z_][\w-]*\s*\(\s*\)/;
 
 function evalProblem(segments) {
   for (const seg of segments) {
     const { words } = split(seg);
     const word = words.find((w) => !COMMAND_PREFIXES.has(w.text));
     if (word && word.text === 'eval') return 'eval';
+    if (word && (word.text === 'alias' || word.text === 'function')) return DEFINES;
   }
   return null;
 }
@@ -749,12 +757,18 @@ export function checkCommand(command, { home, readFile = defaultReadFile } = {})
   if (merge) return deny(merge);
 
   const text = command.trim();
+  if (FUNCTION_DEFINITION.test(text)) return deny(DEFINES);
   const tokens = tokenize(text);
   if (!tokens) {
     if (mentionsPush(text)) return deny('a command too complex to check');
     const settings = rawSettingsProblem(text);
     return settings ? deny(settings) : ALLOW;
   }
+
+  // The merge rules again, over the words with their quotes and escapes taken off.
+  const dequoted = tokens.segments.map((seg) => seg.words.map((w) => w.text).join(' ')).join('\n');
+  const quotedMerge = mergeProblem(dequoted);
+  if (quotedMerge) return deny(quotedMerge);
 
   const other = ghMergeProblem(tokens.segments) ?? gitSettingsProblem(tokens.segments)
     ?? hiddenSubcommandProblem(tokens.segments) ?? evalProblem(tokens.segments)

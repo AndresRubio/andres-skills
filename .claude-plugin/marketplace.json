@@ -6,7 +6,7 @@
     {
       "name": "issue-pipeline",
       "source": "./plugins/issue-pipeline",
-      "description": "Issue-to-PR pipeline: ship, review, pipeline-setup."
+      "description": "Issue-to-PR pipeline: the ship, review, score and setup skills, with a run guard on Bash."
     },
     {
       "name": "check-gate",

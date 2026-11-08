@@ -18,9 +18,9 @@ claude --plugin-dir /path/to/issue-pipeline
 
 Then, in the target repo:
 
-- `/issue-pipeline:ship <#N | issue URL | "idea">` — interactive mode.
+- `/issue-pipeline:ship <#N | issue URL | "idea">`: interactive mode.
 - Add `--mode auto` to run automatically.
-- `/issue-pipeline:ship <PR> --fix` — apply review feedback to an existing PR.
+- `/issue-pipeline:ship <PR> --fix`: apply review feedback to an existing PR.
 
 Worktrees live at `~/.issue-pipeline/worktrees/<repo>/<KEY>`. Environment variables: `ISSUE_PIPELINE_HOME`, `ISSUE_PIPELINE_LANE`, `ISSUE_PIPELINE_CHROME`.
 
@@ -30,10 +30,10 @@ A run ends at an open PR. With the Phase 2a workflows installed (`/issue-pipelin
 
 `/issue-pipeline:setup` installs four GitHub Actions workflows from `templates/github/` into the target repo:
 
-- `pipeline-ship` — the GitHub lane: routes labeled issues, comments and PR labels to a ship or fix run.
-- `pipeline-review` — reviews each `pipeline/*` PR and posts a verdict for its head commit.
-- `pipeline-ready` — deterministic, no AI: keeps the branch current, requests a fix when needed, and labels the PR `ready` once CI is green, the verdict is accepted and the branch is current. It never merges.
-- `pipeline-score` — dispatched by `pipeline-ready` for about 1 in 4 `ready` PRs: scores task compliance and review quality and posts a `score` comment.
+- `pipeline-ship`: the GitHub lane. It routes labeled issues, comments and PR labels to a ship or fix run.
+- `pipeline-review`: reviews each `pipeline/*` PR and posts a verdict for its head commit.
+- `pipeline-ready`: deterministic, no AI. It keeps the branch current, requests a fix when needed, and labels the PR `ready` once CI is green, the verdict is accepted and the branch is current. It never merges.
+- `pipeline-score`: dispatched by `pipeline-ready` for about 1 in 4 `ready` PRs: scores task compliance and review quality and posts a `score` comment.
 
 The agent in `pipeline-ship` and `pipeline-review` loads the plugin with `--plugin-dir` from the pinned checkout of `AndresRubio/andres-skills` (tag `issue-pipeline--v<version>`, set by setup), not from the marketplace, so its skills and the CLI it calls are the same version. The marketplace is for installing the plugin by hand.
 
@@ -43,9 +43,9 @@ Before they can run, install the Claude GitHub App on the repository (`/install-
 
 `/issue-pipeline:review <PR> --head <sha>` reviews a pipeline PR at that head commit and posts one of three verdicts:
 
-- `accepted` — nothing blocks the merge.
-- `revision-needed` — findings with file, line, problem and correction; a fix run works through them.
-- `human-decision-needed` — judgment findings that need the owner's reply before a fix run can act.
+- `accepted`: nothing blocks the merge.
+- `revision-needed`: findings with file, line, problem and correction; a fix run works through them.
+- `human-decision-needed`: judgment findings that need the owner's reply before a fix run can act.
 
 Q10: the short `/ship` alias is unverified; use `/issue-pipeline:ship`.
 
@@ -62,7 +62,7 @@ A run in progress is an open `pipeline/*` PR from this repo, or an open issue wh
 The plugin ships a `PreToolUse` hook (`hooks/guard.mjs`) that checks every Bash command while a `/ship` run is in progress.
 
 - **Pushes.** It allows `git push origin "$BRANCH"` or `git push -u origin "$BRANCH"` (or a literal `pipeline/…` branch) and nothing else. `$BRANCH` has to come from the run's `vars.sh`, sourced first in the same command, and its last `BRANCH` line has to be a `pipeline/*` branch. A command that pushes may contain only that source, `cd`, `git add`, `git commit` (not `--no-verify`), `git status` and a `| tail` or `| head` of the push's output, joined by `&&`, with no substitutions, assignments or redirections (except to `/dev/null` or `2>&1`). So nothing in it can change what gets pushed.
-- **Blocked outright**, pushing or not: any other push (other branches, refspecs, remotes, `--force`, `--mirror`, git options before `push`, a push inside `bash -c` or an alias, a git/gh subcommand hidden in a variable or glob, `git send-pack`/`http-push`/`remote-*` plumbing, `eval`); merging (`gh pr merge` in any spelling, the merge API, GraphQL merge and ref mutations, `gh alias`, writes through the git-refs or contents APIs); reviewing a PR (`gh pr review` in any spelling, the pull request reviews API, the GraphQL `addPullRequestReview`, `submitPullRequestReview` and `approvePullRequest` mutations), so nothing approves or requests changes; `gh repo sync`/`edit`/`delete`/`rename`/`archive`; changing `git remote` URLs or, through `git config`, the config that steers pushes (`remote.*`, `url.*`, `alias.*`, `include.*`, `protocol.*`, `core.hooksPath` and so on); command-line git config (`git -c`, `--config-env`) for any key except `core.quotepath`, `color.*`, `user.name`, `user.email`, `advice.*` and `init.defaultBranch`; and environment redirection: any `VAR=value` before a `git` or `gh` command, and setting `GIT_*`, `GH_*`, `HOME`, `XDG_CONFIG_HOME`, `XDG_CONFIG_DIRS`, `PATH`, `SSH_ASKPASS` or `SSH_AUTH_SOCK` anywhere in the command (`export`, `declare -x` and `env` included).
+- **Blocked outright**, pushing or not: any other push (other branches, refspecs, remotes, `--force`, `--mirror`, git options before `push`, a push inside `bash -c` or an alias, a git/gh subcommand hidden in a variable or glob, `git send-pack`/`http-push`/`remote-*` plumbing, `eval`, `alias`, `function` and `name()` definitions); merging (`gh pr merge` in any spelling, the merge API, GraphQL merge and ref mutations, `gh alias`, writes through the git-refs or contents APIs; the API endpoints are matched after quotes and escapes come off and in any case, so `pulls/1/mer"ge"` and `pulls/1/MERGE` count); reviewing a PR (`gh pr review` in any spelling, the pull request reviews API, the GraphQL `addPullRequestReview`, `submitPullRequestReview` and `approvePullRequest` mutations), so nothing approves or requests changes; `gh repo sync`/`edit`/`delete`/`rename`/`archive`; changing `git remote` URLs or, through `git config`, the config that steers pushes (`remote.*`, `url.*`, `alias.*`, `include.*`, `protocol.*`, `core.hooksPath` and so on); command-line git config (`git -c`, `--config-env`) for any key except `core.quotepath`, `color.*`, `user.name`, `user.email`, `advice.*` and `init.defaultBranch`; and environment redirection: any `VAR=value` before a `git` or `gh` command, and setting `GIT_*`, `GH_*`, `HOME`, `XDG_CONFIG_HOME`, `XDG_CONFIG_DIRS`, `PATH`, `SSH_ASKPASS` or `SSH_AUTH_SOCK` anywhere in the command (`export`, `declare -x` and `env` included).
 - A blocked command exits 2 with the reason on stderr, and the skill then follows its stop procedure. `git commit -m "… push …"` is a known false positive: commit messages go through `-F <file>`.
 
 `ISSUE_PIPELINE_GUARD` controls it: set `1` for runners (always on), `0` to switch it off, or leave it unset for automatic. Automatic means the guard switches on for a session once that session runs the Setup command (the one that creates `<home>/runs/run-XXXXXX`) or sources a run's `vars.sh`, which is before any issue text is read. Just mentioning the pipeline home (`ls ~/.issue-pipeline/runs/`, `grep ISSUE_PIPELINE_HOME`) doesn't switch it on. The guard remembers that with a marker file `<home>/guard/<session id>` and deletes markers older than 14 days.
