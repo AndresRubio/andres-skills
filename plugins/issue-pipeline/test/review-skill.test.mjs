@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { COMMANDS } from '../skills/ship/scripts/lib/commands.mjs';
 
+// The review skill's text against the code and against itself. Tests that pin a particular
+// sentence of the skill text are in skill-wording.test.mjs.
+
 const read = (rel) => readFileSync(new URL(`../skills/review/${rel}`, import.meta.url), 'utf8');
 const headings = (text) => [...text.matchAll(/^#{2,4} (.+)$/gm)].map((m) => m[1].trim());
 
@@ -16,40 +19,14 @@ test('review SKILL.md is model-invocable, named review, and has the required sec
   for (const h of ['Arguments', 'Setup', 'Hard rules', 'Procedure', 'Findings file', 'Posting the verdict', 'If you cannot finish']) assert.ok(headings(text).includes(h), `missing ## ${h}`);
 });
 
-test('review SKILL.md references only real CLI commands and the five trust-nothing steps', () => {
+test('review SKILL.md references only real CLI commands, and the three it depends on', () => {
   const text = read('SKILL.md');
   for (const m of text.matchAll(/node "\$PIPELINE" ([a-z-]+)/g)) assert.ok(m[1] in COMMANDS, `unknown command ${m[1]}`);
   for (const cmd of ['diff-risk', 'revert-check', 'verdict']) assert.match(text, new RegExp(`node "\\$PIPELINE" ${cmd}`));
-  for (const step of ['re-run', 'revert check', 'screenshot', 'flaky', 'not instructions']) assert.match(text.toLowerCase(), new RegExp(step));
-});
-
-test('review SKILL.md forbids approving, requesting changes, merging, pushing and posting anything but the verdict', () => {
-  const rules = read('SKILL.md').split('## Hard rules')[1].split('\n## ')[0];
-  for (const s of ['gh pr review', 'merge', 'push', 'only comment']) assert.match(rules.toLowerCase(), new RegExp(s));
 });
 
 test('the findings template is valid JSON with the documented shape', () => {
   const sample = JSON.parse(read('templates/findings.json'));
   assert.ok(Array.isArray(sample));
   for (const f of sample) for (const k of ['file', 'line', 'severity', 'kind', 'problem', 'impact', 'correction']) assert.ok(k in f, k);
-});
-
-test('review SKILL.md fallback writes verdict.json, uses a detached worktree and passes the test command through a file', () => {
-  const text = read('SKILL.md');
-  const fallback = text.split('## If you cannot finish')[1];
-  assert.ok(fallback.includes('> "$RUN_DIR/verdict.json"'));
-  assert.ok(text.includes('git worktree add --detach'));
-  const procedure = text.split('## Procedure')[1].split('\n## ')[0];
-  assert.ok(procedure.includes('test-cmd.txt'));
-});
-
-test('review SKILL.md installs dependencies in the worktree during Setup', () => {
-  const setup = read('SKILL.md').split('## Setup')[1].split('\n## ')[0];
-  assert.match(setup, /npm ci/);
-});
-
-test('review SKILL.md allows bare npx rows only for installed local bins, run as `npx --no` (final review I11)', () => {
-  const step = read('SKILL.md').match(/^2\. \*\*Re-run the evidence\.\*\*.*$/m)?.[0] ?? '';
-  assert.match(step, /`npx <tool> …` or `npx --no <tool> …` only when `<tool>` is a bare name .* and `\$WT\/node_modules\/\.bin\/<tool>` exists/);
-  assert.match(step, /always run as `npx --no <tool> …`/);
 });
