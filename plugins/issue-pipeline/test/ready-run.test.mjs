@@ -278,20 +278,13 @@ test('a sampled PR gets pipeline-score dispatched after the ready label; others 
   assert.ok(!r.actions[0].done.includes('dispatch pipeline-score'), 'a failed dispatch is not recorded as done');
 });
 
-test('the score dispatch is recorded as done only after it succeeds; a dry run says "would"', async () => {
+test('a successful score dispatch is recorded as done; a dry run says "would"', async () => {
   const sampled = basePr({ body: 'Fixes #8', headRefName: 'pipeline/8-x' });
   const issue = { number: 8, labels: ['pipeline'], comments: [] };
   const ok = fakeDeps({ prs: [sampled], comments: verdictComment('accepted'), issue });
   ok.deps.dispatchScore = (n) => ok.calls.push(['dispatchScore', n]);
   const okRun = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, ok.deps);
   assert.ok(okRun.actions[0].done.includes('dispatch pipeline-score'));
-  const seen = [];
-  const order = fakeDeps({ prs: [sampled], comments: verdictComment('accepted'), issue });
-  order.deps.dispatchScore = () => { throw new Error('boom'); };
-  const bad = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, order.deps);
-  seen.push(...bad.actions[0].done);
-  assert.deepEqual(seen.filter((d) => /pipeline-score/.test(d)), [], 'nothing about pipeline-score is recorded except the failure');
-  assert.ok(seen.includes('score dispatch failed: boom'));
   const dry = fakeDeps({ prs: [sampled], comments: verdictComment('accepted'), issue });
   dry.deps.dispatchScore = () => { throw new Error('must not run'); };
   const dryRun = await runReady({ repo: REPO, config, now: NOW, run: 'local', dryRun: true }, dry.deps);

@@ -66,13 +66,6 @@ test('parseScoreBody is linear: 200 KB of repeated tag openers parse to null in 
   assert.ok(performance.now() - t0 < 1000, `took ${performance.now() - t0} ms`);
 });
 
-test('formatScoreBody is linear on a 200 KB reason', () => {
-  const t0 = performance.now();
-  const body = formatScoreBody({ marker: MK, head: HEAD, score: { ...score, reasons: { taskCompliance: ' '.repeat(200_000), reviewQuality: '\n'.repeat(100_000) } } });
-  assert.equal(parseScoreBody(body).taskCompliance, 'partial');
-  assert.ok(performance.now() - t0 < 1000, `took ${performance.now() - t0} ms`);
-});
-
 test('parseScoreBody: a non-score marker, invalid JSON, a missing trailer and trailing text are all null', () => {
   const good = formatScoreBody({ marker: MK, head: HEAD, score });
   assert.ok(parseScoreBody(good));

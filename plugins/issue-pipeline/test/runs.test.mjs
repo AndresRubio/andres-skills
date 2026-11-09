@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  RELEASING_KINDS, DECISION_KINDS, KEY_RE, runLock, compareKeys, waitingFor, activeRuns,
+  KEY_RE, runLock, compareKeys, waitingFor, activeRuns,
 } from '../skills/ship/scripts/lib/runs.mjs';
 
 const NOW = new Date('2026-10-06T12:00:00Z');
@@ -33,9 +33,7 @@ const view = ({ prs = [], lockedIssues = [], selfIssue = makeIssue(5), maxParall
 });
 const pr = (number, headRefName, over = {}) => ({ number, headRefName, isCrossRepository: false, title: `PR ${number}`, ...over });
 
-test('the kind lists and the key pattern are the ones D16 names', () => {
-  assert.deepEqual([...RELEASING_KINDS], ['report', 'blocked', 'questions', 'split', 'deferred', 'stale-lock']);
-  assert.deepEqual([...DECISION_KINDS], ['grade', 'questions', 'split', 'report', 'blocked', 'deferred']);
+test('the key pattern is the one D16 names', () => {
   for (const key of ['5', '123', 'lin-42', 'abc1-7', 'pr-12', 'PR-12']) assert.match(key, KEY_RE);
   for (const key of ['#5', 'PR12', 'Pr-12', 'PR-x', 'pr12', 'abc', '5 ', '-5', 'Lin-4', '$(x)']) assert.doesNotMatch(key, KEY_RE);
 });

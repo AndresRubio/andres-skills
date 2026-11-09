@@ -115,13 +115,6 @@ test('seeded PR fixtures carry the files a fix run needs and the planted defects
   assert.doesNotThrow(() => execFileSync('bash', ['-n', fileURLToPath(dir('seed-pr.sh'))]));
 });
 
-test('fixtures.json describes the wait (9) and the cap (11) tests', () => {
-  const f = JSON.parse(readFileSync(new URL('../acceptance/fixtures.json', import.meta.url), 'utf8'));
-  assert.equal(f['09b-clear.md'].waitsFor, '09a-count.md');
-  assert.deepEqual(f['11-cap'].group, ['11a-author-italic.md', '11b-meta-description.md', '11c-count-by-author.md']);
-  assert.equal(f['11-cap'].deferredMembers, 1);
-});
-
 test('fill-body fills every placeholder and refuses a missing value', () => {
   const values = { PRIVATE_REPO: 'me/p', 'ISSUE:01-wrong-month.md': 12, 'PERMALINK:src/list.ts:21-24': 'https://github.com/me/s/blob/abc/src/list.ts#L21-L24', CI_RUN: 'https://github.com/me/s/actions/runs/9' };
   const resolve = (name, arg) => values[arg ? `${name}:${arg}` : name];

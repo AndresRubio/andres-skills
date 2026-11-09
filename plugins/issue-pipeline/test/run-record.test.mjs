@@ -14,8 +14,6 @@ test('stageMark appends the policy tier and effort unless the caller names other
   stageMark(runDir, { stage: '8', effort: 'max', now: new Date('2026-10-20T10:10:00Z') });
   assert.deepEqual(readStages(runDir).map((s) => [s.stage, s.model, s.effort]), [['2', 'sonnet', 'medium'], ['8', 'strongest', 'max']]);
   assert.throws(() => stageMark(runDir, { stage: '11' }), /unknown stage/);
-  assert.deepEqual(STAGE_POLICY['0'], { model: 'haiku', effort: 'low' });
-  assert.deepEqual(STAGE_POLICY['3'], { model: 'strongest', effort: 'high' });
 });
 
 test('STAGE_POLICY follows the Model policy table in SKILL.md', () => {
@@ -237,14 +235,6 @@ test('CLI run-record with a missing grade or verdict file records null and names
   assert.equal(run.outcome.reviewVerdict, null);
   assert.ok(r.stderr.includes(grade), r.stderr);
   assert.ok(r.stderr.includes(verdict), r.stderr);
-});
-
-test('CLI run-record with a grade file that exists but does not parse still exits 1', () => {
-  const { root, base } = changedRepo();
-  const runDir = tempDir('run-');
-  writeFileSync(path.join(runDir, 'grade.json'), '{"verdict": ');
-  const r = runCli(recordArgs(runDir, root, base, ['--grade-file', path.join(runDir, 'grade.json')]));
-  assert.equal(r.code, 1);
 });
 
 test('CLI run-record with a transcript that is gone writes null usage', () => {

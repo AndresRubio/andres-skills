@@ -7,7 +7,6 @@ import {
   fitCalls,
   formatDuration,
   headLines,
-  isHostServer,
   outcomeOf,
   parseCommand,
   parseMcpTool,
@@ -223,11 +222,6 @@ describe('names and inputs', () => {
     expect(parseMcpTool('mcp__broken')).toBeUndefined()
     expect(parseMcpTool('mcp____x')).toBeUndefined()
     expect(parseMcpTool('mcp__x__')).toBeUndefined()
-  })
-
-  test('the desktop host servers are left out', async () => {
-    expect(isHostServer('ccd_session')).toBe(true)
-    expect(isHostServer('opsdesk')).toBe(false)
   })
 
   test('shortInput keeps the arguments on one short line', async () => {

@@ -21,6 +21,8 @@ test('checkState reads check runs and status contexts by name', () => {
   assert.equal(checkState(rollup, 'build'), 'pending');
   assert.equal(checkState(rollup, 'e2e'), 'pending');
   assert.equal(checkState(rollup, 'ci/other'), 'failure');
+  assert.equal(checkState([ctx('ci/github', 'SUCCESS')], 'ci/github'), 'success');
+  assert.equal(checkState([ctx('ci/pending', 'PENDING')], 'ci/pending'), 'pending');
   assert.equal(checkState(rollup, 'nope'), 'missing');
   assert.equal(checkState([run('test', 'TIMED_OUT')], 'test'), 'failure');
   assert.equal(checkState([run('test', 'CANCELLED')], 'test'), 'failure');
@@ -64,12 +66,6 @@ test('review check failure + CI failure: routes by verdict first, never plain fi
   const rev = decideReady({ pr: both, config, verdict: { ...accepted, verdict: 'revision-needed' } });
   assert.equal(rev.action, 'fix');
   assert.equal(rev.reason, 'review');
-});
-
-test('StatusContext SUCCESS is success and PENDING is pending', () => {
-  const rollup = [ctx('ci/github', 'SUCCESS'), ctx('ci/pending', 'PENDING')];
-  assert.equal(checkState(rollup, 'ci/github'), 'success');
-  assert.equal(checkState(rollup, 'ci/pending'), 'pending');
 });
 
 test('review check pending with revision-needed verdict waits', () => {

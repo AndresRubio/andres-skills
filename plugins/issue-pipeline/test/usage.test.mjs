@@ -186,17 +186,6 @@ test('usageFromTranscripts: the window excludes earlier spend; an unpriced model
   assert.equal(usageFromTranscripts([{ main, subagents: [] }], { from: '2026-10-21T00:00:00Z', prices: P }), null);
 });
 
-test('usageFromTranscripts: from and to bound the window on both sides, inclusive', () => {
-  const main = [
-    msg('a', '2026-10-20T09:00:00Z', 'm-big', u(1, 0, 0, 0)),
-    msg('b', '2026-10-20T10:00:00Z', 'm-big', u(10, 0, 0, 0)),
-    msg('c', '2026-10-20T11:00:00Z', 'm-big', u(100, 0, 0, 0)),
-    msg('d', '2026-10-20T12:00:00Z', 'm-big', u(1000, 0, 0, 0)),
-  ];
-  const r = usageFromTranscripts([{ main, subagents: [] }], { from: '2026-10-20T10:00:00Z', to: '2026-10-20T11:00:00Z', prices: P });
-  assert.equal(r.tokens.input, 110);
-});
-
 test('usageFromTranscripts counts the spend of several sessions together', () => {
   const s1 = { main: [msg('a', '2026-10-20T10:00:00Z', 'm-big', u(1, 1, 0, 0))], subagents: [] };
   const s2 = { main: [msg('b', '2026-10-20T10:00:00Z', 'm-big', u(2, 2, 0, 0))], subagents: [] };

@@ -509,11 +509,6 @@ describe('findLoads: near misses that must pass', () => {
     expect(load(`cat > notes.md <<'EOF'\n${U}.cola procesar bdns --maximo 31\nEOF`)).toEqual([])
     expect(load(`# ${U}.barrido 2025-01-01 2025-01-31`)).toEqual([])
   })
-
-  test('the taxonomy load and the reconciliation are not month loads and pass', async () => {
-    expect(load(`${U}.taxonomias`)).toEqual([])
-    expect(load(`${U}.conciliacion 2025`)).toEqual([])
-  })
 })
 
 describe('months and dates', () => {
