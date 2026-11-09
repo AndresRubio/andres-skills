@@ -5,7 +5,7 @@ import time
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks"))
-from shell_words import simple_commands  # noqa: E402
+from shell_words import moved, simple_commands  # noqa: E402
 
 CASES = {
     "ls -la": [["ls", "-la"]],
@@ -65,6 +65,60 @@ class ShellWordsTest(unittest.TestCase):
                 found = simple_commands(text)
                 self.assertEqual(found, commands)
                 self.assertEqual([words.heredocs for words in found], bodies)
+
+    def test_a_quoted_delimiter_marks_a_literal_body(self):
+        cases = {
+            "cat <<'EOF'\n$x\nEOF": ["$x"],
+            'cat <<"EOF"\n$x\nEOF': ["$x"],
+            "cat <<\\EOF\n$x\nEOF": ["$x"],
+            "cat <<EOF\n$x\nEOF": [],
+            "cat <<A <<'B'\none\nA\ntwo\nB\n": ["two"],
+        }
+        for text, literal in cases.items():
+            with self.subTest(text=text):
+                (words,) = simple_commands(text)
+                self.assertEqual(words.literal_heredocs, literal)
+
+    def test_a_here_string_stays_a_word_and_is_kept_as_stdin(self):
+        cases = {
+            "git commit -F - <<< 'a b'": (["git", "commit", "-F", "-", "a b"], ["a b"]),
+            "cat <<<word; ls": (["cat", "word"], ["word"]),
+            "cat <<< $(date)": (["cat", "$(...)"], ["$(...)"]),
+            "cat a": (["cat", "a"], []),
+        }
+        for text, (words, herestrings) in cases.items():
+            with self.subTest(text=text):
+                first = simple_commands(text)[0]
+                self.assertEqual(first, words)
+                self.assertEqual(first.herestrings, herestrings)
+        # A `<<<` with no word after it marks nothing on the next command.
+        found = simple_commands("cat <<< ; ls x")
+        self.assertEqual(found, [["cat"], ["ls", "x"]])
+        self.assertEqual([words.herestrings for words in found], [[], []])
+
+    def test_the_word_after_a_redirect_sign_is_kept_as_an_output_or_an_input(self):
+        cases = {
+            "cat > m.txt <<'EOF'\nx\nEOF": ([["m.txt"]], [[]]),
+            "printf x >>m.txt; ls": ([["m.txt"], []], [[], []]),
+            "run >/tmp/y 2>&1": ([["/tmp/y"], []], [[], []]),
+            'cat a "b c" > "d e"': ([["d e"]], [[]]),
+            "sort < in.txt > out.txt": ([["out.txt"]], [["in.txt"]]),
+            "cat > $(mktemp)": ([["$(...)"], []], [[], []]),
+        }
+        for text, (outputs, inputs) in cases.items():
+            with self.subTest(text=text):
+                found = simple_commands(text)
+                self.assertEqual([words.redirects for words in found], outputs)
+                self.assertEqual([words.inputs for words in found], inputs)
+
+    def test_moved_follows_a_literal_cd_only(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        self.assertEqual(moved(here, [".."]), os.path.join(here, ".."))
+        self.assertEqual(moved(None, [here]), here)
+        for words in [["$dir"], ["-"], ["no/such/folder"], ["*"]]:
+            with self.subTest(words=words):
+                self.assertIsNone(moved(here, words))
+        self.assertIsNone(moved(None, ["relative"]))
 
     def test_deep_nesting_is_an_error_and_many_backticks_are_quick(self):
         with self.assertRaises(ValueError):

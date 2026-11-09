@@ -1,5 +1,5 @@
 {
-  "description": "Guard checks. Python command hooks with no TypeScript module; docs/mods.md says why. One process runs all four Bash checks; merge_guard may ask GitHub, so the Bash hook keeps the 40 second timeout it had.",
+  "description": "Guard checks. Python command hooks with no TypeScript module; docs/mods.md says why. One process runs all five Bash checks; merge_guard may ask GitHub, so the Bash hook keeps the 40 second timeout it had.",
   "hooks": {
     "PreToolUse": [
       {

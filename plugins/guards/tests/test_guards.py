@@ -20,8 +20,10 @@ sys.path.insert(0, _HOOKS)
 import discard_guard  # noqa: E402
 import guards  # noqa: E402
 import merge_guard  # noqa: E402
+import message_guard  # noqa: E402
 import pipe_guard  # noqa: E402
 import tmp_guard  # noqa: E402
+from test_message_guard import QUIET_GIT, make_repo  # noqa: E402
 
 _FAKE_GH = '''#!/usr/bin/env python3
 import json, os, sys, time
@@ -113,6 +115,23 @@ class GuardsTest(unittest.TestCase):
         decision, why = self.decide(payload)
         self.assertEqual(decision, "deny")
         self.assertEqual(why, reason_of(discard_guard, payload) + "\n\n" + reason_of(tmp_guard, payload))
+
+    def test_the_bash_checks_run_in_order_with_the_merge_check_last(self):
+        self.assertEqual(guards.MODES["bash"],
+                         ("discard_guard", "pipe_guard", "tmp_guard", "message_guard", "merge_guard"))
+        self.assertEqual(guards.MODES["files"], ("tmp_guard",))
+
+    def test_a_repeated_commit_message_is_denied_after_the_tmp_reason(self):
+        repo = make_repo(os.path.join(os.path.realpath(self.dir.name), "repo"), "Count the words\n")
+        payload = bash("git commit -m 'Count the words' && ls /tmp/x", repo)
+        with mock.patch.dict(os.environ, QUIET_GIT):
+            expected = [reason_of(tmp_guard, payload), reason_of(message_guard, payload)]
+            decision, why = self.decide(payload)
+        self.assertEqual(decision, "deny")
+        self.assertEqual(why, "\n\n".join(expected))
+        self.assertIn("REPEAT_MESSAGE_OK=1", why)
+        with mock.patch.dict(os.environ, QUIET_GIT):
+            self.assertIsNone(self.decide(bash("REPEAT_MESSAGE_OK=1 git commit -m 'Count the words'", repo)))
 
     def test_two_asks_stay_an_ask(self):
         objections = [("ask", "first"), ("ask", "second")]
