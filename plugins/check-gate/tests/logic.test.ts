@@ -165,7 +165,7 @@ describe('findCommit', () => {
     // A closed substitution keeps its cd to itself, and plain text in a string stays a mention.
     expect(findCommit('X="$(cd /other; pwd)"; git commit -m x')).toEqual({})
     expect(findCommit('cd "$REPO" && echo "$(pwd) run git commit later"')).toEqual({})
-    expect(findCommit('cd "$REPO"; gh pr create --body "$(cat <<\'EOF\'\nrun git commit\nEOF\n)"')).toEqual({})
+    expect(findCommit('cd "$REPO"; gh pr create --body "$(cat <<\'EOF\'\nrun git commit\nEOF\n)"')).toBeUndefined()
   })
 
   test('reads the quotes and heredocs inside a substitution', async () => {
@@ -229,9 +229,128 @@ describe('findCommit', () => {
   test('never refuses a commit that may only be a mention', async () => {
     expect(findCommit('cd "$REPO" && echo "run git commit later"')).toEqual({})
     expect(findCommit('GIT_DIR=/x echo "run git commit later"')).toEqual({})
-    expect(findCommit('cd "$REPO"; cat > f <<EOF\nrun git commit later\nEOF')).toEqual({})
+    expect(findCommit('cd "$REPO"; cat > f <<EOF\nrun git commit later')).toEqual({})
     expect(findCommit('git commit -m x; cd /b; echo "run git commit later"')).toEqual({})
     expect(findCommit('cd /b; echo "run git commit later"')).toEqual({ dir: '/b' })
+  })
+
+  test('a heredoc body is no commit', async () => {
+    // The shape the gate refused on 2026-11-06.
+    const python = `python3 - <<'PY'\nprint("run git commit later")\nstep = "x; git commit -m y"\nPY`
+    expect(findCommit(python)).toBeUndefined()
+    expect(findCommit(`cd "$REPO"; ${python}`)).toBeUndefined()
+
+    // Every way to write the mark.
+    const bodies = [
+      'cat <<EOF\nrun git commit\nEOF',
+      'cat << EOF\nrun git commit\nEOF',
+      'cat <<"EOF"\nrun git commit\nEOF',
+      'cat <<\\EOF\nrun git commit\nEOF',
+      'cat <<-EOF\n\trun git commit\n\tEOF',
+      'cat <<EOF >f\nrun git commit\nEOF',
+      'cat <<A <<B\nrun git commit\nA\nrun git commit\nB',
+      'cat <<EOF\ngit commit -m x\nEOF',
+    ]
+    for (const command of bodies) expect(findCommit(command)).toBeUndefined()
+
+    // Inside a substitution, or a string a shell runs.
+    expect(findCommit('X=$(cat <<EOF\nrun git commit\nEOF\n)')).toBeUndefined()
+    expect(findCommit('echo "$(cat <<EOF\nrun git commit\nEOF\n)"')).toBeUndefined()
+    expect(findCommit('`cat <<EOF\nrun git commit\nEOF\n`')).toBeUndefined()
+    expect(findCommit("bash -c 'cat <<EOF\nrun git commit\nEOF'")).toBeUndefined()
+    expect(findCommit('bash -c "cat <<EOF\nrun git commit\nEOF"')).toBeUndefined()
+  })
+
+  test('a heredoc body a shell reads is still gated', async () => {
+    const commands = [
+      "bash <<'EOF'\ngit commit -m x\nEOF",
+      'bash -s <<EOF\ngit commit -m x\nEOF',
+      '/bin/sh <<-EOF\n\tgit commit -m x\n\tEOF',
+      'zsh <<EOF\ngit commit -m x\nEOF',
+      'env A=1 bash <<EOF\ngit commit -m x\nEOF',
+      'sudo bash <<EOF\ngit commit -m x\nEOF',
+      '"$SHELL" <<EOF\ngit commit -m x\nEOF',
+      // What follows the mark on its line doesn't change who reads the body.
+      'bash <<EOF && echo done\ngit commit -m x\nEOF',
+      'bash <<EOF; echo done\ngit commit -m x\nEOF',
+      // Through a pipe.
+      'cat <<EOF | bash\ngit commit -m x\nEOF',
+      'cat <<EOF | tee f | sh\ngit commit -m x\nEOF',
+      'true && cat <<EOF | bash\ngit commit -m x\nEOF',
+      // Read by the shell itself.
+      'source /dev/stdin <<EOF\ngit commit -m x\nEOF',
+      '. /dev/stdin <<EOF\ngit commit -m x\nEOF',
+      // Through a substitution the shell runs.
+      'eval "$(cat <<EOF\ngit commit -m x\nEOF\n)"',
+      'bash -c "$(cat <<EOF\ngit commit -m x\nEOF\n)"',
+      'bash -c $(cat <<EOF\ngit commit -m x\nEOF\n)',
+      'bash <(cat <<EOF\ngit commit -m x\nEOF\n)',
+      // One heredoc inside another.
+      'bash <<A\nbash <<B\ngit commit -m x\nB\nA',
+      // No commit runs here, but the walk doesn't read inside a body a shell reads. It costs a check.
+      'bash <<A\ncat <<B\ngit commit -m x\nB\nA',
+    ]
+    for (const command of commands) expect(findCommit(command)).toEqual({})
+    // The known miss: the shell comes only after the body ends.
+    expect(findCommit('echo "$(cat <<EOF\ngit commit -m x\nEOF\n)" | bash')).toBeUndefined()
+    // It may only be a mention, so it is never refused for its folder.
+    expect(findCommit('cd "$REPO"; bash <<EOF\ngit commit -m x\nEOF')).toEqual({})
+    expect(findCommit('cd /other && bash <<EOF\ngit commit -m x\nEOF')).toEqual({ dir: '/other' })
+    expect(findCommit('bash <<EOF\ngit commit --dry-run\nEOF')).toBeUndefined()
+  })
+
+  test('a shell elsewhere in the command does not make a body commands', async () => {
+    const commands = [
+      'cat <<EOF | tee f\nrun git commit\nEOF',
+      'cat <<EOF | python3 -\nrun git commit\nEOF',
+      'cat > run.sh <<EOF\ngit commit -m x\nEOF',
+      'cat > /tmp/run.sh <<EOF\ngit commit -m x\nEOF',
+      'bash x.sh; cat <<EOF\nrun git commit\nEOF',
+      'bash x.sh && cat <<EOF\nrun git commit\nEOF',
+      'cat <<EOF; bash x.sh\nrun git commit\nEOF',
+      'cat <<EOF\nrun git commit\nEOF\nbash x.sh',
+      'cat <<EOF\nbash <<X\ngit commit -m x\nX\nEOF',
+      `echo "bash" | cat; python3 - <<'PY'\nprint("run git commit")\nPY`,
+      `gh pr create --title "fix bash" --body "$(cat <<'EOF'\nrun git commit\nEOF\n)"`,
+    ]
+    for (const command of commands) expect(findCommit(command)).toBeUndefined()
+  })
+
+  test('a commit next to a heredoc body is still gated', async () => {
+    const python = `python3 - <<'PY'\nprint("run git commit later")\nPY`
+    expect(findCommit(`${python}\ngit add . && git commit -m x`)).toEqual({})
+    expect(findCommit(`python3 - <<'PY' && git commit -m x\nprint("run git commit later")\nPY`)).toEqual({})
+    expect(findCommit(`python3 - <<'PY' &&\nprint("run git commit later")\nPY\ngit commit -m x`)).toEqual({})
+    expect(findCommit(`${python}\ncd /other && git commit -m x`)).toEqual({ dir: '/other' })
+    expect(findCommit(`cd /other && ${python}\ngit commit -m x`)).toEqual({ dir: '/other' })
+    expect(findCommit('git commit -F - <<EOF\nrun git commit later\nEOF')).toEqual({})
+    expect(findCommit('git commit --dry-run <<EOF\nrun git commit later\nEOF')).toBeUndefined()
+    expect(findCommit('X=$(cat <<EOF\nrun git commit\nEOF\n) && git commit -m x')).toEqual({})
+    expect(findCommit("bash -c 'cat <<EOF\nrun git commit\nEOF\ngit commit -m x'")).toEqual({})
+    // The closing line is the tag alone. After that line the text is commands again.
+    expect(findCommit('cat <<EOF\nEOF \nEOF\ngit commit -m x')).toEqual({})
+  })
+
+  test('text that only looks like a heredoc mark hides nothing', async () => {
+    expect(findCommit('cat <<<EOF\ngit commit -m x')).toEqual({})
+    expect(findCommit('echo "<<EOF"\ngit commit -m x')).toEqual({})
+    expect(findCommit("echo '<<EOF'\ngit commit -m x")).toEqual({})
+    expect(findCommit('echo \\<<EOF\nEOF\ngit commit -m x')).toEqual({})
+    expect(findCommit('# <<EOF\ngit commit -m x')).toEqual({})
+    expect(findCommit('x=$((1<<2))\ngit commit -m x')).toEqual({})
+    // Arithmetic the walk can't read, which leaves a body with no closing line. Still gated.
+    expect(findCommit('x=$[1<<2]\ngit commit -m x')).toEqual({})
+    expect(findCommit('((x = ((1<<2)) ))\ngit commit -m x')).toEqual({})
+  })
+
+  test('a body with no closing line stays gated', async () => {
+    expect(findCommit(`python3 - <<'PY'\nprint("run git commit later")`)).toEqual({})
+    // A tag with tabs in front closes only under `<<-`.
+    expect(findCommit('cat <<EOF\nrun git commit\n\tEOF')).toEqual({})
+    expect(findCommit('cat <<EOF\nrun git commit\nEOF ')).toEqual({})
+    expect(findCommit('cat <<A <<B\nrun git commit\nA')).toEqual({})
+    // The string ends the inner shell's text, so a tag after it closes nothing.
+    expect(findCommit("bash -c 'cat <<EOF\nrun git commit'; echo\nEOF")).toEqual({})
   })
 
   test('refuses a commit it cannot place, and says why', async () => {
