@@ -9,10 +9,15 @@ Modes, picked by the first argument:
           heredoc or here-string feeding it) and the title and body of a `gh pr
           create|edit` (-t, -b, -F, --body-file), and deny the call until the
           strong tells are gone. Only that text is read: the words those options
-          take, every heredoc and here-string body in the command, and the files
-          the options name (relative to `git -C`, a leading `cd`, or the hook's
-          cwd; a file the command itself writes is skipped, its body having been
-          read). The command's other words, flags and paths are not read, so a
+          take, the heredoc and here-string bodies that feed the call, and the
+          files the options name (relative to `git -C`, a leading `cd`, or the
+          hook's cwd; a file the command itself writes is skipped, its body having
+          been read). A body feeds the call when it sits in the call's own pipeline
+          (`git commit -F - <<EOF`, `cat <<EOF | git commit -F -`) or in one that
+          writes with > or >> the file the call reads (`cat > m.txt <<EOF`, then
+          `git commit -F m.txt`), or anywhere inside a `$( )`, since a variable
+          can carry it; a script fed to `python3 - <<EOF` is not read.
+          The command's other words, flags and paths are not read, so a
           bare `--` cannot count as a dash; a command that cannot be scanned (an
           unclosed quote) is read whole, flags aside. A `git commit` is also
           denied while a line it adds to a .md/.txt/.rst file has any tell,
@@ -253,10 +258,12 @@ def command_skeleton(cmd, bodies=None, keep_words=False):
     """The command with every quoted string turned into Q, escaped characters into _,
     line continuations into a space and heredoc bodies dropped, so COMMIT_CALL sees
     only real command starts. A heredoc body is never read as a command, whatever
-    command takes it (so `bash <<EOF` holding a commit is not caught, like `bash -c`);
-    each body goes into `bodies` when a list is given, in order. With `keep_words`
-    quoted strings and escapes stay as written and the heredoc marks go, which leaves
-    the shell words for shell_steps.
+    command takes it (so `bash <<EOF` holding a commit is not caught, like `bash -c`).
+    When `bodies` is a list, each heredoc and here-string goes into it in order as
+    (offset, label, text). The offset is where its `<<` or `<<<` mark sits in the
+    returned text, so shell_pipelines can tell which command the body feeds. With
+    `keep_words` quoted strings and escapes stay as written and the heredoc marks go,
+    which leaves the shell words for shell_steps.
     Returns None when the command cannot be scanned (an unclosed quote or heredoc)."""
     out, pending, i, n = [], [], 0, len(cmd)
     while i < n:
@@ -281,17 +288,19 @@ def command_skeleton(cmd, bodies=None, keep_words=False):
             out.append(cmd[i:j + 1] if keep_words else "Q")
             i = j + 1
         elif cmd.startswith("<<<", i):  # a here-string: its word is scanned as usual
+            if bodies is not None and (m := HERE_STRING.match(cmd, i)):
+                bodies.append((len("".join(out)), "the here-string", unquote(m.group(1))))
             out.append("<<<")
             i += 3
         elif c == "<" and (m := HEREDOC.match(cmd, i)):
             word = next(w for w in m.group(2, 3, 4) if w is not None).replace("\\", "")
-            pending.append((word, m.group(1) == "-"))
+            pending.append((word, m.group(1) == "-", len("".join(out))))
             out.append("" if keep_words else "H")
             i = m.end()
         elif c == "\n" and pending:
             # The heredoc bodies start on the next line, one after the other.
             i += 1
-            for word, strip_tabs in pending:
+            for word, strip_tabs, at in pending:
                 lines = []
                 while True:
                     end = cmd.find("\n", i)
@@ -305,7 +314,7 @@ def command_skeleton(cmd, bodies=None, keep_words=False):
                         return None
                     lines.append(line)
                 if bodies is not None:
-                    bodies.append("\n".join(lines))
+                    bodies.append((at, "the heredoc", "\n".join(lines)))
             pending = []
             out.append("\n")
         else:
@@ -326,13 +335,21 @@ def file_text(path):
 LEADING_CD = re.compile(r"^\s*cd\s+(?:\"([^\"]+)\"|'([^']+)'|(\S+))\s*(?:&&|;)")
 
 
-def shell_steps(cmd):
-    """Each simple command in `cmd`, in order, as its list of unquoted words, with
-    redirects and comments dropped. None when the command cannot be scanned."""
-    text = command_skeleton(cmd, keep_words=True)
+def shell_pipelines(cmd, bodies=None):
+    """The pipelines of `cmd` in order, as (steps, files written, end, in a substitution).
+    A pipeline is the simple commands that `|` joins, up to the next newline, `;`, `&&`,
+    `||`, `&` or parenthesis; a `|` at the end of a line carries on to the next line. Each
+    step is its list of unquoted words, with redirects and comments dropped. The files
+    written are the targets of `>` and `>>`. `end` is the offset in the keep_words
+    skeleton where the pipeline stops, which places the heredoc offsets that `bodies`
+    receives as in command_skeleton. The last field is true when the innermost open
+    parenthesis around the pipeline is a `$(`, so its output may become a variable.
+    None when the command cannot be scanned."""
+    text = command_skeleton(cmd, bodies, keep_words=True)
     if text is None:
         return None
-    steps, pos, after_redirect = [[]], 0, False
+    pipes, steps, written, opened = [], [[]], set(), []
+    pos, redirect_to, piped, dollar_at = 0, None, False, -1
     while pos < len(text):
         m = SHELL_TOKEN.match(text, pos)
         if not m:
@@ -342,18 +359,44 @@ def shell_steps(cmd):
         pos = m.end()
         operator, redirect, word = m.groups()
         if operator:
-            steps.append([])
-            after_redirect = False
-        elif redirect:
-            after_redirect = True
-        elif after_redirect:
-            after_redirect = False
+            redirect_to = None
+            if operator == "|":
+                steps.append([])
+            elif not (piped and operator in "\n&"):  # `|&` and a `|` ending a line go on
+                pipes.append((steps, written, m.start(1), bool(opened) and opened[-1]))
+                steps, written = [[]], set()
+            piped = operator == "|" or (piped and operator == "\n")
+            # Each open parenthesis notes whether a `$` sits right before it.
+            if operator == "(":
+                opened.append(dollar_at == m.start(1))
+            elif operator == ")" and opened:
+                opened.pop()
+            dollar_at = -1
+            continue
+        piped = False
+        dollar_at = pos if word and word.endswith("$") else -1
+        if redirect:
+            redirect_to = redirect.lstrip("0123456789")
+        elif redirect_to is not None:
+            if redirect_to in (">", ">>"):
+                written.add(unquote(word))
+            redirect_to = None
         elif word.startswith("#"):
             end = text.find("\n", pos)
             pos = end if end != -1 else len(text)
         else:
             steps[-1].append(unquote(word))
-    return [step for step in steps if step]
+    pipes.append((steps, written, len(text), bool(opened) and opened[-1]))
+    return pipes
+
+
+def shell_steps(cmd):
+    """Each simple command in `cmd`, in order, as its list of unquoted words, with
+    redirects and comments dropped. None when the command cannot be scanned."""
+    pipes = shell_pipelines(cmd)
+    if pipes is None:
+        return None
+    return [step for steps, *_ in pipes for step in steps if step]
 
 
 def expands(word):
@@ -730,24 +773,75 @@ def unquote(word):
     return "".join(out)
 
 
-def message_texts(cmd, bodies, payload):
+def message_call(words):
+    """Whether a step is a `git commit` or a `gh pr create|edit`."""
+    while words and ENV_WORD.match(words[0]):
+        words = words[1:]
+    if words[:1] == ["gh"]:
+        return words[1:2] == ["pr"] and words[2:3] in (["create"], ["edit"])
+    call = words and git_call(words, ".")
+    return bool(call) and call[1] == "commit"
+
+
+def message_files(words):
+    """The files a commit or PR step reads its text from (-F, --file, --body-file)."""
+    names = set()
+    for k, word in enumerate(words):
+        if word in ("-F", "--file", "--body-file"):
+            names.update(words[k + 1:k + 2])
+        elif word.startswith(("--file=", "--body-file=")):
+            names.add(word.split("=", 1)[1])
+        elif word.startswith("-F"):
+            names.add(word[2:])
+    return {os.path.normpath(n) for n in names if n != "-"}
+
+
+def fed_bodies(cmd):
+    """(label, text) for each heredoc and here-string body that feeds a commit or PR.
+    A body feeds one when its mark sits in a pipeline that holds the commit or PR call
+    (`git commit -F - <<EOF`, `cat <<EOF | git commit -F -`), or in a pipeline that
+    writes with > or >> a file such a call reads with -F, --file or --body-file
+    (`cat > m.txt <<EOF` and then `git commit -F m.txt`). A body inside a `$( )` counts
+    too when the command has a commit or PR call, since a variable can carry it there
+    (`msg=$(cat <<EOF)` and then `git commit -m "$msg"`). Any other body, such as a
+    script fed to `python3 - <<EOF`, is not message text. A body in a brace group piped
+    to the call (`{ cat <<EOF; } | git commit -F -`) is a known miss. When the command
+    cannot be split into pipelines every body counts, as before this rule."""
+    bodies = []
+    pipes = shell_pipelines(cmd, bodies)
+    if pipes is None:
+        return [(label, text) for _, label, text in bodies]
+    calls = [step for steps, *_ in pipes for step in steps if message_call(step)]
+    read = set().union(*map(message_files, calls))
+    feeds = [any(map(message_call, steps)) or (bool(calls) and in_sub)
+             or bool(read & {os.path.normpath(w) for w in written})
+             for steps, written, _, in_sub in pipes]
+    out = []
+    for at, label, text in bodies:
+        owner = next(k for k, (_, _, end, _) in enumerate(pipes) if at <= end)
+        if feeds[owner]:
+            out.append((label, text))
+    return out
+
+
+def message_texts(cmd, payload):
     """(label, text) for each message a commit or PR command carries: the words given
-    inline, the heredoc and here-string bodies, and the files it names, read from disk.
-    A relative file is taken from the folder `git -C` names, else where a leading `cd`
-    goes, else the hook's cwd; a `cd` later in the command is not followed, and a file
-    that cannot be read is skipped. A file the command itself writes is skipped too:
-    what is on disk is stale, and the body written is scanned as a heredoc or a word."""
+    inline, the heredoc and here-string bodies that feed the call (see fed_bodies), and
+    the files it names, read from disk. A relative file is taken from the folder `git
+    -C` names, else where a leading `cd` goes, else the hook's cwd; a `cd` later in the
+    command is not followed, and a file that cannot be read is skipped. A file the
+    command itself writes is skipped too: what is on disk is stale, and the body written
+    is scanned as a heredoc or a word."""
     texts = [("the message", unquote(m.group(1))) for m in INLINE_TEXT.finditer(cmd)]
-    texts += [("the here-string", unquote(m.group(1))) for m in HERE_STRING.finditer(cmd)]
-    texts += [("the heredoc", body) for body in bodies]
-    written = {unquote(m.group(1)) for m in WRITTEN_FILE.finditer(cmd)}
+    texts += fed_bodies(cmd)
+    written = {os.path.normpath(unquote(m.group(1))) for m in WRITTEN_FILE.finditer(cmd)}
     cwd = os.path.expanduser(payload.get("cwd") or ".")
     cd = LEADING_CD.match(cmd)
     if cd:
         cwd = os.path.join(cwd, os.path.expanduser(next(g for g in cd.groups() if g)))
     for m in TEXT_FILE.finditer(cmd):
         name = unquote(m.group(1))
-        if name == "-" or name in written:
+        if name == "-" or os.path.normpath(name) in written:
             continue
         base = cwd
         git_c = GIT_C.search(cmd, 0, m.start())
@@ -764,8 +858,7 @@ def message_texts(cmd, bodies, payload):
 
 def mode_commit(payload):
     cmd = (payload.get("tool_input") or {}).get("command", "")
-    bodies = []
-    skeleton = command_skeleton(cmd, bodies)
+    skeleton = command_skeleton(cmd)
     # Unscannable: a false deny beats a missed check, so match the raw command.
     call = COMMIT_CALL.search(cmd if skeleton is None else skeleton)
     if not call:
@@ -777,7 +870,7 @@ def mode_commit(payload):
         # whole of it is read, flags aside.
         texts = [("the command", re.sub(r"(?<!\S)--?[A-Za-z][\w-]*", " ", cmd))]
     else:
-        texts = message_texts(cmd, bodies, payload)
+        texts = message_texts(cmd, payload)
     blocks = []
     for label, text in texts:
         hits = find_tells(text, strong_only=True)
