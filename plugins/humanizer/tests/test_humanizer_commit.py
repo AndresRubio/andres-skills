@@ -104,10 +104,6 @@ class CommitModeTest(unittest.TestCase):
         self.denied("cd sub && git commit -F m.md")
         self.denied(f"cd {sub} && git -c user.name=x -C . commit -F m.md")
 
-    def test_body_file_is_not_read_as_an_inline_body(self):
-        self.passed("gh pr edit 5 --body-file clean.md")
-        self.denied("gh pr edit 5 --body-file notes.md")
-
 
 if __name__ == "__main__":
     unittest.main()

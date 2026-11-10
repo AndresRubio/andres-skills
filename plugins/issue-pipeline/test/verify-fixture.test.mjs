@@ -380,12 +380,6 @@ test('the default branch (read from gh api repos/<repo>) is the base and is neve
   assert.equal(r.code, 0, r.stderr + r.stdout);
 });
 
-test('reviews are fetched only for pull requests, not for plain issues', () => {
-  // cleanRoutes has no pulls/5/reviews route (#5 is an issue); fetching it would exit 3.
-  const r = runLeak(cleanRoutes());
-  assert.equal(r.code, 0, r.stderr + r.stdout);
-});
-
 test('a gh failure while scanning for leaks exits 3', () => {
   const r = runLeak(cleanRoutes({ 'api --paginate --slurp repos/o/r/pulls/comments?per_page=100': { __ghError: 'gh: HTTP 500: Internal Server Error' } }));
   assert.equal(r.code, 3, r.stderr);

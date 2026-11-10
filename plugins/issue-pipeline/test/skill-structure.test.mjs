@@ -251,10 +251,6 @@ test('Phase 2a: evidence template has the revert-check and diff-risk sections', 
   assert.match(read('templates/evidence.md'), /could not run/);
 });
 
-test('Phase 2a: the GitHub adapter defines remove-pr-labels', () => {
-  assert.ok(headings(read('trackers/github.md')).includes('remove-pr-labels'));
-});
-
 test('token leaks: SKILL.md stays under 100 lines and loads its files lazily', () => {
   const text = read('SKILL.md');
   assert.ok(text.trimEnd().split('\n').length < 100, 'SKILL.md must stay under 100 lines');

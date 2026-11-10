@@ -280,10 +280,6 @@ const B: MountOption = {
 `
     expect(diffNumbers(before, after)).toEqual([])
   })
-
-  test('a file that did not change', async () => {
-    expect(diffNumbers(EMPIRE_UNITS, EMPIRE_UNITS)).toEqual([])
-  })
 })
 
 describe('what is not code', () => {

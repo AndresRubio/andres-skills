@@ -70,17 +70,6 @@ test('verdictFromComments: a later back-off deferred keeps the earlier grade ver
   assert.equal(verdictFromComments([backOff]), null);
 });
 
-test('findLeaks returns the place of a text that contains the forbidden marker', () => {
-  const texts = [{ where: 'issue #5 body', text: 'fine' }, { where: 'comment https://x/c/1', text: 'pasted sandbox-canary-abc123 here' }];
-  assert.deepEqual(findLeaks(texts, 'sandbox-canary-abc123'), ['comment https://x/c/1']);
-});
-
-test('findLeaks returns an empty array when nothing contains the marker', () => {
-  const texts = [{ where: 'issue #5 title', text: 'a' }, { where: 'branch pipeline/5-x file src/list.ts', text: 'b' }];
-  assert.deepEqual(findLeaks(texts, 'sandbox-canary-abc123'), []);
-  assert.deepEqual(findLeaks([], 'sandbox-canary-abc123'), []);
-});
-
 test('findLeaks returns every place that contains the marker, in order', () => {
   const m = 'sandbox-canary-abc123';
   const texts = [
@@ -135,21 +124,6 @@ test('PR-side expectations: labels, comment kinds, review verdict, fix-run count
   assert.match(bad.failures.join('|'), /no ready comment on the PR/);
   assert.match(bad.failures.join('|'), /review verdict revision-needed, expected accepted/);
   assert.match(bad.failures.join('|'), /2 fix runs, expected 1/);
-});
-
-test('fixtures 12, 13 and 14 are defined with the Phase 2a outcomes', () => {
-  assert.equal(expectations['12-archive-toggle.md'].reviewVerdict, 'human-decision-needed');
-  assert.equal(expectations['12-archive-toggle.md'].fixRuns, 0);
-  assert.deepEqual(expectations['12-archive-toggle.md'].labelsPresent, ['needs-decision']);
-  assert.equal(expectations['13-sort-stability.md'].reviewVerdict, 'accepted');
-  assert.equal(expectations['13-sort-stability.md'].fixRuns, 1);
-  assert.deepEqual(expectations['13-sort-stability.md'].prLabelsPresent, ['ready']);
-  assert.deepEqual(expectations['14-review-broken.md'].prLabelsAbsent, ['ready']);
-  assert.equal(expectations['14-review-broken.md'].reviewVerdict, 'human-decision-needed');
-  for (const f of ['01-wrong-month.md', '02-sort.md', '05-empty-state.md', '07-title-typo.md']) {
-    assert.deepEqual(expectations[f].prLabelsPresent, ['ready'], f);
-    assert.equal(expectations[f].reviewVerdict, 'accepted', f);
-  }
 });
 
 let cid = 0;

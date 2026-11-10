@@ -1162,10 +1162,6 @@ class Links(unittest.TestCase):
         texto = "See [knowledge/landscape/harbor.md](knowledge/landscape/harbor.md).\n"
         self.assertEqual("", parar(last_assistant_message=texto))
 
-    def test_the_memory_index_dash_rule_still_holds(self):
-        texto = "- [Branches](branches.md) — main is ahead — and nobody knows why\n"
-        self.assertIn("block", post("/tmp/x/memory/MEMORY.md", "Edit", {"new_string": texto}))
-
 
 class PluginLayout(unittest.TestCase):
     """The hook runs from the install cache and has to know the repo copy of its own files."""

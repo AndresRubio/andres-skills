@@ -1,11 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { runCli } from './helpers/cli.mjs';
+
+const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 test('version prints the plugin version as JSON', () => {
   const r = runCli(['version']);
   assert.equal(r.code, 0, r.stderr);
-  assert.deepEqual(r.json(), { version: '0.3.0' });
+  assert.deepEqual(r.json(), { version });
 });
 
 test('an unknown command exits 2 with a JSON error on stderr', () => {

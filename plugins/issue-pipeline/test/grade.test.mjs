@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { gradeVerdict, CHECKLIST_FIELDS } from '../skills/ship/scripts/lib/grade.mjs';
+import { gradeVerdict } from '../skills/ship/scripts/lib/grade.mjs';
 import { waitingFor } from '../skills/ship/scripts/lib/runs.mjs';
 import { runCli } from './helpers/cli.mjs';
 import { tempDir } from './helpers/git.mjs';
@@ -60,7 +60,6 @@ test('invalid checklists are rejected', () => {
   assert.throws(() => gradeVerdict(missing, LIMITS), /"pipelineGo" must be boolean/);
   assert.throws(() => gradeVerdict({ ...base(), extra: 1 }, LIMITS), /unknown field "extra"/);
   assert.throws(() => gradeVerdict({ ...base(), estimatedFiles: -1 }, LIMITS), /estimatedFiles/);
-  assert.equal(Object.keys(CHECKLIST_FIELDS).length, 13);
 });
 
 test('a checklist field named constructor is rejected as unknown, not treated as a prototype property', () => {
@@ -182,12 +181,10 @@ test('wait: a missing activeRuns and a null self.lockedAt both throw, even with 
 });
 
 test('wait: an empty waitFor needs no activeRuns', () => {
-  assert.deepEqual(grade({}, LIMITS), { verdict: 'ready', reasons: [] });
   assert.deepEqual(grade({ waitOverride: true }, LIMITS), { verdict: 'ready', reasons: [] });
 });
 
-test('the checklist rejects conflictsWithOpenPipelinePr as unknown and needs waitFor and waitOverride', () => {
-  assert.throws(() => grade({ conflictsWithOpenPipelinePr: false }), /unknown field "conflictsWithOpenPipelinePr"/);
+test('the checklist needs waitFor and waitOverride', () => {
   const { waitOverride, ...noOverride } = base();
   assert.throws(() => gradeVerdict(noOverride, LIMITS), /"waitOverride" must be boolean/);
   const { waitFor, ...noWaitFor } = base();

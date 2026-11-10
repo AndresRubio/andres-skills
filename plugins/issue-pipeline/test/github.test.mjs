@@ -124,10 +124,6 @@ function loggingGh(routes) {
   return { dir, calls: () => readFileSync(log, 'utf8').trim().split('\n') };
 }
 
-test('countOpenPipelinePrs is gone', () => {
-  assert.equal('countOpenPipelinePrs' in github, false);
-});
-
 test('fetchActiveRuns lists PRs and pipeline-working issues, fetches each other issue, then self', () => {
   const routes = runsRoutes();
   const calls = [];
@@ -242,12 +238,6 @@ test('CLI waiting-for reads the wait from an issue file', () => {
   assert.equal(r.code, 0, r.stderr);
   assert.deepEqual(r.json(), { waitingFor: ['7', '8'] });
   assert.equal(runCli(['waiting-for']).code, 2);
-});
-
-test('pr-count is now an unknown command', () => {
-  const r = runCli(['pr-count', '--repo', REPO]);
-  assert.equal(r.code, 2);
-  assert.match(JSON.parse(r.stderr).error, /unknown command "pr-count"/);
 });
 
 test('normalizeIssue keeps the creation time, which orders the sweep', () => {

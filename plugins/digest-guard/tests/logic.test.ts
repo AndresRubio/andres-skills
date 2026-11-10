@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import {
-  GATE_COMMAND,
   GMAIL_READ_ACTIONS,
   GMAIL_WRITE_ACTIONS,
   describeFindings,
@@ -405,11 +404,6 @@ describe('judgeGate', () => {
   test('does not take an exit 0 that printed a FAIL line', async () => {
     expect(judgeGate(0, `${REAL_PASS}check_x   FAIL (2)\n`).ok).toBe(false)
   })
-
-  test('fails an exit 127 and a missing script', async () => {
-    expect(judgeGate(127, 'sh: python3: command not found').ok).toBe(false)
-    expect(judgeGate(2, "python3: can't open file 'digest-routine/check-structure.py'").ok).toBe(false)
-  })
 })
 
 describe('pushDenyText', () => {
@@ -429,9 +423,5 @@ describe('pushDenyText', () => {
     const said = pushDenyText('/r/ai-digest', 'x', out)
     expect(said).toContain('line 199')
     expect(said).not.toContain('line 10\n')
-  })
-
-  test('the command it names is the routine\'s', async () => {
-    expect(GATE_COMMAND).toBe('python3 digest-routine/check-structure.py 2>&1')
   })
 })

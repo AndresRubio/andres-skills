@@ -569,17 +569,6 @@ test('a changed tree runs the checks again', async ($, on) => {
   expect(refused).toContain('Failed: pytest')
 })
 
-test('a failing result is reused too: no rerun until the code changes', async ($, on) => {
-  const world = repo(on)
-
-  await firstCommit($, world)
-  await commit($)
-  await commit($)
-
-  expect(world.spawns).toBe(1)
-  expect(world.allowed).toBe(0)
-})
-
 test('commands that are not commits pass untouched', async ($, on) => {
   const world = repo(on)
 

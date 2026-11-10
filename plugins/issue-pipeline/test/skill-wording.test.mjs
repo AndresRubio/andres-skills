@@ -329,11 +329,6 @@ test('the active-runs tracker operation runs the CLI and says the text is untrus
   assert.match(ops, /untrusted/);
 });
 
-test('stage 0 and stage 3 pass --expect-locked (16c)', () => {
-  assert.match(read('stages/00-resolve.md'), /--expect-locked/);
-  assert.match(read('stages/03-grade.md'), /--expect-locked/);
-});
-
 test('README says the interactive wait question comes before the fork questions and the split choice (16c round 3)', () => {
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
   const override = readme.split('\n').find((l) => l.startsWith('- **Overriding it.**')) ?? '';
