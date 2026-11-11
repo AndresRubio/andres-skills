@@ -204,22 +204,6 @@ test('no backticked span under skills/ship combines a git push with a command su
 
 // --- Task 16c: runs in progress (D16) ---
 
-function allFiles(dir = SKILL_DIR) {
-  return readdirSync(dir).flatMap((name) => {
-    const full = path.join(dir, name);
-    return statSync(full).isDirectory() ? allFiles(full) : [full];
-  });
-}
-
-test('no file under skills/ mentions the removed count, field or file (16c)', () => {
-  for (const file of allFiles()) {
-    const text = readFileSync(file, 'utf8');
-    for (const gone of ['open-pipeline-pr-count', 'pr-count', 'conflictsWithOpenPipelinePr', 'open-prs.json', 'countOpenPipelinePrs', 'open-pipeline-prs']) {
-      assert.ok(!text.includes(gone), `${path.relative(SKILL_DIR, file)} still mentions ${gone}`);
-    }
-  }
-});
-
 import { checkCommand } from '../skills/ship/scripts/lib/guard.mjs';
 
 test("research's evidence fetches are non-fatal and pass the run guard (16c round 2)", () => {

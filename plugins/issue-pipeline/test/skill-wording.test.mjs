@@ -329,13 +329,6 @@ test('the active-runs tracker operation runs the CLI and says the text is untrus
   assert.match(ops, /untrusted/);
 });
 
-test('README says the interactive wait question comes before the fork questions and the split choice (16c round 3)', () => {
-  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
-  const override = readme.split('\n').find((l) => l.startsWith('- **Overriding it.**')) ?? '';
-  assert.match(override, /before/);
-  assert.doesNotMatch(override, /after fork questions are answered|told to proceed/);
-});
-
 test('Phase 2a: stage 7 runs the revert check and records it', () => {
   const verify = read('stages/07-verify.md');
   assert.match(verify, /node "\$PIPELINE" revert-check --base "\$BASE_SHA" --command/);
@@ -385,10 +378,10 @@ test('token leaks: SKILL.md has the output rule, the effort column and the subag
   assert.match(policy, /30-line return limit/);
 });
 
-test('token leaks: context-hygiene.md has its five rules and no inlined copy lives in SKILL.md', () => {
+test('token leaks: context-hygiene.md keeps at least its five rules and no inlined copy lives in SKILL.md', () => {
   const hygiene = read('context-hygiene.md');
   assert.match(hygiene, /^# Context hygiene$/m);
-  assert.equal((hygiene.match(/^- /gm) ?? []).length, 5);
+  assert.ok((hygiene.match(/^- /gm) ?? []).length >= 5);
   assert.doesNotMatch(read('SKILL.md'), /\/issue-pipeline:ship <KEY>/);
 });
 

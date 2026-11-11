@@ -132,7 +132,7 @@ test('CLI eligibility validates the lane and reads files', () => {
   assert.deepEqual(capped.json().reasons, ['maxParallel reached (2/2)'], capped.stderr);
 });
 
-test('CLI eligibility needs --active-runs-file on automatic lanes but not on the manual lane; --open-pipeline-prs is gone', () => {
+test('CLI eligibility needs --active-runs-file on automatic lanes but not on the manual lane', () => {
   const dir = tempDir();
   const issueFile = path.join(dir, 'issue.json');
   const configFile = path.join(dir, 'config.json');
@@ -146,9 +146,6 @@ test('CLI eligibility needs --active-runs-file on automatic lanes but not on the
   const manual = runCli(['eligibility', '--issue-file', issueFile, '--config-file', configFile, '--lane', 'manual']);
   assert.equal(manual.code, 0, manual.stderr);
   assert.equal(manual.json().eligible, true);
-  const old = runCli(['eligibility', '--issue-file', issueFile, '--config-file', configFile, '--lane', 'manual', '--open-pipeline-prs', '0']);
-  assert.equal(old.code, 2);
-  assert.match(old.stderr, /open-pipeline-prs/);
 });
 
 // --- D16: runs in progress ---

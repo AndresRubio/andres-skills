@@ -26,6 +26,12 @@ test('constructor is an unknown command, not a prototype property', () => {
   assert.match(err.error, /unknown command "constructor"/);
 });
 
+test('a flag the command does not define is a usage error that names the flag', () => {
+  const r = runCli(['version', '--no-such-flag', '0']);
+  assert.equal(r.code, 2);
+  assert.match(JSON.parse(r.stderr).error, /no-such-flag/);
+});
+
 test('an unexpected positional argument is a usage error', () => {
   const r = runCli(['version', 'extra']);
   assert.equal(r.code, 2);

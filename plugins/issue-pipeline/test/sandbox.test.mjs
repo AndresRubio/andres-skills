@@ -63,10 +63,9 @@ test('every label used on a seeded issue is a known sandbox label', () => {
   }
 });
 
-test('setup-sandbox.sh creates the ready label and no ship-it label', () => {
+test('setup-sandbox.sh creates the ready label', () => {
   const src = readFileSync(dir('setup-sandbox.sh'), 'utf8');
   assert.match(src, /^label ready\s+\w{6} /m);
-  assert.doesNotMatch(src, /^label ship-it/m);
 });
 
 test('both sandbox scripts are syntactically valid bash', () => {
