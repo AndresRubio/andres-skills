@@ -46,6 +46,31 @@ Each step that pushes, opens a pull request, or starts a paid Actions run needs 
 
 Expect the first runs to fail on configuration before they fail on code. Read the Actions log of the failed job before changing anything in the plugin.
 
+## What the first attempts showed, 2026-11-11
+
+The four workflows are on `main` of the public sandbox, installed by pull request 18 and corrected by pull request 19. On the private sandbox pull request 18 is merged and pull request 19 is still open. Two ship runs started on issue 1 of the public sandbox. Neither got as far as stage 0, so the acceptance tasks are still to do and the two results files still do not exist.
+
+What went wrong, in the order it appeared:
+
+1. The fresh sandboxes had 12 open issues carrying the `pipeline` label. A dry run of the sweep (`pipeline.mjs sweep --dry-run`) showed that the first scheduled `pipeline-ready` run after the merge would have started issues 1 to 6 at once in each sandbox. The Phase 2b plan expects that sweep to start nothing. The label was removed from all 24 issues before the merge, and one issue is labelled at a time.
+2. The first value stored in `PIPELINE_TOKEN` was not a token. `pipeline-ready` failed with `HTTP 401: Bad credentials` until the owner stored a real fine-grained token.
+3. The three Claude workflows passed `--disallowedTools` without quotes. `claude-code-action` splits `claude_args` on whitespace, the tool patterns contain spaces, and Claude Code exited with `unknown option '--force:*),Bash(git'`. Fixed in commit `9548eae`, with a test in `test/workflows.test.mjs` that reads each `claude_args` the way the action does.
+4. The value stored in `CLAUDE_CODE_OAUTH_TOKEN` starts with a space, so Anthropic answers `401 Invalid bearer token` and the run ends two seconds after Claude Code starts, at no cost. The action hides that message. The run log shows only `is_error: true` with `total_cost_usd: 0` and an empty `modelUsage`. Two things identify it: a local `claude -p` with a made-up token returns the same result, and the log prints the secret as `claude_code_oauth_token:  ***` with two spaces, where a sound secret prints one. `claude setup-token` prints the token wrapped over two lines, each starting with a space, so copying it from the terminal picks up the space and may lose the second line. Only the owner can replace it.
+5. A run that dies before Claude starts posts nothing and leaves the `pipeline` label on the issue. The sweep then counts the issue as new and starts it again every 30 minutes. Remove the label while a failure of this kind is being fixed.
+6. `scanText: pathological 200 KB inputs scan in linear time` in `test/hydrate.test.mjs` failed once with 587 ms against its 500 ms limit while the machine was busy, and passed on the next two runs.
+
+To check a token before storing it, without showing it to a session, the owner can run this in the Terminal app:
+
+```bash
+read -s T
+CLAUDE_CODE_OAUTH_TOKEN="$T" claude -p "say hi"
+printf %s "$T" | gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo AndresRubio/pipeline-sandbox
+printf %s "$T" | gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo AndresRubio/pipeline-sandbox-private
+unset T
+```
+
+The second line answers with a greeting when the token is good and with `Failed to authenticate` when it is not.
+
 ## Conventions this work followed
 
 Git identity `AndresRubio <2109109+AndresRubio@users.noreply.github.com>`. On this machine the default SSH key for `github.com` belongs to another account; AndresRubio repositories push through the `github.com-personal` alias, which the clones already use. Commit messages and pull request bodies carry no attribution lines. Pull requests are merged by the owner, since the app's permission classifier refuses a merge from a session. Commit message files go in the session scratchpad under a unique name, and their first line is checked in a call of its own before the commit, because two hooks in this repository can refuse a whole Bash command and a retry then commits a stale file.
