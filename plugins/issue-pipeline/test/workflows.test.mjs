@@ -150,3 +150,32 @@ test('pipeline-score blocks gh pr edit like pipeline-review does', () => {
     assert.match(rendered(name), /--disallowedTools .*Bash\(gh pr edit:\*\)/, name);
   }
 });
+
+// claude-code-action splits claude_args like a shell: on whitespace, except inside quotes
+// (base-action/src/parse-sdk-options.ts). A tool pattern with a space in it must be quoted to arrive whole.
+const claudeArgs = (yaml) => {
+  const lines = yaml.split('\n');
+  const at = lines.findIndex((l) => /^\s*claude_args: \|$/.test(l));
+  const indent = lines[at].search(/\S/);
+  const end = lines.findIndex((l, i) => i > at && l.trim() !== '' && l.search(/\S/) <= indent);
+  return lines.slice(at + 1, end === -1 ? undefined : end).join('\n');
+};
+const shellWords = (text) => (text.match(/(?:"[^"]*"|'[^']*'|[^\s"'])+/g) ?? []).map((w) => w.replace(/["']/g, ''));
+
+test('each workflow passes Claude whole flags and whole tool patterns', () => {
+  const FLAGS = ['--plugin-dir', '--model', '--effort', '--max-budget-usd', '--disallowedTools'];
+  const review = ['Bash(gh pr merge:*)', 'Bash(gh pr review:*)', 'Bash(gh pr edit:*)', 'Bash(git push:*)'];
+  const expected = {
+    'pipeline-ship.yml': ['Bash(gh pr merge:*)', 'Bash(gh pr review:*)', 'Bash(git push --force:*)', 'Bash(git push -f:*)'],
+    'pipeline-review.yml': review,
+    'pipeline-score.yml': [...review, 'Edit'],
+  };
+  for (const [name, tools] of Object.entries(expected)) {
+    const words = shellWords(claudeArgs(rendered(name)));
+    assert.deepEqual(words.filter((w) => w.startsWith('--') && !FLAGS.includes(w)), [], `${name}: unknown flags`);
+    const from = words.indexOf('--disallowedTools') + 1;
+    const next = words.findIndex((w, i) => i >= from && w.startsWith('--'));
+    const values = words.slice(from, next === -1 ? undefined : next);
+    assert.deepEqual(values.flatMap((v) => v.split(',')), tools, name);
+  }
+});

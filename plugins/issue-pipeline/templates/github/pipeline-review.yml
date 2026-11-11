@@ -54,7 +54,7 @@ jobs:
             --model claude-fable-5-1
             --effort high
             --max-budget-usd 15
-            --disallowedTools Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh pr edit:*),Bash(git push:*)
+            --disallowedTools "Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh pr edit:*),Bash(git push:*)"
       - name: Verdict → check status
         # Skipped when cancelled: a run cancelled by a newer push must not post a verdict for a superseded head.
         if: ${{ !cancelled() }}
