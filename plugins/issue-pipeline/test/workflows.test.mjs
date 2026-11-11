@@ -162,20 +162,31 @@ const claudeArgs = (yaml) => {
 };
 const shellWords = (text) => (text.match(/(?:"[^"]*"|'[^']*'|[^\s"'])+/g) ?? []).map((w) => w.replace(/["']/g, ''));
 
-test('each workflow passes Claude whole flags and whole tool patterns', () => {
-  const FLAGS = ['--plugin-dir', '--model', '--effort', '--max-budget-usd', '--disallowedTools'];
-  const review = ['Bash(gh pr merge:*)', 'Bash(gh pr review:*)', 'Bash(gh pr edit:*)', 'Bash(git push:*)'];
+// Claude Code in a headless run denies Bash and file writes unless they are allowed, and then ends
+// the session as a success with nothing done. The lists are what each skill needs (spec §6.2).
+test('each workflow passes Claude whole flags, the tools its skill needs and the commands it must not run', () => {
+  const FLAGS = ['--plugin-dir', '--model', '--effort', '--max-budget-usd', '--allowedTools', '--disallowedTools'];
+  const readAndReport = ['Bash', 'Read', 'Write', 'Glob', 'Grep'];
+  const noReview = ['Bash(gh pr merge:*)', 'Bash(gh pr review:*)', 'Bash(gh pr edit:*)', 'Bash(git push:*)'];
   const expected = {
-    'pipeline-ship.yml': ['Bash(gh pr merge:*)', 'Bash(gh pr review:*)', 'Bash(git push --force:*)', 'Bash(git push -f:*)'],
-    'pipeline-review.yml': review,
-    'pipeline-score.yml': [...review, 'Edit'],
+    'pipeline-ship.yml': {
+      allowed: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'Agent', 'Task', 'TodoWrite'],
+      disallowed: ['Bash(gh pr merge:*)', 'Bash(gh pr review:*)', 'Bash(git push --force:*)', 'Bash(git push -f:*)'],
+    },
+    'pipeline-review.yml': { allowed: readAndReport, disallowed: noReview },
+    'pipeline-score.yml': { allowed: readAndReport, disallowed: [...noReview, 'Edit'] },
   };
-  for (const [name, tools] of Object.entries(expected)) {
+  for (const [name, { allowed, disallowed }] of Object.entries(expected)) {
     const words = shellWords(claudeArgs(rendered(name)));
     assert.deepEqual(words.filter((w) => w.startsWith('--') && !FLAGS.includes(w)), [], `${name}: unknown flags`);
-    const from = words.indexOf('--disallowedTools') + 1;
-    const next = words.findIndex((w, i) => i >= from && w.startsWith('--'));
-    const values = words.slice(from, next === -1 ? undefined : next);
-    assert.deepEqual(values.flatMap((v) => v.split(',')), tools, name);
+    // The values of a flag are the words up to the next flag, each split on commas, as the action reads them.
+    const valuesOf = (flag) => {
+      const from = words.indexOf(flag) + 1;
+      if (from === 0) return [];
+      const next = words.findIndex((w, i) => i >= from && w.startsWith('--'));
+      return words.slice(from, next === -1 ? undefined : next).flatMap((v) => v.split(','));
+    };
+    assert.deepEqual(valuesOf('--allowedTools'), allowed, `${name}: allowed tools`);
+    assert.deepEqual(valuesOf('--disallowedTools'), disallowed, `${name}: disallowed tools`);
   }
 });

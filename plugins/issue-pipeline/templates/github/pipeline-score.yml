@@ -53,4 +53,5 @@ jobs:
             --model haiku
             --effort low
             --max-budget-usd 2
+            --allowedTools "Bash,Read,Write,Glob,Grep"
             --disallowedTools "Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh pr edit:*),Bash(git push:*),Edit"
