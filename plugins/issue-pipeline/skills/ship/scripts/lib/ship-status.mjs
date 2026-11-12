@@ -12,15 +12,18 @@ export function sessionStarted(home) {
 }
 
 // The comment that parks an issue whose run never started. `run` is the marker's run: the Actions
-// run URL, or 'local' outside Actions.
-export function notStartedBody(marker, run) {
+// run URL, or 'local' outside Actions. `edits` are the label edits that go with it (notStartedEdits):
+// when they take pipeline-go away the owner is told, because a reply does not bring the label back.
+export function notStartedBody(marker, run, edits = []) {
   const log = run.startsWith('http') ? ` The log is at ${run}.` : '';
+  const goRemoved = edits.some(([flag, label]) => flag === '--remove-label' && label === 'pipeline-go');
   return [
     marker,
     '',
     `The run did not start: the session ended before the pipeline's Setup, so no stage ran and nothing was changed.${log}`,
     '',
     'Reply here once the cause is fixed to start a new run.',
+    ...(goRemoved ? ['', '`pipeline-go` was removed: an earlier run\'s lock is still on this issue, and with both labels on the sweep would have started it again without you. Add the label back if the next run should have it.'] : []),
   ].join('\n');
 }
 

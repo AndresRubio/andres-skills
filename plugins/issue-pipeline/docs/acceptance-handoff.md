@@ -193,6 +193,15 @@ Left open from that review, none of them seen in a run:
 - After a fix run's report the check also removes `pipeline-go`, where the fix stage removes only the lock.
 - The issue behind a fix run is taken from the branch name. A branch such as `pipeline/issue-7-x` gives no issue and the lock is not checked, and a key that is neither a number nor `PR-<n>` ends in an error.
 
+0.3.5 itself was read by a second reader before it was tagged, with 27 mutations of the changed lines. No blocker. A loop over 512 states of labels, lock and latest decision fed what the never-started path leaves to the sweep at six and twelve hours, and nothing was started without a new reply. Two things came out of it:
+
+- The `pipeline-go` that 0.3.5 removes may be the owner's override of a wait, and a reply does not bring it back. The comment now says that the label was removed and why. The alternative, removing the stale lock label and keeping `pipeline-go`, needs the lock's age and was not done.
+- Still open, and older than 0.3.5: the comment says "Reply here once the cause is fixed to start a new run", which is not true while another run's lock on the issue is younger than `lockTtlHours`. The run the reply starts finds the issue locked, stops, and its job is green.
+
+`SKILL.md` still names `split` among the comments that can come before the stop procedure. That only happens when the split's own label edit fails, and then the stop procedure cannot edit labels either, so unlocking is what the check can do.
+
+The timing test of item 11 in the first list failed twice more while this was being committed, with 750 ms against its 500 ms limit on a machine whose load average was above 30. Alone the scan takes 60 ms. The test now checks growth: four times the input may take at most eight times as long, where a quadratic scan takes sixteen, and a second test checks that rule against a linear and a quadratic loop.
+
 The two forced failures above ran on 0.3.4. The never-started path now goes through the new rule, which gives the same result for the labels issue 13 had. 0.3.5 has not run in Actions.
 
 ## Conventions this work followed

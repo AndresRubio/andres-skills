@@ -220,8 +220,9 @@ export const COMMANDS = {
     // The run folder is looked for where the workflow says the home is. An attempt that commented on
     // the issue started, wherever its folder went, so it is never told that it did not.
     if (!folder && attemptComments(run, comments, v.since).length === 0) {
-      postIssueComment(v.repo, issue, notStartedBody(formatMarker('blocked', { run }), run));
-      for (const [flag, label] of notStartedEdits(labels)) edit(flag, label);
+      const edits = notStartedEdits(labels);
+      postIssueComment(v.repo, issue, notStartedBody(formatMarker('blocked', { run }), run, edits));
+      for (const [flag, label] of edits) edit(flag, label);
       throw new ExitError({ started: false, source: 'posted' });
     }
     const lock = lockLeft(run, { labels, comments, since: v.since });

@@ -114,6 +114,7 @@ test('CLI ship-status --post-missing tells the issue the run did not start, park
   assert.deepEqual({ kind: parseMarker(body()).kind, run: parseMarker(body()).run }, { kind: 'blocked', run: RUN });
   assert.match(body(), /did not start/);
   assert.match(body(), /https:\/\/github\.com\/o\/r\/actions\/runs\/99/);
+  assert.doesNotMatch(body(), /pipeline-go/, 'nothing to say about a label that stays');
 });
 
 test('CLI ship-status --post-missing does not let an earlier attempt of the same run stand in for this one', () => {
@@ -183,6 +184,8 @@ test('CLI ship-status --post-missing parks a session that never started so that 
   assert.equal(r.code, 1, r.stderr);
   assert.deepEqual(r.json(), { started: false, source: 'posted' });
   assert.deepEqual(calls(), [COMMENTS, LABELS, POST, PARK, NO_GO]);
+  // The owner is told, because a reply does not bring the label back.
+  assert.match(body(), /`pipeline-go` was removed/);
 
   // The issue as those calls leave it, read by the sweep once the crashed run's lock is stale.
   const edits = calls().map((c) => c.match(/--(add|remove)-label (\S+)$/)).filter(Boolean);
@@ -196,6 +199,14 @@ test('CLI ship-status --post-missing parks a session that never started so that 
   const sweep = sweepCandidates({ issues: [issue], prs: [], closedPrs: [], config, owner: 'AndresRubio', now: new Date('2026-11-12T06:00:00Z') });
   assert.deepEqual(sweep.start, []);
   assert.deepEqual(sweep.skipped.map((x) => x.why), ['needs-decision with no new reply']);
+});
+
+test('CLI ship-status --post-missing leaves another run\'s lock on an issue whose session never started', () => {
+  // The lock is not this session's to remove, and there is no pipeline-go to take away.
+  const { r, calls, body } = status(EMPTY(), { [COMMENTS]: [[comment('lock', OTHER, 1)]], [LABELS]: labels('pipeline', 'pipeline-working'), [POST]: 'url', [PARK]: 'url' });
+  assert.equal(r.code, 1, r.stderr);
+  assert.deepEqual(calls(), [COMMENTS, LABELS, POST, PARK]);
+  assert.doesNotMatch(body(), /pipeline-go/);
 });
 
 test('CLI ship-status --post-missing leaves a lock that a later run holds', () => {

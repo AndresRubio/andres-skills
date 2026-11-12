@@ -29,22 +29,44 @@ test('scanText: a malformed percent escape in a permalink path does not throw', 
   assert.equal(ref.reason, 'not fetched: malformed path');
 });
 
-test('scanText: pathological 200 KB inputs scan in linear time', () => {
+// Linear time is checked as growth, never as a time limit: a limit in milliseconds fails on a busy
+// machine (the 200 KB scan takes 60 ms alone and took 750 ms with the suite running under load).
+// Four times the input may take up to eight times as long; a quadratic scan takes sixteen. The
+// best of three runs is compared, and a scan under 5 ms counts as 5 so that noise near zero
+// cannot fail the test.
+function growsLinearly(run, n) {
+  const best = (size) => Math.min(...[0, 1, 2].map(() => {
+    const t0 = performance.now();
+    run(size);
+    return performance.now() - t0;
+  }));
+  const small = best(n);
+  const big = best(4 * n);
+  return { ok: big < 8 * Math.max(small, 5), small: Math.round(small), big: Math.round(big) };
+}
+
+test('growsLinearly tells a linear scan from a quadratic one', () => {
+  const linear = (n) => { let x = 0; for (let i = 0; i < n * 40; i++) x += i; return x; };
+  const quadratic = (n) => { let x = 0; for (let i = 0; i < n / 50; i++) for (let j = 0; j < n / 50; j++) x += j; return x; };
+  assert.equal(growsLinearly(linear, 200_000).ok, true);
+  assert.equal(growsLinearly(quadratic, 200_000).ok, false);
+});
+
+test('scanText: pathological inputs scan in linear time', () => {
   const N = 200_000;
   const inputs = [
-    '/'.repeat(N), '#'.repeat(N), '.'.repeat(N), '-'.repeat(N), 'a.'.repeat(N / 2),
-    '#1 '.repeat(N / 3), '#1'.repeat(N / 2), 'x#1 '.repeat(N / 4),
-    `https://github.com/o/r/blob/${SHA}/`.repeat(Math.floor(N / 76)),
-    'https://github.com/o/r/blob/0123456/'.repeat(Math.floor(N / 36)),
-    'https://github.com/'.repeat(Math.floor(N / 19)),
-    `https://${'.'.repeat(N / 2)}x`, `https://a${'.x'.repeat(N / 4)}`,
-    'https://github.com/' + 'a'.repeat(N), 'a/'.repeat(N / 2) + '#1', '1/'.repeat(N / 2),
+    (n) => '/'.repeat(n), (n) => '#'.repeat(n), (n) => '.'.repeat(n), (n) => '-'.repeat(n), (n) => 'a.'.repeat(n / 2),
+    (n) => '#1 '.repeat(n / 3), (n) => '#1'.repeat(n / 2), (n) => 'x#1 '.repeat(n / 4),
+    (n) => `https://github.com/o/r/blob/${SHA}/`.repeat(Math.floor(n / 76)),
+    (n) => 'https://github.com/o/r/blob/0123456/'.repeat(Math.floor(n / 36)),
+    (n) => 'https://github.com/'.repeat(Math.floor(n / 19)),
+    (n) => `https://${'.'.repeat(n / 2)}x`, (n) => `https://a${'.x'.repeat(n / 4)}`,
+    (n) => 'https://github.com/' + 'a'.repeat(n), (n) => 'a/'.repeat(n / 2) + '#1', (n) => '1/'.repeat(n / 2),
   ];
-  for (const text of inputs) {
-    const t0 = performance.now();
-    scanText(text);
-    const ms = performance.now() - t0;
-    assert.ok(ms < 500, `${text.slice(0, 24)}... took ${Math.round(ms)} ms`);
+  for (const make of inputs) {
+    const texts = new Map([[N, make(N)], [4 * N, make(4 * N)]]);
+    const grew = growsLinearly((size) => scanText(texts.get(size)), N);
+    assert.ok(grew.ok, `${make(24).slice(0, 24)}... took ${grew.small} ms at ${N} characters and ${grew.big} ms at four times that`);
   }
 });
 
