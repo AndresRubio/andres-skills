@@ -190,3 +190,14 @@ test('each workflow passes Claude whole flags, the tools its skill needs and the
     assert.deepEqual(valuesOf('--disallowedTools'), disallowed, `${name}: disallowed tools`);
   }
 });
+
+test('pipeline-ship checks in code that the session started, against the pipeline home the Claude step used', () => {
+  const t = rendered('pipeline-ship.yml');
+  assert.match(t, /^      key: \$\{\{ steps\.target\.outputs\.key \}\}$/m);
+  assert.match(t, /echo "key=\$\(echo "\$out" \| node -e .*\)\.key.*\)" >> "\$GITHUB_OUTPUT"/);
+  const homes = [...t.matchAll(/^\s+ISSUE_PIPELINE_HOME: (.+)$/gm)].map((m) => m[1]);
+  assert.deepEqual(homes, [homes[0], homes[0]], 'the Claude step and the check name the same home');
+  const afterClaude = t.slice(t.indexOf('uses: anthropics/claude-code-action@v1'));
+  // It runs when the Claude step failed too: a session that could not log in leaves no run folder either.
+  assert.match(afterClaude, /if: \$\{\{ !cancelled\(\) \}\}\n\s+env:\n\s+GH_TOKEN: \$\{\{ github\.token \}\}\n[\s\S]*?KEY: \$\{\{ needs\.route\.outputs\.key \}\}\n\s+run: node \S*pipeline\.mjs ship-status --home "\$ISSUE_PIPELINE_HOME" --repo \$\{\{ github\.repository \}\} --key "\$KEY" --post-missing$/m);
+});

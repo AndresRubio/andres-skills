@@ -7,7 +7,7 @@ import { loadConfig } from './config.mjs';
 import { formatMarker, parseMarker, defaultRun } from './marker.mjs';
 import { lockStatus } from './lock.mjs';
 import { checkEligibility, LANES } from './eligibility.mjs';
-import { ghJson, isRepoSlug, fetchIssue, fetchPr, currentRepo, fetchActiveRuns, fetchPrComments, postPrComment } from './github.mjs';
+import { ghJson, ghText, isRepoSlug, fetchIssue, fetchPr, currentRepo, fetchActiveRuns, fetchPrComments, postPrComment, postIssueComment } from './github.mjs';
 import { computeVerdict, formatVerdictBody, latestVerdict } from './verdict.mjs';
 import { waitingFor, KEY_RE } from './runs.mjs';
 import { gradeVerdict } from './grade.mjs';
@@ -21,6 +21,7 @@ import { STAGE_POLICY, stageMark, readStages, stageTimings, loadUsage, buildRun,
 import { runReady } from './ready-run.mjs';
 import { runSweep, realSweepDeps } from './sweep-run.mjs';
 import { laneTarget } from './lane.mjs';
+import { sessionStarted, notStartedBody } from './ship-status.mjs';
 import { defaultVars, installFiles } from './setup.mjs';
 import { formatScoreBody } from './score.mjs';
 import { hydrate } from './hydrate-run.mjs';
@@ -178,6 +179,26 @@ export const COMMANDS = {
       throw new ExitError({ verdict: 'human-decision-needed', source: 'posted' });
     }
     throw new ExitError({ verdict: 'human-decision-needed', source: 'missing' });
+  },
+  // After the Claude step of pipeline-ship: did the session get as far as Setup? With --post-missing,
+  // an issue whose run never started gets a `blocked` comment and `needs-decision`, so the owner
+  // hears about it and the sweep stops starting it again. A fix run keyed by its pull request has
+  // no issue to park and nothing sweeps it, so it only exits 1.
+  'ship-status': (argv) => {
+    const v = parse(argv, { home: { type: 'string' }, repo: { type: 'string' }, key: { type: 'string' }, 'post-missing': { type: 'boolean' } });
+    required(v, 'home', 'key');
+    if (!KEY_RE.test(v.key)) throw new UsageError('--key must be a run key: an issue number or PR-<n>');
+    if (sessionStarted(v.home)) return { started: true };
+    if (!v['post-missing'] || !/^\d+$/.test(v.key)) throw new ExitError({ started: false, source: 'missing' });
+    required(v, 'repo');
+    if (!isRepoSlug(v.repo)) throw new UsageError(`--repo must be owner/name, got ${JSON.stringify(v.repo)}`);
+    const run = defaultRun();
+    // The run folder is looked for where the workflow says the home is. A run that commented on the
+    // issue started, wherever its folder went, so it is never told that it did not.
+    if (fetchPrComments(v.repo, v.key).some((c) => c.pipeline && c.marker.run === run)) return { started: true };
+    postIssueComment(v.repo, v.key, notStartedBody(formatMarker('blocked', { run }), run));
+    ghText(['issue', 'edit', v.key, '--repo', v.repo, '--add-label', 'needs-decision']);
+    throw new ExitError({ started: false, source: 'posted' });
   },
   version: (argv) => {
     parse(argv);

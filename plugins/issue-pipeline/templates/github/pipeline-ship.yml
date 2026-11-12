@@ -29,6 +29,7 @@ jobs:
       run: ${{ steps.target.outputs.run }}
       prompt: ${{ steps.target.outputs.prompt }}
       concurrency: ${{ steps.target.outputs.concurrency }}
+      key: ${{ steps.target.outputs.key }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,6 +49,7 @@ jobs:
           echo "run=$(echo "$out" | node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(0,"utf8")).run))')" >> "$GITHUB_OUTPUT"
           echo "prompt=$(echo "$out" | node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).prompt || "")')" >> "$GITHUB_OUTPUT"
           echo "concurrency=$(echo "$out" | node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).concurrency || "")')" >> "$GITHUB_OUTPUT"
+          echo "key=$(echo "$out" | node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).key || "")')" >> "$GITHUB_OUTPUT"
 
   ship:
     needs: route
@@ -93,3 +95,12 @@ jobs:
             --max-budget-usd 25
             --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill,Agent,Task,TodoWrite"
             --disallowedTools "Bash(gh pr merge:*),Bash(gh pr review:*),Bash(git push --force:*),Bash(git push -f:*)"
+      # A session that was refused its tools, could not log in or never loaded the skill can still end
+      # as a success. Setup creates the run folder before anything else, so no run folder means no stage ran.
+      - name: Check that the run started
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_PIPELINE_HOME: ${{ runner.temp }}/issue-pipeline
+          KEY: ${{ needs.route.outputs.key }}
+        run: node .issue-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs ship-status --home "$ISSUE_PIPELINE_HOME" --repo ${{ github.repository }} --key "$KEY" --post-missing
