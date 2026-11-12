@@ -22,3 +22,24 @@ export function notStartedBody(marker, run) {
     'Reply here once the cause is fixed to start a new run.',
   ].join('\n');
 }
+
+// Whether this run still holds the issue's lock: the issue carries `pipeline-working` and its newest
+// lock comment is this run's. Every way a run ends releases the lock (the report, a stop, a back-off),
+// so a run that still holds it when the job is over stopped part-way.
+export function holdsLock(run, { labels, comments }) {
+  if (!labels.includes('pipeline-working')) return false;
+  const newest = comments.filter((c) => c.pipeline && c.marker.kind === 'lock').sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0)).at(-1);
+  return newest?.marker.run === run;
+}
+
+// The comment that parks an issue whose run started and then ended with the lock held.
+export function stoppedBody(marker, run) {
+  const log = run.startsWith('http') ? ` The log is at ${run}.` : '';
+  return [
+    marker,
+    '',
+    `The run stopped with the lock held: the session took the lock and ended without a report, a question or a stop comment, so no result was posted.${log} Whatever it committed is still on its branch, if it pushed one.`,
+    '',
+    'The lock is released. Reply here to start a new run.',
+  ].join('\n');
+}

@@ -26,11 +26,9 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
       - run: git remote set-head origin --auto
-      - uses: actions/checkout@v4
-        with:
-          repository: {{PLUGIN_REPO_SLUG}}
-          ref: {{PLUGIN_REF}}
-          path: .issue-pipeline-plugin
+      # Cloned outside the workspace: inside it, the repo's own test runner would collect the plugin's tests.
+      - name: Fetch the pinned plugin
+        run: git -c advice.detachedHead=false clone --quiet --depth 1 --branch {{PLUGIN_REF}} {{PLUGIN_REPO}} "$RUNNER_TEMP/issue-pipeline-plugin"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -47,10 +45,9 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allowed_bots: "claude[bot]"
           prompt: "/issue-pipeline:review ${{ github.event.pull_request.number }} --head ${{ github.event.pull_request.head.sha }}"
-          # The agent loads the pinned checkout above, so its skills, stages and hooks match the CLI it calls.
-          # Verify on the first sandbox run that claude-code-action passes --plugin-dir through.
+          # The agent loads the pinned clone above, so its skills, stages and hooks match the CLI it calls.
           claude_args: |
-            --plugin-dir .issue-pipeline-plugin/{{PLUGIN_SUBDIR}}
+            --plugin-dir ${{ runner.temp }}/issue-pipeline-plugin/{{PLUGIN_SUBDIR}}
             --model claude-fable-5-1
             --effort high
             --max-budget-usd 15
@@ -61,4 +58,4 @@ jobs:
         if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node .issue-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs verdict-status --repo "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --head "${{ github.event.pull_request.head.sha }}" --post-missing
+        run: node "$RUNNER_TEMP/issue-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs" verdict-status --repo "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --head "${{ github.event.pull_request.head.sha }}" --post-missing

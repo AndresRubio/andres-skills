@@ -29,11 +29,9 @@ jobs:
           PR: ${{ inputs.pr }}
         run: case "$PR" in ''|*[!0-9]*) exit 1;; esac
       - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
-        with:
-          repository: {{PLUGIN_REPO_SLUG}}
-          ref: {{PLUGIN_REF}}
-          path: .issue-pipeline-plugin
+      # Cloned outside the workspace: inside it, the repo's own test runner would collect the plugin's tests.
+      - name: Fetch the pinned plugin
+        run: git -c advice.detachedHead=false clone --quiet --depth 1 --branch {{PLUGIN_REF}} {{PLUGIN_REPO}} "$RUNNER_TEMP/issue-pipeline-plugin"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -49,7 +47,7 @@ jobs:
           allowed_bots: "github-actions[bot]"
           prompt: "/issue-pipeline:score ${{ inputs.pr }}"
           claude_args: |
-            --plugin-dir .issue-pipeline-plugin/{{PLUGIN_SUBDIR}}
+            --plugin-dir ${{ runner.temp }}/issue-pipeline-plugin/{{PLUGIN_SUBDIR}}
             --model haiku
             --effort low
             --max-budget-usd 2

@@ -28,11 +28,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/checkout@v4
-        with:
-          repository: {{PLUGIN_REPO_SLUG}}
-          ref: {{PLUGIN_REF}}
-          path: .issue-pipeline-plugin
+      # Cloned outside the workspace: inside it, the repo's own test runner would collect the plugin's tests.
+      - name: Fetch the pinned plugin
+        run: git -c advice.detachedHead=false clone --quiet --depth 1 --branch {{PLUGIN_REF}} {{PLUGIN_REPO}} "$RUNNER_TEMP/issue-pipeline-plugin"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -49,10 +47,10 @@ jobs:
           GH_TOKEN: ${{ secrets.PIPELINE_TOKEN || github.token }}
         run: |
           git remote set-head origin --auto
-          node .issue-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs ready --repo-root . --repo ${{ github.repository }}
+          node "$RUNNER_TEMP/issue-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs" ready --repo-root . --repo ${{ github.repository }}
       # The sweep (spec §8.1): restarts deferred, waiting and crashed issues by dispatching pipeline-ship.
       - name: Sweep deferred and waiting issues
         if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged && startsWith(github.event.pull_request.head.ref, 'pipeline/'))) }}
         env:
           GH_TOKEN: ${{ secrets.PIPELINE_TOKEN || github.token }}
-        run: node .issue-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs sweep --repo-root . --repo ${{ github.repository }}
+        run: node "$RUNNER_TEMP/issue-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs" sweep --repo-root . --repo ${{ github.repository }}

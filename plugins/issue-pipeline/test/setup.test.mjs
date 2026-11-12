@@ -55,7 +55,7 @@ test('CLI setup renders with overrides', () => {
   const r = runCli(['setup', '--repo-root', root, '--plugin-ref', 'issue-pipeline--v9.9.9', '--ci-workflows', 'CI,Lint']);
   assert.equal(r.code, 0, r.stderr);
   const ready = readFileSync(path.join(root, '.github/workflows/pipeline-ready.yml'), 'utf8');
-  assert.match(ready, /ref: issue-pipeline--v9\.9\.9/);
+  assert.match(ready, /clone --quiet --depth 1 --branch issue-pipeline--v9\.9\.9 /);
   assert.match(ready, /workflows: \[CI, Lint, pipeline-review\]/);
   assert.equal(existsSync(path.join(root, '.claude/pipeline.json')), true);
 });

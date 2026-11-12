@@ -87,7 +87,7 @@ After pull request 20 put the allowed tools on `main` of the public sandbox, iss
 - Attempt 1 of run 43175653397 took the lock and ended two minutes later as a success: 37 turns, 0.46 dollars, one permission denial, and no grade, branch or stop comment. It left `pipeline-working` on the issue. The cause is unknown. The action hides the session, and a rerun with debug logging does not show it either.
 - Attempt 2, the same run after `pipeline-working` was removed by hand, went through stages 0 to 10 in 304 seconds: 113 turns, 1.39 dollars by the action's count and 1.18 in `run.json`. The grade was `small-gaps` with two assumptions. The change is one line in `src/list.ts` and three tests, and CI passed.
 - `pipeline-review` ran on `claude-fable-5-1` for 210 seconds (24 turns, 1.94 dollars) and posted `human-decision-needed` with one Important judgment finding: the spec's own criterion "checked by running the app" has no screenshot. The check failed, which is what a verdict other than `accepted` is meant to do.
-- `pipeline-ready` then failed. `gh issue comment 1` was refused with "Resource not accessible by personal access token (addComment)", so the `PIPELINE_TOKEN` has no write access to issues.
+- `pipeline-ready` then failed. `gh issue comment 1` was refused with "Resource not accessible by personal access token (addComment)", so the `PIPELINE_TOKEN` has no write access to issues. The owner has to add read and write on Issues to that token, and the private sandbox to its repository access (item 2 of the first list).
 
 What the run showed about the plugin:
 
@@ -98,6 +98,8 @@ What the run showed about the plugin:
 5. Every pipeline comment starts a `pipeline-ship` run that the route job turns down, four in this run. They cost seconds and no Claude usage.
 6. A scheduled `pipeline-ready` run did appear, at 03:59 UTC, four and a half hours after the merge. Item 10 above was written before it.
 7. The `ship-status` step of version 0.3.1 would not have caught attempt 1, because that session started and then stopped with the lock held. The lock goes stale after `lockTtlHours` (3 hours) and the sweep should then start the issue again. That was not waited for.
+
+Version 0.3.2 answers items 1 and 7. The workflows clone the plugin into `$RUNNER_TEMP/issue-pipeline-plugin`, outside the workspace, with `git clone --depth 1 --branch <tag>` in place of `actions/checkout`, whose `path` has to stay inside the workspace. `ship-status` also asks whether the run still holds the issue's lock when the job is over, and if so posts `blocked`, adds `needs-decision`, removes `pipeline-working` and fails the job. Neither change has run in Actions. Items 2 and 3 are open: the other plugins are still not on the runner, and why the preview command was denied is not known.
 
 Neither results file is written. This was one fixture on one sandbox, and the acceptance tasks in the plans cover more.
 

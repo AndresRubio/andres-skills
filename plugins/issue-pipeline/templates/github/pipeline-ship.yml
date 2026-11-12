@@ -31,11 +31,9 @@ jobs:
       concurrency: ${{ steps.target.outputs.concurrency }}
       key: ${{ steps.target.outputs.key }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: {{PLUGIN_REPO_SLUG}}
-          ref: {{PLUGIN_REF}}
-          path: .issue-pipeline-plugin
+      # Cloned outside the workspace: inside it, the repo's own test runner would collect the plugin's tests.
+      - name: Fetch the pinned plugin
+        run: git -c advice.detachedHead=false clone --quiet --depth 1 --branch {{PLUGIN_REF}} {{PLUGIN_REPO}} "$RUNNER_TEMP/issue-pipeline-plugin"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -44,7 +42,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          out=$(node .issue-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs lane-target --event-file "$GITHUB_EVENT_PATH" --event-name "${{ github.event_name }}" --repo "${{ github.repository }}")
+          out=$(node "$RUNNER_TEMP/issue-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs" lane-target --event-file "$GITHUB_EVENT_PATH" --event-name "${{ github.event_name }}" --repo "${{ github.repository }}")
           echo "$out"
           echo "run=$(echo "$out" | node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(0,"utf8")).run))')" >> "$GITHUB_OUTPUT"
           echo "prompt=$(echo "$out" | node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).prompt || "")')" >> "$GITHUB_OUTPUT"
@@ -64,11 +62,9 @@ jobs:
         with:
           fetch-depth: 0
       - run: git remote set-head origin --auto
-      - uses: actions/checkout@v4
-        with:
-          repository: {{PLUGIN_REPO_SLUG}}
-          ref: {{PLUGIN_REF}}
-          path: .issue-pipeline-plugin
+      # Cloned outside the workspace: inside it, the repo's own test runner would collect the plugin's tests.
+      - name: Fetch the pinned plugin
+        run: git -c advice.detachedHead=false clone --quiet --depth 1 --branch {{PLUGIN_REF}} {{PLUGIN_REPO}} "$RUNNER_TEMP/issue-pipeline-plugin"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -87,20 +83,20 @@ jobs:
           # github.token runs as github-actions[bot], which the action refuses unless it is listed.
           allowed_bots: "claude[bot],github-actions[bot]"
           prompt: ${{ needs.route.outputs.prompt }}
-          # The agent loads the pinned checkout above, so its skills, stages and hooks match the CLI it calls.
-          # Verify on the first sandbox run that claude-code-action passes --plugin-dir through.
+          # The agent loads the pinned clone above, so its skills, stages and hooks match the CLI it calls.
           claude_args: |
-            --plugin-dir .issue-pipeline-plugin/{{PLUGIN_SUBDIR}}
+            --plugin-dir ${{ runner.temp }}/issue-pipeline-plugin/{{PLUGIN_SUBDIR}}
             --effort high
             --max-budget-usd 25
             --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill,Agent,Task,TodoWrite"
             --disallowedTools "Bash(gh pr merge:*),Bash(gh pr review:*),Bash(git push --force:*),Bash(git push -f:*)"
-      # A session that was refused its tools, could not log in or never loaded the skill can still end
-      # as a success. Setup creates the run folder before anything else, so no run folder means no stage ran.
-      - name: Check that the run started
+      # A session can end as a success having done nothing (refused its tools, no login, skill not loaded)
+      # or having taken the lock and stopped. Setup creates the run folder before anything else, and
+      # every proper ending releases the lock, so the CLI looks for both and parks the issue otherwise.
+      - name: Check that the run started and ended properly
         if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_PIPELINE_HOME: ${{ runner.temp }}/issue-pipeline
           KEY: ${{ needs.route.outputs.key }}
-        run: node .issue-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs ship-status --home "$ISSUE_PIPELINE_HOME" --repo ${{ github.repository }} --key "$KEY" --post-missing
+        run: node "$RUNNER_TEMP/issue-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs" ship-status --home "$ISSUE_PIPELINE_HOME" --repo ${{ github.repository }} --key "$KEY" --post-missing

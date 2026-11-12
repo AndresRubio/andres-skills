@@ -14,7 +14,7 @@ test('pipeline-review: job and check are both named pipeline-review; it never ap
   assert.match(t, /prompt: "\/issue-pipeline:review \$\{\{ github\.event\.pull_request\.number \}\} --head \$\{\{ github\.event\.pull_request\.head\.sha \}\}"/);
   assert.match(t, /--model claude-fable-5-1/);
   assert.match(t, /--disallowedTools .*Bash\(gh pr review:\*\)/);
-  assert.match(t, /if: \$\{\{ !cancelled\(\) \}\}\n[\s\S]*?run: node .*pipeline\.mjs verdict-status .* --post-missing/);
+  assert.match(t, /if: \$\{\{ !cancelled\(\) \}\}\n[\s\S]*?run: node .*pipeline\.mjs" verdict-status .* --post-missing/);
   assert.doesNotMatch(t, /always\(\)/);
   assert.match(t, /head\.repo\.full_name == github\.repository/);
   assert.match(t, /ISSUE_PIPELINE_GUARD: '1'/);
@@ -30,7 +30,7 @@ test('pipeline-ready: deterministic, no AI, right triggers and permissions, conc
   assert.match(t, /contents: write\n\s+pull-requests: write\n\s+issues: write/);
   assert.doesNotMatch(t, /claude-code-action/);
   assert.doesNotMatch(t, /CLAUDE_CODE_OAUTH_TOKEN/);
-  assert.match(t, /pipeline\.mjs ready --repo-root \. --repo \$\{\{ github\.repository \}\}$/m);
+  assert.match(t, /pipeline\.mjs" ready --repo-root \. --repo \$\{\{ github\.repository \}\}$/m);
   assert.doesNotMatch(t, /--config-file|pipeline\.mjs config/);
   assert.match(t, /git remote set-head origin --auto/);
   assert.match(t, /GH_TOKEN: \$\{\{ secrets\.PIPELINE_TOKEN \|\| github\.token \}\}/);
@@ -41,7 +41,7 @@ test('pipeline-ship: routes with lane-target, runs the action only when run is t
   assert.match(t, /issues:\n\s+types: \[labeled\]/);
   assert.match(t, /issue_comment:\n\s+types: \[created\]/);
   assert.match(t, /pull_request:\n\s+types: \[labeled\]/);
-  assert.match(t, /pipeline\.mjs lane-target --event-file "\$GITHUB_EVENT_PATH" --event-name "\$\{\{ github\.event_name \}\}" --repo/);
+  assert.match(t, /pipeline\.mjs" lane-target --event-file "\$GITHUB_EVENT_PATH" --event-name "\$\{\{ github\.event_name \}\}" --repo/);
   assert.match(t, /if: needs\.route\.outputs\.run == 'true'/);
   assert.match(t, /prompt: \$\{\{ needs\.route\.outputs\.prompt \}\}/);
   assert.match(t, /ISSUE_PIPELINE_LANE: github/);
@@ -83,13 +83,26 @@ test('pipeline-ready warns when PIPELINE_TOKEN is missing, before deciding, and 
   assert.match(t, /GH_TOKEN: \$\{\{ secrets\.PIPELINE_TOKEN \|\| github\.token \}\}/);
 });
 
-test('the agent loads the pinned plugin checkout with --plugin-dir, never the marketplace HEAD', () => {
-  for (const name of ['pipeline-ship.yml', 'pipeline-review.yml']) {
+// Checked out inside the workspace, the plugin's own tests are collected by the repo's test runner:
+// on the first sandbox run a plain `npm test` failed with 59 files that were not the repo's.
+test('every workflow clones the pinned plugin outside the workspace and calls its CLI from there', () => {
+  const home = '$RUNNER_TEMP/issue-pipeline-plugin';
+  for (const name of ['pipeline-ship.yml', 'pipeline-review.yml', 'pipeline-ready.yml', 'pipeline-score.yml']) {
+    const t = rendered(name);
+    assert.doesNotMatch(t, /\.issue-pipeline-plugin/, name);
+    assert.doesNotMatch(t, /repository: AndresRubio\/andres-skills/, name);
+    assert.ok(t.includes(`run: git -c advice.detachedHead=false clone --quiet --depth 1 --branch ${defaultVars().PLUGIN_REF} https://github.com/AndresRubio/andres-skills.git "${home}"`), name);
+    for (const line of t.split('\n').filter((l) => /pipeline\.mjs/.test(l))) {
+      assert.ok(line.includes(`node "${home}/plugins/issue-pipeline/skills/ship/scripts/pipeline.mjs" `), `${name}: ${line.trim()}`);
+    }
+  }
+});
+
+test('the agent loads the pinned plugin clone with --plugin-dir, never the marketplace HEAD', () => {
+  for (const name of ['pipeline-ship.yml', 'pipeline-review.yml', 'pipeline-score.yml']) {
     const t = rendered(name);
     assert.doesNotMatch(t, /plugin_marketplaces:|^\s+plugins:/m, name);
-    assert.match(t, /claude_args: \|\n\s+--plugin-dir \.issue-pipeline-plugin\/plugins\/issue-pipeline\/\n/, name);
-    assert.match(t, /repository: AndresRubio\/andres-skills\n\s+ref: issue-pipeline--v\d+\.\d+\.\d+\n\s+path: \.issue-pipeline-plugin/, name);
-    assert.match(t, /# Verify on the first sandbox run that claude-code-action passes --plugin-dir through\./, name);
+    assert.match(t, /claude_args: \|\n\s+--plugin-dir \$\{\{ runner\.temp \}\}\/issue-pipeline-plugin\/plugins\/issue-pipeline\/\n/, name);
   }
 });
 
@@ -110,8 +123,9 @@ test('pipeline-ready: the sweep runs on schedule, by hand and on a merged pipeli
   const t = rendered('pipeline-ready.yml');
   assert.match(t, /^  actions: write$/m);
   assert.match(t, /- name: Sweep deferred and waiting issues\n\s+if: \$\{\{ !cancelled\(\) && \(github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch' \|\| \(github\.event_name == 'pull_request' && github\.event\.action == 'closed' && github\.event\.pull_request\.merged && startsWith\(github\.event\.pull_request\.head\.ref, 'pipeline\/'\)\)\) \}\}/);
-  assert.match(t, /pipeline\.mjs sweep --repo-root \. --repo \$\{\{ github\.repository \}\}/);
-  assert.ok(t.indexOf('pipeline.mjs ready') < t.indexOf('pipeline.mjs sweep'), 'the sweep runs after the readiness pass');
+  assert.match(t, /pipeline\.mjs" sweep --repo-root \. --repo \$\{\{ github\.repository \}\}/);
+  const [readyAt, sweepAt] = [t.indexOf('pipeline.mjs" ready'), t.indexOf('pipeline.mjs" sweep')];
+  assert.ok(readyAt !== -1 && readyAt < sweepAt, 'the sweep runs after the readiness pass');
 });
 
 test('pipeline-score: dispatched only, validates its input, haiku at low effort, never merges or pushes', () => {
@@ -199,5 +213,5 @@ test('pipeline-ship checks in code that the session started, against the pipelin
   assert.deepEqual(homes, [homes[0], homes[0]], 'the Claude step and the check name the same home');
   const afterClaude = t.slice(t.indexOf('uses: anthropics/claude-code-action@v1'));
   // It runs when the Claude step failed too: a session that could not log in leaves no run folder either.
-  assert.match(afterClaude, /if: \$\{\{ !cancelled\(\) \}\}\n\s+env:\n\s+GH_TOKEN: \$\{\{ github\.token \}\}\n[\s\S]*?KEY: \$\{\{ needs\.route\.outputs\.key \}\}\n\s+run: node \S*pipeline\.mjs ship-status --home "\$ISSUE_PIPELINE_HOME" --repo \$\{\{ github\.repository \}\} --key "\$KEY" --post-missing$/m);
+  assert.match(afterClaude, /if: \$\{\{ !cancelled\(\) \}\}\n\s+env:\n\s+GH_TOKEN: \$\{\{ github\.token \}\}\n[\s\S]*?KEY: \$\{\{ needs\.route\.outputs\.key \}\}\n\s+run: node "\S*pipeline\.mjs" ship-status --home "\$ISSUE_PIPELINE_HOME" --repo \$\{\{ github\.repository \}\} --key "\$KEY" --post-missing$/m);
 });
