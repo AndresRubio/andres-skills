@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { RELEASING_KINDS } from './runs.mjs';
 
@@ -15,14 +15,19 @@ export function sessionStarted(home) {
 // writes it, as the array of SDK messages, to $RUNNER_TEMP/claude-execution-output.json. Only tool
 // names are read from it, never text, input or output: the last calls the main session made (a
 // subagent's calls carry parent_tool_use_id) and the tools it was refused. A name that is not a
-// plain tool name is dropped, so nothing in the log can shape the comment. null when there is no
-// readable log.
+// plain tool name is dropped, so nothing in the log can shape the comment, and the counts are
+// capped, so nothing in it can make the comment long. null when there is no readable log, or when
+// the file is larger than any real session's: the comment and the label edits come after this,
+// and running out of memory here would skip them.
 const TOOL_NAME = /^[A-Za-z][A-Za-z0-9_.-]{0,79}$/;
 const LAST_CALLS = 6;
-export function sessionTrace(file) {
+const MAX_REFUSED = 12;
+const MAX_LOG_BYTES = 256 * 1024 * 1024;
+export function sessionTrace(file, { maxBytes = MAX_LOG_BYTES } = {}) {
   if (!file || !existsSync(file)) return null;
   let messages;
   try {
+    if (statSync(file).size > maxBytes) return null;
     messages = JSON.parse(readFileSync(file, 'utf8'));
   } catch {
     return null;
@@ -35,7 +40,7 @@ export function sessionTrace(file) {
   const refused = messages
     .filter((m) => m?.type === 'result' && Array.isArray(m.permission_denials))
     .flatMap((m) => m.permission_denials.map((d) => d?.tool_name));
-  return { lastTools: plain(called).slice(-LAST_CALLS), denied: [...new Set(plain(refused))] };
+  return { lastTools: plain(called).slice(-LAST_CALLS), denied: [...new Set(plain(refused))].slice(0, MAX_REFUSED) };
 }
 
 // The trace as lines of a comment: empty when there is nothing to say.

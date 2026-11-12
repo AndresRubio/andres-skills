@@ -230,7 +230,11 @@ So the cause of the two stopped runs is still open between a background dispatch
 
 Nothing in the stages needs background tasks: the preview server is started by the plugin's own `preview-start` command.
 
-What is not shown: none of this has run in Actions. The runner installs Claude Code 2.1.322, five patch versions after the one tested here, and whether `ScheduleWakeup` is offered inside the action's session was not seen. Issue 4 has to run again on 0.3.6. If it stops again, its `blocked` comment will name the tools. Items 2 to 4 were written after the second reading and were not read again.
+What is not shown: none of this has run in Actions. The runner installs Claude Code 2.1.322, five patch versions after the one tested here, and whether `ScheduleWakeup` is offered inside the action's session was not seen. Issue 4 has to run again on 0.3.6. If it stops again, its `blocked` comment will name the tools.
+
+Items 2 to 4 then had a reading of their own, with a fuzz of the log reader and 40 mutations. No blocker. The hard rule as first written forbade endings the skill prescribes (fix mode's last step, a back-off, a stop before the lock) and now names them. The log reader got a limit of twelve refused names and of 256 MB on the file, since the comment and the label edits come after it, and its tests now pin the name filter, the wrong-shaped entries and the marker staying first. That last correction was not read again.
+
+Left open from that reading, for the owner: the workflows take tools away one by one, and a session still has others that are not allowed and would be refused, among them `WebSearch`, `WebFetch`, `PushNotification` and `SendToProject`. `--tools "Bash,Read,Write,Edit,Glob,Grep,Skill,Agent"` gave a local session exactly those tools. That is the stricter design, and it also decides whether a session may search the web, so it was not done here. `TodoWrite`, which the ship workflow allows, is no longer a tool in Claude Code 2.1.317.
 
 ## Conventions this work followed
 

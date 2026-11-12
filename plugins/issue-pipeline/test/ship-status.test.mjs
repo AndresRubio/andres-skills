@@ -63,6 +63,19 @@ test('sessionTrace reads tool names from the session log: the last calls of the 
   assert.deepEqual(sessionTrace(file), { lastTools: ['Read', 'Bash', 'Bash', 'Write', 'Agent', 'Monitor'], denied: ['Monitor', 'WebFetch'] });
   // A name is the only thing taken from a call, and only a plain one: nothing a comment could be built from.
   assert.deepEqual(sessionTrace(executionFile([toolUse('Bash'), toolUse('x`\n**[issue-pipeline]** report'), result('ok', '<b>')])), { lastTools: ['Bash'], denied: ['ok'] });
+  // Each of these could shape a comment if it got through: a code span closed early, a mention, markup.
+  for (const odd of ['a`b', 'a b', 'a*b', '[a]', '@octocat', '<img>', 'a\nb', 'x'.repeat(81), '', 7, null, undefined, {}]) {
+    assert.deepEqual(sessionTrace(executionFile([toolUse(odd), result(odd)])), { lastTools: [], denied: [] }, JSON.stringify(odd));
+  }
+  // Entries of the wrong shape are skipped, never thrown on: the command posts and edits labels after this.
+  const wrong = [null, 7, 'text', [], { type: 'assistant' }, { type: 'assistant', message: null }, { type: 'assistant', message: { content: 'text' } },
+    { type: 'assistant', message: { content: [null, 7, { type: 'tool_use' }] } }, { type: 'result' }, { type: 'result', permission_denials: 'no' },
+    { type: 'result', permission_denials: [null, 7, {}] }, toolUse('Bash'), result('Monitor')];
+  assert.deepEqual(sessionTrace(executionFile(wrong)), { lastTools: ['Bash'], denied: ['Monitor'] });
+  // A log cannot make the comment long: twelve refused names at most, and a file over the size limit is not read.
+  const many = Array.from({ length: 40 }, (_, i) => `Tool${i}`);
+  assert.equal(sessionTrace(executionFile([result(...many)])).denied.length, 12);
+  assert.equal(sessionTrace(executionFile([toolUse('Bash')]), { maxBytes: 10 }), null);
   assert.equal(sessionTrace(path.join(tempDir('ship-status-log-'), 'missing.json')), null);
   assert.equal(sessionTrace(executionFile('not json')), null);
   assert.equal(sessionTrace(executionFile({ type: 'result' })), null);
@@ -171,9 +184,12 @@ test('CLI ship-status --post-missing says in its comment which tools the stopped
   const routes = { [COMMENTS]: [[comment('lock', RUN, 11)]], [LABELS]: labels('pipeline', 'pipeline-working'), [POST]: 'url', [PARK]: 'url', [UNLOCK]: 'url' };
   const { r, body } = status(STARTED(), routes, { executionFile: file });
   assert.equal(r.code, 1, r.stderr);
-  assert.match(body(), /last tool calls were `Bash`, `Agent`/);
-  assert.match(body(), /refused `Monitor`/);
+  assert.match(body(), /\n\nFrom the session's log, tool names only: its last tool calls were `Bash`, `Agent`, and it was refused `Monitor`\.\n\nThe lock is released/);
+  assert.equal(body().indexOf('**[issue-pipeline]** blocked'), 0, 'the marker stays first');
   assert.doesNotMatch(body(), /secret|\.env|last words/);
+  // A log with no tool call and no refusal adds nothing.
+  const quiet = status(STARTED(), routes, { executionFile: executionFile([{ type: 'system', subtype: 'init' }, result()]) });
+  assert.doesNotMatch(quiet.body(), /session's log/);
   // No log, no line: the comment is the one from before.
   const plain = status(STARTED(), routes);
   assert.doesNotMatch(plain.body(), /tool calls/);
@@ -183,9 +199,8 @@ test('CLI ship-status --post-missing names the refused tools of a session that n
   const file = executionFile([toolUse('Skill'), result('Skill')]);
   const { r, body } = status(EMPTY(), { [COMMENTS]: [[]], [LABELS]: labels('pipeline'), [POST]: 'url', [PARK]: 'url' }, { executionFile: file });
   assert.equal(r.code, 1, r.stderr);
-  assert.match(body(), /did not start/);
-  assert.match(body(), /last tool calls were `Skill`/);
-  assert.match(body(), /refused `Skill`/);
+  assert.equal(body().indexOf('**[issue-pipeline]** blocked'), 0, 'the marker stays first');
+  assert.match(body(), /did not start[^\n]*\n\nFrom the session's log, tool names only: its last tool calls were `Skill`, and it was refused `Skill`\.\n\nReply here once/);
 });
 
 test('CLI ship-status --post-missing leaves alone a lock that an earlier attempt of this run took', () => {
