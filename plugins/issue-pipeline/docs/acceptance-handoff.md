@@ -287,7 +287,16 @@ A second reader attacked that reasoning before the tag and found it to hold for 
 
 Other changes in that version of the action were read for their effect here. The action now starts sessions in auto mode by default, except when `allowed_bots` is set, and the three workflows set it, so their permission mode is unchanged. The action also restores `GITHUB_ENV`, `GITHUB_PATH` and git's config files after the session; the ship runs above ran on the new version and their last step still read `ATTEMPT_STARTED`.
 
-What is not shown: 0.3.7 has not run in Actions, and a fix run started by the `pipeline-fix` label has never been seen there on any version.
+One run in Actions bears on this without the 0.3.7 workflows being merged. The action applies its list only when the pull request's author has no write access, so the commit of pull request 28 was put on a second branch, `pipeline/2-review-check`, and opened as pull request 32 by the owner's account, after its code had been read (a sort function, its use, and tests that touch nothing outside themselves). Same commit, same 0.3.6 workflow, same version of the action (`8a29bc6f`) and of Claude Code:
+
+| Pull request | Author | Review run | Denials | Turns | Cost | Verdict |
+|---|---|---|---|---|---|---|
+| 28 | a bot | 43310732822 | 8 | 23 | 1.41 dollars | `human-decision-needed` |
+| 32 | the owner | 43317399332 | 0 | 19 | 1.16 dollars | `accepted`, one minor finding |
+
+So the list of denied commands was the whole cause, and with it out of the way the review works on the action's new version. Pull request 32 was closed and its branch deleted. One side effect: checks belong to a commit, so the commit of pull request 28 now also carries the green `pipeline-review` check of that run, next to its own red one. The verdict comment on pull request 28 still says `human-decision-needed`, and that comment is what `pipeline-ready` reads.
+
+What is not shown: the 0.3.7 workflows themselves have not run in Actions, so that the input `restrict_untrusted_prs: "false"` empties the list is known from the action's source and not from a run. A fix run started by the `pipeline-fix` label has never been seen in Actions on any version.
 
 Left for the owner: the workflows follow the floating tag `@v1`, which is how this change arrived in the middle of a day of runs. Pinning the action to a commit would stop that and would mean updating it by hand.
 
