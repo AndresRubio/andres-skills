@@ -80,6 +80,10 @@ jobs:
           ISSUE_PIPELINE_GUARD: '1'
           CI: 'true'
           ISSUE_PIPELINE_HOME: ${{ runner.temp }}/issue-pipeline
+          # claude-code-action ends the run at the session's first result message, and a session that
+          # leaves a subagent or a command in the background ends its turn to wait for it. Off, so that
+          # every dispatch returns inside its turn.
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # claude-code-action takes a comma-separated list. A sweep dispatch made with the default

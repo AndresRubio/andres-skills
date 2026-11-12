@@ -204,6 +204,23 @@ The timing test of item 11 in the first list failed twice more while this was be
 
 The two forced failures above ran on 0.3.4. The never-started path now goes through the new rule, which gives the same result for the labels issue 13 had. 0.3.5 has not run in Actions.
 
+## Why sessions stop after the lock, and version 0.3.6, 2026-11-12
+
+The 0.3.5 workflows went onto `main` of the public sandbox with pull request 26, and issue 4 ("Make the whole app bilingual", the fixture that should be split) ran on them. The session took the lock, ran for 66 seconds (27 turns, 0.35 dollars, one permission denial) and ended as a success with no grade, no split and no branch. The check at the end of the job caught it without being forced: it printed `{"started":true,"finished":false,"source":"posted"}`, posted the `blocked` comment, added `needs-decision`, removed `pipeline-working` and failed the job (run 43256092712). The first attempt on issue 1 had ended the same way, so two of the eight real runs stopped like this.
+
+The cause, as far as it could be shown outside Actions:
+
+1. `claude-code-action` stops reading the session at its first result message. Its source says so in `base-action/src/run-claude-sdk.ts`: it breaks out of the loop on `message.type === "result"`, on the grounds that nothing follows a result.
+2. A headless Claude Code session that leaves work in the background does send more after a result. A local `claude -p` (version 2.1.317) told to dispatch one subagent and wait for it produced three result messages. The first read "The subagent has been resumed and is finishing the command. I'm waiting for its report." and the answer came in the third.
+3. So a session that ends its turn to wait for a subagent or a background command is cut off there by the action. Stage 2 is the first stage that dispatches a subagent, and both stopped runs ended soon after taking the lock, before any grade.
+4. The same local session with `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` in its environment sent one result message, with the subagent's answer in it.
+
+Version 0.3.6 sets that variable on the Claude step of `pipeline-ship`, `pipeline-review` and `pipeline-score`. The action hands its whole environment to the session (`parse-sdk-options.ts` copies `process.env`), so a step-level `env` reaches Claude Code. Nothing in the stages needs background tasks: the preview server is started by the plugin's own `preview-start` command.
+
+What is not shown: the runner's sessions were never seen, since the action hides them, so that the two stopped runs were waiting on a background task is inferred from the above. The runner installs Claude Code 2.1.322, five patch versions after the one tested here. Issue 4 has to run again on 0.3.6 before this counts as fixed, and 0.3.6 was not read by a second reader.
+
+An idea for later, which needs the owner's view because it would put text from a hidden session on the issue: the action writes the session to `$RUNNER_TEMP/claude-execution-output.json`, and `ship-status` could quote the session's last message and the names of the tools it was denied in its `blocked` comment. That would have named this cause on the first stopped run.
+
 ## Conventions this work followed
 
 Git identity `AndresRubio <2109109+AndresRubio@users.noreply.github.com>`. On this machine the default SSH key for `github.com` belongs to another account; AndresRubio repositories push through the `github.com-personal` alias, which the clones already use. Commit messages and pull request bodies carry no attribution lines. Pull requests are merged by the owner, since the app's permission classifier refuses a merge from a session. Commit message files go in the session scratchpad under a unique name, and their first line is checked in a call of its own before the commit, because two hooks in this repository can refuse a whole Bash command and a retry then commits a stale file.

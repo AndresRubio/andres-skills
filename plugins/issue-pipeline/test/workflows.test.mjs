@@ -206,6 +206,18 @@ test('each workflow passes Claude whole flags, the tools its skill needs and the
   }
 });
 
+test('every Claude step runs with background tasks off, so the session cannot end while it waits', () => {
+  // claude-code-action stops reading at the first result message. A headless session that leaves a
+  // subagent or a command in the background ends its turn to wait, which sends a result, and the
+  // action ends the run there: the ship run on issue 4 of the sandbox stopped that way with the
+  // lock held. With background tasks off, a subagent returns inside the turn that dispatched it.
+  for (const name of ['pipeline-ship.yml', 'pipeline-review.yml', 'pipeline-score.yml']) {
+    const step = rendered(name).match(/uses: anthropics\/claude-code-action@v1\n        env:\n((?:          .*\n)+?)        with:/);
+    assert.ok(step, `${name}: the Claude step has an env block`);
+    assert.match(step[1], /^          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'$/m, name);
+  }
+});
+
 test('pipeline-ship checks in code that the session started, against the pipeline home the Claude step used', () => {
   const t = rendered('pipeline-ship.yml');
   assert.match(t, /^      key: \$\{\{ steps\.target\.outputs\.key \}\}$/m);
