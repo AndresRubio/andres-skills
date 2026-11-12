@@ -103,6 +103,24 @@ Version 0.3.2 answers items 1 and 7. The workflows clone the plugin into `$RUNNE
 
 Neither results file is written. This was one fixture on one sandbox, and the acceptance tasks in the plans cover more.
 
+## Second run, on version 0.3.2, 2026-11-12
+
+Both sandboxes took the 0.3.2 workflows (pull request 22 on the public one, 21 on the private one), merged after a review by a second reader whose findings are a comment on pull request 22. Issue 8 ("Typo in the page title") then ran on the public sandbox and passed on its first attempt.
+
+- `pipeline-ship` took 189 seconds and 0.77 dollars: lock, grade `ready`, report, and pull request 23 with `index.html` and a new `src/title.test.ts`.
+- The plugin was cloned outside the workspace and plain `npm test` passed, with no folder excluded. progress.md lists no known issues.
+- The preview started this time and a screenshot is committed under `docs/pipeline/8/screenshots/`.
+- The new last step printed `{"started":true}` and passed, so it does not fire on a run that ends properly. Its two failure paths have still not been seen in Actions.
+- `pipeline-review` took 75 seconds and 1.01 dollars and posted `accepted` with no findings. The check is green.
+- `pipeline-ready` failed again on the token: "Resource not accessible by personal access token (addComment)", for pull request 23 and for issue 1. So pull request 23 has an accepted verdict and green checks and no `ready` label. This is the only link of the chain that has not worked, and it waits on the owner giving the token write access to issues and pull requests.
+
+Open from the review of 0.3.2, none fixed yet:
+
+1. Every attempt of an Actions run shares one run identity (`marker.mjs` uses the run id without the attempt), so `ship-status` counts an earlier attempt's comments as its own.
+2. `if: ${{ !cancelled() }}` skips `ship-status` when the job reaches its 150-minute timeout, the case with a lock most likely held.
+3. The tests of `ship-status` pass with its two `gh issue edit` calls deleted. The fake `gh` records no calls.
+4. A fix run keyed `PR-<n>` (started by the `pipeline-fix` label) gets no lock check.
+
 ## Conventions this work followed
 
 Git identity `AndresRubio <2109109+AndresRubio@users.noreply.github.com>`. On this machine the default SSH key for `github.com` belongs to another account; AndresRubio repositories push through the `github.com-personal` alias, which the clones already use. Commit messages and pull request bodies carry no attribution lines. Pull requests are merged by the owner, since the app's permission classifier refuses a merge from a session. Commit message files go in the session scratchpad under a unique name, and their first line is checked in a call of its own before the commit, because two hooks in this repository can refuse a whole Bash command and a retry then commits a stale file.
