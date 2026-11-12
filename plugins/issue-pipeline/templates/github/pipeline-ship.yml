@@ -58,6 +58,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
+      # Every attempt of a run shares one run link, so the last step tells this attempt apart by its start time.
+      - name: Note when this attempt started
+        run: echo "ATTEMPT_STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -94,9 +97,10 @@ jobs:
       # or having taken the lock and stopped. Setup creates the run folder before anything else, and
       # every proper ending releases the lock, so the CLI looks for both and parks the issue otherwise.
       - name: Check that the run started and ended properly
-        if: ${{ !cancelled() }}
+        # Also after a timeout or a cancel: a run that reaches the time limit is the one most likely to hold the lock.
+        if: ${{ always() }}
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_PIPELINE_HOME: ${{ runner.temp }}/issue-pipeline
           KEY: ${{ needs.route.outputs.key }}
-        run: node "$RUNNER_TEMP/issue-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs" ship-status --home "$ISSUE_PIPELINE_HOME" --repo ${{ github.repository }} --key "$KEY" --post-missing
+        run: node "$RUNNER_TEMP/issue-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs" ship-status --home "$ISSUE_PIPELINE_HOME" --repo ${{ github.repository }} --key "$KEY" --since "$ATTEMPT_STARTED" --post-missing

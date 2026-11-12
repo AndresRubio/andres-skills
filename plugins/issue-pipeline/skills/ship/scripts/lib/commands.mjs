@@ -21,7 +21,7 @@ import { STAGE_POLICY, stageMark, readStages, stageTimings, loadUsage, buildRun,
 import { runReady } from './ready-run.mjs';
 import { runSweep, realSweepDeps } from './sweep-run.mjs';
 import { laneTarget } from './lane.mjs';
-import { sessionStarted, notStartedBody, holdsLock, stoppedBody } from './ship-status.mjs';
+import { sessionStarted, notStartedBody, attemptComments, lockLeft, stoppedBody } from './ship-status.mjs';
 import { defaultVars, installFiles } from './setup.mjs';
 import { formatScoreBody } from './score.mjs';
 import { hydrate } from './hydrate-run.mjs';
@@ -59,6 +59,14 @@ function readVerdictFile(file) {
   try { data = JSON.parse(text); } catch { data = null; }
   if (data === null || typeof data !== 'object' || Array.isArray(data)) throw new Error(`${file} is not a JSON object with a verdict`);
   return data.verdict ?? null;
+}
+
+// The issue a fix run keyed PR-<n> locks: the one its pull request's pipeline/<N>-… branch names.
+// Null for a pull request that is not on a pipeline branch of a numbered issue.
+function issueBehindPr(repo, key) {
+  let issue;
+  try { issue = keyFromBranch(fetchPr(repo, key.slice('PR-'.length)).headRefName); } catch { return null; }
+  return /^\d+$/.test(issue) ? issue : null;
 }
 
 // A full ISO 8601 date or date-time. Date.parse alone takes '5' or '2026'.
@@ -180,40 +188,53 @@ export const COMMANDS = {
     }
     throw new ExitError({ verdict: 'human-decision-needed', source: 'missing' });
   },
-  // After the Claude step of pipeline-ship: did the session start, and did it end properly? A session
+  // After the Claude step of pipeline-ship: did this attempt start, and did it end properly? A session
   // can end as a success having done nothing, or having taken the lock and stopped. With
   // --post-missing, either case gets a `blocked` comment and `needs-decision` on the issue and exit 1,
-  // so the owner hears about it and the sweep stops starting the issue again; a held lock is released
-  // too. A fix run keyed by its pull request has no issue to park and nothing sweeps it, so only its
-  // run folder is checked.
+  // so the owner hears about it and the sweep stops starting the issue again; a lock this attempt
+  // left behind is released too. --since is when this attempt began: an earlier attempt of the same
+  // Actions run carries the same run link and must not stand in for this one. A fix run is keyed by
+  // its pull request, and the issue it locks is the one its pipeline/<N>-… branch names.
   'ship-status': (argv) => {
-    const v = parse(argv, { home: { type: 'string' }, repo: { type: 'string' }, key: { type: 'string' }, 'post-missing': { type: 'boolean' } });
+    const v = parse(argv, { home: { type: 'string' }, repo: { type: 'string' }, key: { type: 'string' }, since: { type: 'string' }, 'post-missing': { type: 'boolean' } });
     required(v, 'home', 'key');
     if (!KEY_RE.test(v.key)) throw new UsageError('--key must be a run key: an issue number or PR-<n>');
+    if (v.since !== undefined && !isIsoDate(v.since)) throw new UsageError('--since must be an ISO date-time');
     const folder = sessionStarted(v.home);
-    if (!v['post-missing'] || !/^\d+$/.test(v.key)) {
+    const folderOnly = () => {
       if (!folder) throw new ExitError({ started: false, source: 'missing' });
       return { started: true };
-    }
+    };
+    if (!v['post-missing']) return folderOnly();
     required(v, 'repo');
     if (!isRepoSlug(v.repo)) throw new UsageError(`--repo must be owner/name, got ${JSON.stringify(v.repo)}`);
+    const issue = /^\d+$/.test(v.key) ? v.key : issueBehindPr(v.repo, v.key);
+    if (!issue) return folderOnly();
     const run = defaultRun();
-    const comments = fetchPrComments(v.repo, v.key);
+    const comments = fetchPrComments(v.repo, issue);
+    const labels = ghJson(['issue', 'view', issue, '--repo', v.repo, '--json', 'labels']).labels.map((l) => l.name);
+    const edit = (flag, label) => ghText(['issue', 'edit', issue, '--repo', v.repo, flag, label]);
+    // What the stop procedure does in automatic mode: the comment first, then the labels.
     const park = (body) => {
-      postIssueComment(v.repo, v.key, body);
-      ghText(['issue', 'edit', v.key, '--repo', v.repo, '--add-label', 'needs-decision']);
+      postIssueComment(v.repo, issue, body);
+      edit('--add-label', 'needs-decision');
+      if (labels.includes('pipeline-go')) edit('--remove-label', 'pipeline-go');
     };
-    // The run folder is looked for where the workflow says the home is. A run that commented on the
-    // issue started, wherever its folder went, so it is never told that it did not.
-    if (!folder && !comments.some((c) => c.pipeline && c.marker.run === run)) {
+    // The run folder is looked for where the workflow says the home is. An attempt that commented on
+    // the issue started, wherever its folder went, so it is never told that it did not.
+    if (!folder && attemptComments(run, comments, v.since).length === 0) {
       park(notStartedBody(formatMarker('blocked', { run }), run));
       throw new ExitError({ started: false, source: 'posted' });
     }
-    const labels = ghJson(['issue', 'view', v.key, '--repo', v.repo, '--json', 'labels']).labels.map((l) => l.name);
-    if (holdsLock(run, { labels, comments })) {
+    const left = lockLeft(run, { labels, comments, since: v.since });
+    if (left === 'held') {
       park(stoppedBody(formatMarker('blocked', { run }), run));
-      ghText(['issue', 'edit', v.key, '--repo', v.repo, '--remove-label', 'pipeline-working']);
+      edit('--remove-label', 'pipeline-working');
       throw new ExitError({ started: true, finished: false, source: 'posted' });
+    }
+    if (left === 'reported') {
+      edit('--remove-label', 'pipeline-working');
+      return { started: true, unlocked: true };
     }
     return { started: true };
   },

@@ -2,11 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { sessionStarted, holdsLock } from '../skills/ship/scripts/lib/ship-status.mjs';
+import { sessionStarted, lockLeft } from '../skills/ship/scripts/lib/ship-status.mjs';
 import { parseMarker } from '../skills/ship/scripts/lib/marker.mjs';
-import { normalizeComments } from '../skills/ship/scripts/lib/github.mjs';
+import { normalizeComments, PR_FIELDS } from '../skills/ship/scripts/lib/github.mjs';
 import { runCli } from './helpers/cli.mjs';
-import { fakeGh } from './helpers/fake-gh.mjs';
+import { fakeGh, ghCalls } from './helpers/fake-gh.mjs';
 import { tempDir } from './helpers/git.mjs';
 
 const REPO = 'o/r';
@@ -15,13 +15,17 @@ const LABELS = `issue view 7 --repo ${REPO} --json labels`;
 const POST = `issue comment 7 --repo ${REPO} --body-file BODY`;
 const PARK = `issue edit 7 --repo ${REPO} --add-label needs-decision`;
 const UNLOCK = `issue edit 7 --repo ${REPO} --remove-label pipeline-working`;
+const NO_GO = `issue edit 7 --repo ${REPO} --remove-label pipeline-go`;
+const PR_VIEW = `pr view 12 --repo ${REPO} --json ${PR_FIELDS}`;
 const ACTIONS = { GITHUB_RUN_ID: '99', GITHUB_REPOSITORY: REPO, GITHUB_SERVER_URL: 'https://github.com' };
 const RUN = 'https://github.com/o/r/actions/runs/99';
 const OTHER = 'https://github.com/o/r/actions/runs/98';
+// This attempt began at minute 10. Comments are placed by their minute.
+const SINCE = '2026-11-12T00:10:00Z';
+const at = (minute) => new Date(Date.UTC(2026, 10, 12, 0, minute)).toISOString().replace('.000Z', 'Z');
 
-let clock = 0;
-// A pipeline comment as the API returns it, each one a minute after the last.
-const comment = (kind, run) => ({ id: ++clock, user: { login: 'claude[bot]' }, author_association: 'NONE', body: `**[issue-pipeline]** ${kind} · 2026-11-12T00:00:00Z · ${run}\n\ntext`, created_at: new Date(Date.UTC(2026, 10, 12, 0, clock)).toISOString() });
+// A pipeline comment as the API returns it.
+const comment = (kind, run, minute) => ({ id: minute, user: { login: 'claude[bot]' }, author_association: 'NONE', body: `**[issue-pipeline]** ${kind} · ${at(minute)} · ${run}\n\ntext`, created_at: at(minute) });
 const labels = (...names) => ({ labels: names.map((name) => ({ name })) });
 
 // A pipeline home as Setup leaves it: <home>/runs/run-XXXXXX.
@@ -30,89 +34,137 @@ function homeWith(...entries) {
   for (const entry of entries) mkdirSync(path.join(home, entry), { recursive: true });
   return home;
 }
+const STARTED = () => homeWith('runs/run-a1B2c3');
+const EMPTY = () => homeWith('runs');
 
-const status = (home, routes, key = '7') => {
+function status(home, routes, { key = '7', since = SINCE } = {}) {
   const dir = fakeGh(routes);
-  const r = runCli(['ship-status', '--home', home, '--repo', REPO, '--key', key, '--post-missing'], { env: { PATH: `${dir}:${process.env.PATH}`, ISSUE_PIPELINE_BODY_FILE: 'BODY', ...ACTIONS }, cwd: dir });
-  return { r, body: () => readFileSync(path.join(dir, 'BODY'), 'utf8') };
-};
+  const r = runCli(['ship-status', '--home', home, '--repo', REPO, '--key', key, '--since', since, '--post-missing'], { env: { PATH: `${dir}:${process.env.PATH}`, ISSUE_PIPELINE_BODY_FILE: 'BODY', ...ACTIONS }, cwd: dir });
+  return { r, calls: () => ghCalls(dir), body: () => readFileSync(path.join(dir, 'BODY'), 'utf8') };
+}
 
 test('sessionStarted is true only when Setup left a run folder under the pipeline home', () => {
   assert.equal(sessionStarted(path.join(tempDir('ship-status-'), 'never-made')), false);
   assert.equal(sessionStarted(homeWith()), false);
-  assert.equal(sessionStarted(homeWith('runs')), false);
+  assert.equal(sessionStarted(EMPTY()), false);
   assert.equal(sessionStarted(homeWith('runs/review-a1B2c3')), false, 'a review run folder is not a ship run');
-  const fileOnly = homeWith('runs');
+  const fileOnly = EMPTY();
   writeFileSync(path.join(fileOnly, 'runs', 'run-notadir'), '');
   assert.equal(sessionStarted(fileOnly), false, 'a file named like a run folder does not count');
-  assert.equal(sessionStarted(homeWith('runs/run-a1B2c3')), true);
+  assert.equal(sessionStarted(STARTED()), true);
 });
 
-test('holdsLock is true only while the issue is locked and its newest lock comment is this run\'s', () => {
-  const mine = normalizeComments([comment('lock', RUN)]);
-  assert.equal(holdsLock(RUN, { labels: ['pipeline', 'pipeline-working'], comments: mine }), true);
-  assert.equal(holdsLock(RUN, { labels: ['pipeline'], comments: mine }), false, 'the lock was released');
-  const taken = normalizeComments([comment('lock', RUN), comment('report', RUN), comment('lock', OTHER)]);
-  assert.equal(holdsLock(RUN, { labels: ['pipeline', 'pipeline-working'], comments: taken }), false, 'a later run holds it');
-  assert.equal(holdsLock(RUN, { labels: ['pipeline-working'], comments: [] }), false, 'no lock comment at all');
+test('lockLeft says how this attempt left the lock: free, held, or reported with the label still on', () => {
+  const left = (names, list, opts = { since: SINCE }) => lockLeft(RUN, { labels: names, comments: normalizeComments(list), since: opts.since });
+  const locked = ['pipeline', 'pipeline-working'];
+  assert.equal(left(locked, [comment('lock', RUN, 11)]), 'held');
+  assert.equal(left(['pipeline'], [comment('lock', RUN, 11)]), 'free', 'the lock was released');
+  assert.equal(left(locked, [comment('lock', RUN, 11), comment('report', RUN, 12), comment('lock', OTHER, 13)]), 'free', 'a later run holds it');
+  assert.equal(left(locked, []), 'free', 'no lock comment at all');
+  assert.equal(left(locked, [comment('lock', RUN, 5)]), 'free', 'an earlier attempt of this run took it');
+  assert.equal(left(locked, [comment('lock', RUN, 5)], {}), 'held', 'without a start time every attempt counts');
+  assert.equal(left(locked, [comment('lock', RUN, 11), comment('report', RUN, 12)]), 'reported');
+  assert.equal(left(locked, [comment('lock', RUN, 11), comment('grade', RUN, 12)]), 'held', 'a grade does not end a run');
 });
 
-test('CLI ship-status exits 0 for a session that started and released its lock', () => {
-  const { r } = status(homeWith('runs/run-a1B2c3'), { [COMMENTS]: [[comment('lock', RUN), comment('report', RUN)]], [LABELS]: labels('pipeline') });
+test('CLI ship-status exits 0 for a session that started and released its lock, and changes nothing', () => {
+  const { r, calls } = status(STARTED(), { [COMMENTS]: [[comment('lock', RUN, 11), comment('report', RUN, 12)]], [LABELS]: labels('pipeline') });
   assert.equal(r.code, 0, r.stderr);
   assert.deepEqual(r.json(), { started: true });
+  assert.deepEqual(calls(), [COMMENTS, LABELS]);
 });
 
 test('CLI ship-status without --post-missing looks only at the run folder', () => {
-  const r = runCli(['ship-status', '--home', homeWith('runs'), '--key', '7']);
+  const r = runCli(['ship-status', '--home', EMPTY(), '--key', '7']);
   assert.equal(r.code, 1);
   assert.deepEqual(r.json(), { started: false, source: 'missing' });
-  const ok = runCli(['ship-status', '--home', homeWith('runs/run-a1B2c3'), '--key', '7']);
+  const ok = runCli(['ship-status', '--home', STARTED(), '--key', '7']);
   assert.equal(ok.code, 0, ok.stderr);
   assert.deepEqual(ok.json(), { started: true });
 });
 
 test('CLI ship-status --post-missing tells the issue the run did not start, parks it, and still exits 1', () => {
-  // An earlier run's comment does not count as this run's.
-  const { r, body } = status(homeWith('runs'), { [COMMENTS]: [[comment('lock', OTHER), comment('report', OTHER)]], [POST]: 'url', [PARK]: 'url' });
+  // An earlier run's comments do not count as this run's.
+  const { r, calls, body } = status(EMPTY(), { [COMMENTS]: [[comment('lock', OTHER, 11), comment('report', OTHER, 12)]], [LABELS]: labels('pipeline'), [POST]: 'url', [PARK]: 'url' });
   assert.equal(r.code, 1, r.stderr);
   assert.deepEqual(r.json(), { started: false, source: 'posted' });
+  assert.deepEqual(calls(), [COMMENTS, LABELS, POST, PARK]);
   assert.deepEqual({ kind: parseMarker(body()).kind, run: parseMarker(body()).run }, { kind: 'blocked', run: RUN });
   assert.match(body(), /did not start/);
   assert.match(body(), /https:\/\/github\.com\/o\/r\/actions\/runs\/99/);
 });
 
-test('CLI ship-status --post-missing counts a run that commented as started, wherever its run folder went', () => {
-  const { r } = status(homeWith('runs'), { [COMMENTS]: [[comment('lock', RUN), comment('report', RUN)]], [LABELS]: labels('pipeline') });
-  assert.equal(r.code, 0, r.stderr);
-  assert.deepEqual(r.json(), { started: true });
+test('CLI ship-status --post-missing does not let an earlier attempt of the same run stand in for this one', () => {
+  // Attempt 1 ran to its report. Attempt 2, this one, began later and never reached Setup.
+  const { r, calls } = status(EMPTY(), { [COMMENTS]: [[comment('lock', RUN, 3), comment('report', RUN, 5)]], [LABELS]: labels('pipeline'), [POST]: 'url', [PARK]: 'url' });
+  assert.equal(r.code, 1, r.stderr);
+  assert.deepEqual(r.json(), { started: false, source: 'posted' });
+  assert.deepEqual(calls(), [COMMENTS, LABELS, POST, PARK]);
 });
 
-test('CLI ship-status --post-missing parks and unlocks an issue whose run stopped with the lock held', () => {
-  const { r, body } = status(homeWith('runs/run-a1B2c3'), { [COMMENTS]: [[comment('lock', RUN)]], [LABELS]: labels('bug', 'pipeline', 'pipeline-working'), [POST]: 'url', [PARK]: 'url', [UNLOCK]: 'url' });
+test('CLI ship-status --post-missing counts an attempt that commented as started, wherever its run folder went', () => {
+  const { r, calls } = status(EMPTY(), { [COMMENTS]: [[comment('lock', RUN, 11), comment('report', RUN, 12)]], [LABELS]: labels('pipeline') });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(r.json(), { started: true });
+  assert.deepEqual(calls(), [COMMENTS, LABELS]);
+});
+
+test('CLI ship-status --post-missing parks and unlocks an issue whose attempt stopped with the lock held', () => {
+  const { r, calls, body } = status(STARTED(), { [COMMENTS]: [[comment('lock', RUN, 11)]], [LABELS]: labels('bug', 'pipeline', 'pipeline-working', 'pipeline-go'), [POST]: 'url', [PARK]: 'url', [NO_GO]: 'url', [UNLOCK]: 'url' });
   assert.equal(r.code, 1, r.stderr);
   assert.deepEqual(r.json(), { started: true, finished: false, source: 'posted' });
+  // The comment goes first, as in the stop procedure, and pipeline-go goes with the lock.
+  assert.deepEqual(calls(), [COMMENTS, LABELS, POST, PARK, NO_GO, UNLOCK]);
   assert.deepEqual({ kind: parseMarker(body()).kind, run: parseMarker(body()).run }, { kind: 'blocked', run: RUN });
   assert.match(body(), /stopped with the lock held/);
 });
 
-test('CLI ship-status --post-missing leaves a lock that a later run holds', () => {
-  const { r } = status(homeWith('runs/run-a1B2c3'), { [COMMENTS]: [[comment('lock', RUN), comment('report', RUN), comment('lock', OTHER)]], [LABELS]: labels('pipeline', 'pipeline-working') });
+test('CLI ship-status --post-missing leaves alone a lock that an earlier attempt of this run took', () => {
+  // Attempt 1 died holding the lock. Attempt 2 stopped at stage 0 behind it and changed nothing.
+  const { r, calls } = status(STARTED(), { [COMMENTS]: [[comment('lock', RUN, 3)]], [LABELS]: labels('pipeline', 'pipeline-working') });
   assert.equal(r.code, 0, r.stderr);
   assert.deepEqual(r.json(), { started: true });
+  assert.deepEqual(calls(), [COMMENTS, LABELS]);
 });
 
-test('CLI ship-status --post-missing posts nothing for a fix run keyed by its pull request', () => {
-  const { r } = status(homeWith('runs'), {}, 'PR-7');
+test('CLI ship-status --post-missing only unlocks when the attempt reported and left the label on', () => {
+  const { r, calls } = status(STARTED(), { [COMMENTS]: [[comment('lock', RUN, 11), comment('report', RUN, 12)]], [LABELS]: labels('pipeline', 'pipeline-working'), [UNLOCK]: 'url' });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(r.json(), { started: true, unlocked: true });
+  assert.deepEqual(calls(), [COMMENTS, LABELS, UNLOCK]);
+});
+
+test('CLI ship-status --post-missing leaves a lock that a later run holds', () => {
+  const { r, calls } = status(STARTED(), { [COMMENTS]: [[comment('lock', RUN, 11), comment('report', RUN, 12), comment('lock', OTHER, 13)]], [LABELS]: labels('pipeline', 'pipeline-working') });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(r.json(), { started: true });
+  assert.deepEqual(calls(), [COMMENTS, LABELS]);
+});
+
+test('CLI ship-status --post-missing checks the issue behind a fix run keyed by its pull request', () => {
+  const pr = { number: 12, headRefName: 'pipeline/7-wrong-month', labels: [] };
+  const { r, calls } = status(STARTED(), { [PR_VIEW]: pr, [COMMENTS]: [[comment('lock', RUN, 11)]], [LABELS]: labels('pipeline', 'pipeline-working'), [POST]: 'url', [PARK]: 'url', [UNLOCK]: 'url' }, { key: 'PR-12' });
   assert.equal(r.code, 1, r.stderr);
-  assert.deepEqual(r.json(), { started: false, source: 'missing' });
-  const started = status(homeWith('runs/run-a1B2c3'), {}, 'PR-7');
+  assert.deepEqual(r.json(), { started: true, finished: false, source: 'posted' });
+  assert.deepEqual(calls(), [PR_VIEW, COMMENTS, LABELS, POST, PARK, UNLOCK]);
+});
+
+test('CLI ship-status --post-missing falls back to the run folder for a pull request that is not on a pipeline branch', () => {
+  const pr = { number: 12, headRefName: 'feature/x', labels: [] };
+  const missing = status(EMPTY(), { [PR_VIEW]: pr }, { key: 'PR-12' });
+  assert.equal(missing.r.code, 1, missing.r.stderr);
+  assert.deepEqual(missing.r.json(), { started: false, source: 'missing' });
+  assert.deepEqual(missing.calls(), [PR_VIEW]);
+  const started = status(STARTED(), { [PR_VIEW]: pr }, { key: 'PR-12' });
   assert.equal(started.r.code, 0, started.r.stderr);
   assert.deepEqual(started.r.json(), { started: true });
 });
 
-test('CLI ship-status refuses a key that is not a run key', () => {
-  const r = runCli(['ship-status', '--home', homeWith('runs'), '--key', '7; rm -rf x']);
-  assert.equal(r.code, 2);
-  assert.match(r.stderr, /--key/);
+test('CLI ship-status refuses a key that is not a run key and a start time that is not a date', () => {
+  const key = runCli(['ship-status', '--home', EMPTY(), '--key', '7; rm -rf x']);
+  assert.equal(key.code, 2);
+  assert.match(key.stderr, /--key/);
+  const since = runCli(['ship-status', '--home', EMPTY(), '--key', '7', '--since', 'yesterday']);
+  assert.equal(since.code, 2);
+  assert.match(since.stderr, /--since/);
 });

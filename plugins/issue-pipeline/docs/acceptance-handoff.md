@@ -114,12 +114,14 @@ Both sandboxes took the 0.3.2 workflows (pull request 22 on the public one, 21 o
 - `pipeline-review` took 75 seconds and 1.01 dollars and posted `accepted` with no findings. The check is green.
 - `pipeline-ready` failed again on the token: "Resource not accessible by personal access token (addComment)", for pull request 23 and for issue 1. So pull request 23 has an accepted verdict and green checks and no `ready` label. This is the only link of the chain that has not worked, and it waits on the owner giving the token write access to issues and pull requests.
 
-Open from the review of 0.3.2, none fixed yet:
+From the review of 0.3.2, all four fixed in version 0.3.3, which has not run in Actions:
 
 1. Every attempt of an Actions run shares one run identity (`marker.mjs` uses the run id without the attempt), so `ship-status` counts an earlier attempt's comments as its own.
 2. `if: ${{ !cancelled() }}` skips `ship-status` when the job reaches its 150-minute timeout, the case with a lock most likely held.
 3. The tests of `ship-status` pass with its two `gh issue edit` calls deleted. The fake `gh` records no calls.
 4. A fix run keyed `PR-<n>` (started by the `pipeline-fix` label) gets no lock check.
+
+In 0.3.3 the ship job notes when the attempt began and passes it as `--since`, so only this attempt's comments and lock count. The last step runs under `always()`. The fake `gh` in the tests records every call, and the tests assert the comment and label calls in order: with the two label edits deleted, 5 of the 14 tests fail. A fix run keyed by its pull request is checked on the issue its `pipeline/<N>-…` branch names. Two smaller things from the same review went in as well: a run that posted its report and left `pipeline-working` on is only unlocked, and parking removes `pipeline-go`.
 
 ## Conventions this work followed
 

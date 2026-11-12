@@ -65,7 +65,8 @@ test('no workflow edits .github/workflows or merges', () => {
 test('ship and review jobs set origin/HEAD right after the target-repo checkout (config reads the default branch)', () => {
   const ship = rendered('pipeline-ship.yml');
   const shipJob = ship.slice(ship.indexOf('\n  ship:\n'));
-  assert.match(shipJob, /steps:\n      - uses: actions\/checkout@v4\n        with:\n          fetch-depth: 0\n      - run: git remote set-head origin --auto\n/);
+  // The ship job notes its start time first; the checkout is still followed at once by set-head.
+  assert.match(shipJob, /\n      - uses: actions\/checkout@v4\n        with:\n          fetch-depth: 0\n      - run: git remote set-head origin --auto\n/);
   const review = rendered('pipeline-review.yml');
   assert.match(review, /steps:\n      - uses: actions\/checkout@v4\n        with:\n          fetch-depth: 0\n          ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}\n      - run: git remote set-head origin --auto\n/);
 });
@@ -211,7 +212,14 @@ test('pipeline-ship checks in code that the session started, against the pipelin
   assert.match(t, /echo "key=\$\(echo "\$out" \| node -e .*\)\.key.*\)" >> "\$GITHUB_OUTPUT"/);
   const homes = [...t.matchAll(/^\s+ISSUE_PIPELINE_HOME: (.+)$/gm)].map((m) => m[1]);
   assert.deepEqual(homes, [homes[0], homes[0]], 'the Claude step and the check name the same home');
+  // The ship job notes when this attempt began before anything else: every attempt of an Actions run
+  // shares one run link, so the check tells them apart by time.
+  const ship = t.slice(t.indexOf('\n  ship:\n'));
+  const noted = ship.indexOf('run: echo "ATTEMPT_STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"');
+  assert.ok(noted !== -1 && noted < ship.indexOf('uses: actions/checkout@v4'), 'the start time is the first step');
   const afterClaude = t.slice(t.indexOf('uses: anthropics/claude-code-action@v1'));
-  // It runs when the Claude step failed too: a session that could not log in leaves no run folder either.
-  assert.match(afterClaude, /if: \$\{\{ !cancelled\(\) \}\}\n\s+env:\n\s+GH_TOKEN: \$\{\{ github\.token \}\}\n[\s\S]*?KEY: \$\{\{ needs\.route\.outputs\.key \}\}\n\s+run: node "\S*pipeline\.mjs" ship-status --home "\$ISSUE_PIPELINE_HOME" --repo \$\{\{ github\.repository \}\} --key "\$KEY" --post-missing$/m);
+  // It runs when the Claude step failed, and when the job timed out or was cancelled: a run that
+  // reaches the 150-minute limit is the one most likely to still hold the lock.
+  assert.match(afterClaude, /if: \$\{\{ always\(\) \}\}\n\s+env:\n\s+GH_TOKEN: \$\{\{ github\.token \}\}\n[\s\S]*?KEY: \$\{\{ needs\.route\.outputs\.key \}\}\n\s+run: node "\S*pipeline\.mjs" ship-status --home "\$ISSUE_PIPELINE_HOME" --repo \$\{\{ github\.repository \}\} --key "\$KEY" --since "\$ATTEMPT_STARTED" --post-missing$/m);
 });
+
