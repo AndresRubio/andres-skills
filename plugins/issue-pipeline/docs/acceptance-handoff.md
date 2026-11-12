@@ -302,6 +302,25 @@ Left for the owner: the workflows follow the floating tag `@v1`, which is how th
 
 `pipeline-ready` failed five times during these runs with "Resource not accessible by personal access token (addComment)": `PIPELINE_TOKEN` cannot comment on issues of the public sandbox, on top of not seeing the private one. Until the owner gives it read and write on Issues and Pull requests, no pull request is marked ready and no issue is told that its review needs a decision. One nit seen in its output: a step that fails is still listed under `done`, because the step is recorded before it runs.
 
+## The 0.3.7 workflows in Actions, 2026-11-12
+
+The owner merged pull request 28 and then told the session to merge the rest. Pull requests 31 and 26, which put the 0.3.7 workflows on the `main` of both sandboxes, were merged at 22:48 UTC. The review then ran on the two pipeline pull requests that were still open, both opened by a bot, on a third build of the action that day (`7ca5eaf9`):
+
+| Pull request | Issue | Review run | Time | Turns | Cost | Denials | Verdict |
+|---|---|---|---|---|---|---|---|
+| 30 | 9 | 43323764777 | 81 s | 19 | 1.24 dollars | 0 | `accepted`, two minor findings |
+| 29 | 5 | 43323722942 | 126 s | 15 | 1.57 dollars | 0 | `human-decision-needed`, one finding |
+
+So `restrict_untrusted_prs: "false"` does what the action's source says: the review of a bot's pull request runs `node` and `npm` again. The verdict on pull request 29 is a real one. Its finding is that "centred under the form" can be read two ways, which the ship run had recorded as an assumption the owner never answered. The owner's "merge all" settled it, and pull requests 30 and 29 were merged. Issues 2, 5 and 9 are closed, neither sandbox has an open pull request, and the public sandbox's `main` passes its 21 tests and its typecheck.
+
+Two things came up on the way.
+
+A review cannot run on a branch that predates a workflow change. The first try reopened pull request 30 without touching its branch (run 43323443531). The action refused to issue a token, "The commit this run started from has a workflow file that differs from its copy on the repository's default branch", and no model call was made. Bringing `main` into the branch started a run that worked. After every regeneration of the workflows, each open `pipeline/` pull request needs `main` merged into it before its review can run. Nothing in the plugin does that or says so yet.
+
+Pull request 29 conflicted with pull request 28 in one line of `src/render.ts`. The session merged `main` into the branch by hand and kept both changes, the new empty-state text and the sorted list. The pipeline has no lane for a conflict.
+
+Still not seen in Actions: a fix run started by the `pipeline-fix` label, and a resume by a reply or by `pipeline-go`. `pipeline-ready` still fails with "Resource not accessible by personal access token (addComment)" whenever it has something to say, since `PIPELINE_TOKEN` is unchanged.
+
 ## Conventions this work followed
 
-Git identity `AndresRubio <2109109+AndresRubio@users.noreply.github.com>`. On this machine the default SSH key for `github.com` belongs to another account; AndresRubio repositories push through the `github.com-personal` alias, which the clones already use. Commit messages and pull request bodies carry no attribution lines. Pull requests are merged by the owner, since the app's permission classifier refuses a merge from a session. Commit message files go in the session scratchpad under a unique name, and their first line is checked in a call of its own before the commit, because two hooks in this repository can refuse a whole Bash command and a retry then commits a stale file.
+Git identity `AndresRubio <2109109+AndresRubio@users.noreply.github.com>`. On this machine the default SSH key for `github.com` belongs to another account; AndresRubio repositories push through the `github.com-personal` alias, which the clones already use. Commit messages and pull request bodies carry no attribution lines. Pull requests are merged by the owner, or by the session once the owner has said so in that session in their own message; without that the app's permission classifier refuses a merge. Commit message files go in the session scratchpad under a unique name, and their first line is checked in a call of its own before the commit, because two hooks in this repository can refuse a whole Bash command and a retry then commits a stale file.
