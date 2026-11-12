@@ -21,7 +21,7 @@ import { STAGE_POLICY, stageMark, readStages, stageTimings, loadUsage, buildRun,
 import { runReady } from './ready-run.mjs';
 import { runSweep, realSweepDeps } from './sweep-run.mjs';
 import { laneTarget } from './lane.mjs';
-import { sessionStarted, notStartedBody, attemptComments, lockLeft, stoppedBody } from './ship-status.mjs';
+import { sessionStarted, notStartedBody, attemptComments, lockLeft, endingEdits, stoppedBody } from './ship-status.mjs';
 import { defaultVars, installFiles } from './setup.mjs';
 import { formatScoreBody } from './score.mjs';
 import { hydrate } from './hydrate-run.mjs';
@@ -62,10 +62,12 @@ function readVerdictFile(file) {
 }
 
 // The issue a fix run keyed PR-<n> locks: the one its pull request's pipeline/<N>-… branch names.
-// Null for a pull request that is not on a pipeline branch of a numbered issue.
+// Null for a pull request that is not on a pipeline branch of a numbered issue. A pull request that
+// cannot be read is an error, like any other failed gh call.
 function issueBehindPr(repo, key) {
+  const branch = fetchPr(repo, key.slice('PR-'.length)).headRefName;
   let issue;
-  try { issue = keyFromBranch(fetchPr(repo, key.slice('PR-'.length)).headRefName); } catch { return null; }
+  try { issue = keyFromBranch(branch); } catch { return null; }
   return /^\d+$/.test(issue) ? issue : null;
 }
 
@@ -192,7 +194,8 @@ export const COMMANDS = {
   // can end as a success having done nothing, or having taken the lock and stopped. With
   // --post-missing, either case gets a `blocked` comment and `needs-decision` on the issue and exit 1,
   // so the owner hears about it and the sweep stops starting the issue again; a lock this attempt
-  // left behind is released too. --since is when this attempt began: an earlier attempt of the same
+  // left behind is released too. An attempt that posted its ending comment and stopped before
+  // changing the labels gets those label changes and exit 0. --since is when this attempt began: an earlier attempt of the same
   // Actions run carries the same run link and must not stand in for this one. A fix run is keyed by
   // its pull request, and the issue it locks is the one its pipeline/<N>-… branch names.
   'ship-status': (argv) => {
@@ -214,27 +217,25 @@ export const COMMANDS = {
     const comments = fetchPrComments(v.repo, issue);
     const labels = ghJson(['issue', 'view', issue, '--repo', v.repo, '--json', 'labels']).labels.map((l) => l.name);
     const edit = (flag, label) => ghText(['issue', 'edit', issue, '--repo', v.repo, flag, label]);
-    // What the stop procedure does in automatic mode: the comment first, then the labels.
-    const park = (body) => {
-      postIssueComment(v.repo, issue, body);
-      edit('--add-label', 'needs-decision');
-      if (labels.includes('pipeline-go')) edit('--remove-label', 'pipeline-go');
-    };
     // The run folder is looked for where the workflow says the home is. An attempt that commented on
-    // the issue started, wherever its folder went, so it is never told that it did not.
+    // the issue started, wherever its folder went, so it is never told that it did not. pipeline-go
+    // stays: a session that never started used no approval.
     if (!folder && attemptComments(run, comments, v.since).length === 0) {
-      park(notStartedBody(formatMarker('blocked', { run }), run));
+      postIssueComment(v.repo, issue, notStartedBody(formatMarker('blocked', { run }), run));
+      edit('--add-label', 'needs-decision');
       throw new ExitError({ started: false, source: 'posted' });
     }
-    const left = lockLeft(run, { labels, comments, since: v.since });
-    if (left === 'held') {
-      park(stoppedBody(formatMarker('blocked', { run }), run));
-      edit('--remove-label', 'pipeline-working');
+    const lock = lockLeft(run, { labels, comments, since: v.since });
+    if (lock.left === 'held') {
+      // What the stop procedure does in automatic mode: the comment, needs-decision, then the lock
+      // and pipeline-go with it.
+      postIssueComment(v.repo, issue, stoppedBody(formatMarker('blocked', { run }), run));
+      for (const [flag, label] of endingEdits('blocked', labels)) edit(flag, label);
       throw new ExitError({ started: true, finished: false, source: 'posted' });
     }
-    if (left === 'reported') {
-      edit('--remove-label', 'pipeline-working');
-      return { started: true, unlocked: true };
+    if (lock.left === 'ended') {
+      for (const [flag, label] of endingEdits(lock.kind, labels)) edit(flag, label);
+      return { started: true, unlocked: true, after: lock.kind };
     }
     return { started: true };
   },

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { sessionStarted, lockLeft } from '../skills/ship/scripts/lib/ship-status.mjs';
+import { sessionStarted, lockLeft, endingEdits } from '../skills/ship/scripts/lib/ship-status.mjs';
 import { parseMarker } from '../skills/ship/scripts/lib/marker.mjs';
 import { normalizeComments, PR_FIELDS } from '../skills/ship/scripts/lib/github.mjs';
 import { runCli } from './helpers/cli.mjs';
@@ -54,17 +54,34 @@ test('sessionStarted is true only when Setup left a run folder under the pipelin
   assert.equal(sessionStarted(STARTED()), true);
 });
 
-test('lockLeft says how this attempt left the lock: free, held, or reported with the label still on', () => {
+test('lockLeft says how this attempt left the lock: free, held, or ended with the label still on', () => {
   const left = (names, list, opts = { since: SINCE }) => lockLeft(RUN, { labels: names, comments: normalizeComments(list), since: opts.since });
   const locked = ['pipeline', 'pipeline-working'];
-  assert.equal(left(locked, [comment('lock', RUN, 11)]), 'held');
-  assert.equal(left(['pipeline'], [comment('lock', RUN, 11)]), 'free', 'the lock was released');
-  assert.equal(left(locked, [comment('lock', RUN, 11), comment('report', RUN, 12), comment('lock', OTHER, 13)]), 'free', 'a later run holds it');
-  assert.equal(left(locked, []), 'free', 'no lock comment at all');
-  assert.equal(left(locked, [comment('lock', RUN, 5)]), 'free', 'an earlier attempt of this run took it');
-  assert.equal(left(locked, [comment('lock', RUN, 5)], {}), 'held', 'without a start time every attempt counts');
-  assert.equal(left(locked, [comment('lock', RUN, 11), comment('report', RUN, 12)]), 'reported');
-  assert.equal(left(locked, [comment('lock', RUN, 11), comment('grade', RUN, 12)]), 'held', 'a grade does not end a run');
+  assert.deepEqual(left(locked, [comment('lock', RUN, 11)]), { left: 'held' });
+  assert.deepEqual(left(['pipeline'], [comment('lock', RUN, 11)]), { left: 'free' }, 'the lock was released');
+  assert.deepEqual(left(locked, [comment('lock', RUN, 11), comment('report', RUN, 12), comment('lock', OTHER, 13)]), { left: 'free' }, 'a later run holds it');
+  assert.deepEqual(left(locked, []), { left: 'free' }, 'no lock comment at all');
+  assert.deepEqual(left(locked, [comment('lock', RUN, 5)]), { left: 'free' }, 'an earlier attempt of this run took it');
+  assert.deepEqual(left(locked, [comment('lock', RUN, 5)], {}), { left: 'held' }, 'without a start time every attempt counts');
+  assert.deepEqual(left(locked, [comment('lock', RUN, 10)]), { left: 'held' }, 'a lock in the very second the attempt began is this attempt\'s');
+  assert.deepEqual(left(locked, [comment('lock', RUN, 11), comment('report', RUN, 12)]), { left: 'ended', kind: 'report' });
+  assert.deepEqual(left(locked, [comment('lock', RUN, 11), comment('grade', RUN, 12), comment('questions', RUN, 13)]), { left: 'ended', kind: 'questions' });
+  assert.deepEqual(left(locked, [comment('lock', RUN, 11), comment('grade', RUN, 12)]), { left: 'held' }, 'a grade does not end a run');
+  assert.deepEqual(left(locked, [comment('lock', RUN, 11), comment('report', OTHER, 12)]), { left: 'held' }, 'another run\'s report does not end this one');
+  assert.deepEqual(left(locked, [comment('report', RUN, 10), comment('lock', RUN, 11)], {}), { left: 'held' }, 'a report from before the lock does not end it');
+});
+
+test('endingEdits finishes what each ending comment\'s procedure does to the labels', () => {
+  const all = ['pipeline', 'pipeline-working', 'pipeline-go'];
+  const park = ['--add-label', 'needs-decision'];
+  const noGo = ['--remove-label', 'pipeline-go'];
+  const unlock = ['--remove-label', 'pipeline-working'];
+  // The stop procedure: needs-decision, then the lock, and pipeline-go with it.
+  for (const kind of ['blocked', 'questions', 'split']) assert.deepEqual(endingEdits(kind, all), [park, noGo, unlock], kind);
+  // Stage 10 releases the lock and a leftover pipeline-go. A back-off releases the lock and nothing else.
+  assert.deepEqual(endingEdits('report', all), [noGo, unlock]);
+  assert.deepEqual(endingEdits('deferred', all), [unlock]);
+  assert.deepEqual(endingEdits('blocked', ['pipeline', 'pipeline-working']), [park, unlock], 'no pipeline-go to remove');
 });
 
 test('CLI ship-status exits 0 for a session that started and released its lock, and changes nothing', () => {
@@ -85,7 +102,8 @@ test('CLI ship-status without --post-missing looks only at the run folder', () =
 
 test('CLI ship-status --post-missing tells the issue the run did not start, parks it, and still exits 1', () => {
   // An earlier run's comments do not count as this run's.
-  const { r, calls, body } = status(EMPTY(), { [COMMENTS]: [[comment('lock', OTHER, 11), comment('report', OTHER, 12)]], [LABELS]: labels('pipeline'), [POST]: 'url', [PARK]: 'url' });
+  // pipeline-go stays: a session that never started used no approval.
+  const { r, calls, body } = status(EMPTY(), { [COMMENTS]: [[comment('lock', OTHER, 11), comment('report', OTHER, 12)]], [LABELS]: labels('pipeline', 'pipeline-go'), [POST]: 'url', [PARK]: 'url' });
   assert.equal(r.code, 1, r.stderr);
   assert.deepEqual(r.json(), { started: false, source: 'posted' });
   assert.deepEqual(calls(), [COMMENTS, LABELS, POST, PARK]);
@@ -127,11 +145,20 @@ test('CLI ship-status --post-missing leaves alone a lock that an earlier attempt
   assert.deepEqual(calls(), [COMMENTS, LABELS]);
 });
 
-test('CLI ship-status --post-missing only unlocks when the attempt reported and left the label on', () => {
-  const { r, calls } = status(STARTED(), { [COMMENTS]: [[comment('lock', RUN, 11), comment('report', RUN, 12)]], [LABELS]: labels('pipeline', 'pipeline-working'), [UNLOCK]: 'url' });
-  assert.equal(r.code, 0, r.stderr);
-  assert.deepEqual(r.json(), { started: true, unlocked: true });
-  assert.deepEqual(calls(), [COMMENTS, LABELS, UNLOCK]);
+test('CLI ship-status --post-missing finishes the labels of an attempt that posted its ending comment and stopped', () => {
+  const ended = (kind, routes) => status(STARTED(), { [COMMENTS]: [[comment('lock', RUN, 11), comment(kind, RUN, 12)]], [LABELS]: labels('pipeline', 'pipeline-working', 'pipeline-go'), ...routes });
+  const report = ended('report', { [NO_GO]: 'url', [UNLOCK]: 'url' });
+  assert.equal(report.r.code, 0, report.r.stderr);
+  assert.deepEqual(report.r.json(), { started: true, unlocked: true, after: 'report' });
+  assert.deepEqual(report.calls(), [COMMENTS, LABELS, NO_GO, UNLOCK]);
+  // A blocked comment without needs-decision would leave the owner's reply unrouted.
+  const blocked = ended('blocked', { [PARK]: 'url', [NO_GO]: 'url', [UNLOCK]: 'url' });
+  assert.equal(blocked.r.code, 0, blocked.r.stderr);
+  assert.deepEqual(blocked.r.json(), { started: true, unlocked: true, after: 'blocked' });
+  assert.deepEqual(blocked.calls(), [COMMENTS, LABELS, PARK, NO_GO, UNLOCK]);
+  const deferred = ended('deferred', { [UNLOCK]: 'url' });
+  assert.equal(deferred.r.code, 0, deferred.r.stderr);
+  assert.deepEqual(deferred.calls(), [COMMENTS, LABELS, UNLOCK]);
 });
 
 test('CLI ship-status --post-missing leaves a lock that a later run holds', () => {
@@ -158,6 +185,14 @@ test('CLI ship-status --post-missing falls back to the run folder for a pull req
   const started = status(STARTED(), { [PR_VIEW]: pr }, { key: 'PR-12' });
   assert.equal(started.r.code, 0, started.r.stderr);
   assert.deepEqual(started.r.json(), { started: true });
+});
+
+test('CLI ship-status --post-missing fails loudly when the pull request of a fix run cannot be read', () => {
+  const { r, calls } = status(STARTED(), {}, { key: 'PR-12' });
+  assert.equal(r.code, 1);
+  assert.equal(r.stdout, '', 'no result is printed: the lock was not checked');
+  assert.match(r.stderr, /pr view 12/);
+  assert.deepEqual(calls(), [PR_VIEW]);
 });
 
 test('CLI ship-status refuses a key that is not a run key and a start time that is not a date', () => {

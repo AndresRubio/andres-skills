@@ -33,19 +33,31 @@ export function attemptComments(run, comments, since) {
 }
 
 // How this attempt left the issue's lock when the job was over.
-//   'free'     it does not hold it: released, never taken, or taken by another run or an earlier attempt
-//   'held'     it took the lock and posted nothing that ends a run
-//   'reported' it posted a comment that ends a run and left the label on
+//   { left: 'free' }            it does not hold it: released, never taken, or taken by another run or an earlier attempt
+//   { left: 'held' }            it took the lock and posted nothing that ends a run
+//   { left: 'ended', kind }     it posted a comment that ends a run (kind) and stopped before changing the labels
 // Every way a run ends releases the lock (the report, a stop, a back-off), so 'held' is a run that
-// stopped part-way.
+// stopped part-way. Comments are ordered by id, as in runs.mjs, never by time.
 export function lockLeft(run, { labels, comments, since }) {
-  if (!labels.includes('pipeline-working')) return 'free';
-  const byTime = (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-  const pipeline = comments.filter((c) => c.pipeline).sort(byTime);
+  if (!labels.includes('pipeline-working')) return { left: 'free' };
+  const pipeline = comments.filter((c) => c.pipeline).sort((a, b) => a.id - b.id);
   const lock = pipeline.filter((c) => c.marker.kind === 'lock').at(-1);
-  if (!lock || lock.marker.run !== run || !sameOrAfter(lock.createdAt, since)) return 'free';
-  const ended = pipeline.some((c) => c.marker.run === run && byTime(c, lock) > 0 && RELEASING_KINDS.includes(c.marker.kind));
-  return ended ? 'reported' : 'held';
+  if (!lock || lock.marker.run !== run || !sameOrAfter(lock.createdAt, since)) return { left: 'free' };
+  const ending = pipeline.filter((c) => c.id > lock.id && c.marker.run === run && RELEASING_KINDS.includes(c.marker.kind)).at(-1);
+  return ending ? { left: 'ended', kind: ending.marker.kind } : { left: 'held' };
+}
+
+// The label edits that finish an ending comment's procedure, in its order. The stop procedure
+// (`blocked`, and the `questions` and `split` stops) adds needs-decision and removes pipeline-go with
+// the lock. Stage 10's `report` removes pipeline-go with the lock. A back-off (`deferred`) releases
+// the lock and nothing else.
+const PARKS = ['blocked', 'questions', 'split'];
+export function endingEdits(kind, labels) {
+  const edits = [];
+  if (PARKS.includes(kind)) edits.push(['--add-label', 'needs-decision']);
+  if ((PARKS.includes(kind) || kind === 'report') && labels.includes('pipeline-go')) edits.push(['--remove-label', 'pipeline-go']);
+  edits.push(['--remove-label', 'pipeline-working']);
+  return edits;
 }
 
 // The comment that parks an issue whose run started and then ended with the lock held.

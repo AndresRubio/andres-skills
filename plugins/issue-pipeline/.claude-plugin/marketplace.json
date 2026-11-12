@@ -6,7 +6,7 @@
     {
       "name": "issue-pipeline",
       "description": "Issue-to-PR pipeline for Claude Code.",
-      "version": "0.3.3",
+      "version": "0.3.4",
       "source": "./",
       "author": { "name": "AndresRubio", "url": "https://github.com/AndresRubio" }
     }
