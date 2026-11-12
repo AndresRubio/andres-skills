@@ -236,6 +236,20 @@ Items 2 to 4 then had a reading of their own, with a fuzz of the log reader and 
 
 Left open from that reading, for the owner: the workflows take tools away one by one, and a session still has others that are not allowed and would be refused, among them `WebSearch`, `WebFetch`, `PushNotification` and `SendToProject`. `--tools "Bash,Read,Write,Edit,Glob,Grep,Skill,Agent"` gave a local session exactly those tools. That is the stricter design, and it also decides whether a session may search the web, so it was not done here. `TodoWrite`, which the ship workflow allows, is no longer a tool in Claude Code 2.1.317.
 
+## Issue 4 again, on version 0.3.6, 2026-11-12
+
+Both sandboxes took the 0.3.6 workflows (pull request 27 on the public one, 25 on the private one). Issue 4, the one whose session had stopped on 0.3.5, was started again by taking `needs-decision` off it and putting the `pipeline` label back, since a reply would have been a comment in the owner's name.
+
+- `pipeline-ship` (run 43308478552) took 141 seconds, 38 turns and 0.56 dollars. It posted the lock and, 106 seconds later, a `questions` comment with a full grade and a research summary, so the session went through the stage where the earlier one had stopped.
+- It added `needs-decision` and removed `pipeline-working`. The last step printed `{"started":true}` and the job was green.
+- The session counted one permission denial again and finished all the same. A denial by itself does not end a run.
+
+What this does and does not show:
+
+1. The issue that stopped on 0.3.5 ran to a proper ending on 0.3.6. That is one run. Two of the eight runs before it had stopped, so a single good run would have been the likely outcome without any fix, and it takes more runs to say the stops are gone. If one stops, its `blocked` comment now names the session's last tool calls.
+2. The grade did not split the issue, which is what the fixture was written to produce. It judged the change to fit, at the limit of six files, and stopped on the number of assumptions: seven against a limit of three for an unattended run. Whether that is the grade working or the fixture being too small is for the owner to judge.
+3. Open on issue 4: a reply, or `pipeline-go` to accept the seven assumptions. Either would be the first resume seen in Actions.
+
 ## Conventions this work followed
 
 Git identity `AndresRubio <2109109+AndresRubio@users.noreply.github.com>`. On this machine the default SSH key for `github.com` belongs to another account; AndresRubio repositories push through the `github.com-personal` alias, which the clones already use. Commit messages and pull request bodies carry no attribution lines. Pull requests are merged by the owner, since the app's permission classifier refuses a merge from a session. Commit message files go in the session scratchpad under a unique name, and their first line is checked in a call of its own before the commit, because two hooks in this repository can refuse a whole Bash command and a retry then commits a stale file.
