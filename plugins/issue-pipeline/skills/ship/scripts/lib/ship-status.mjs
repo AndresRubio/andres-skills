@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { RELEASING_KINDS } from './runs.mjs';
 
@@ -11,16 +11,54 @@ export function sessionStarted(home) {
   return readdirSync(runs, { withFileTypes: true }).some((entry) => entry.isDirectory() && entry.name.startsWith('run-'));
 }
 
+// What the session's own log says about how it ended. claude-code-action hides the session and
+// writes it, as the array of SDK messages, to $RUNNER_TEMP/claude-execution-output.json. Only tool
+// names are read from it, never text, input or output: the last calls the main session made (a
+// subagent's calls carry parent_tool_use_id) and the tools it was refused. A name that is not a
+// plain tool name is dropped, so nothing in the log can shape the comment. null when there is no
+// readable log.
+const TOOL_NAME = /^[A-Za-z][A-Za-z0-9_.-]{0,79}$/;
+const LAST_CALLS = 6;
+export function sessionTrace(file) {
+  if (!file || !existsSync(file)) return null;
+  let messages;
+  try {
+    messages = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(messages)) return null;
+  const plain = (names) => names.filter((n) => typeof n === 'string' && TOOL_NAME.test(n));
+  const called = messages
+    .filter((m) => m?.type === 'assistant' && !m.parent_tool_use_id && Array.isArray(m.message?.content))
+    .flatMap((m) => m.message.content.filter((c) => c?.type === 'tool_use').map((c) => c.name));
+  const refused = messages
+    .filter((m) => m?.type === 'result' && Array.isArray(m.permission_denials))
+    .flatMap((m) => m.permission_denials.map((d) => d?.tool_name));
+  return { lastTools: plain(called).slice(-LAST_CALLS), denied: [...new Set(plain(refused))] };
+}
+
+// The trace as lines of a comment: empty when there is nothing to say.
+function traceLines(trace) {
+  if (!trace || (trace.lastTools.length === 0 && trace.denied.length === 0)) return [];
+  const names = (list) => list.map((n) => `\`${n}\``).join(', ');
+  const parts = [];
+  if (trace.lastTools.length) parts.push(`its last tool calls were ${names(trace.lastTools)}`);
+  if (trace.denied.length) parts.push(`it was refused ${names(trace.denied)}`);
+  return ['', `From the session's log, tool names only: ${parts.join(', and ')}.`];
+}
+
 // The comment that parks an issue whose run never started. `run` is the marker's run: the Actions
 // run URL, or 'local' outside Actions. `edits` are the label edits that go with it (notStartedEdits):
 // when they take pipeline-go away the owner is told, because a reply does not bring the label back.
-export function notStartedBody(marker, run, edits = []) {
+export function notStartedBody(marker, run, edits = [], trace = null) {
   const log = run.startsWith('http') ? ` The log is at ${run}.` : '';
   const goRemoved = edits.some(([flag, label]) => flag === '--remove-label' && label === 'pipeline-go');
   return [
     marker,
     '',
     `The run did not start: the session ended before the pipeline's Setup, so no stage ran and nothing was changed.${log}`,
+    ...traceLines(trace),
     '',
     'Reply here once the cause is fixed to start a new run.',
     ...(goRemoved ? ['', '`pipeline-go` was removed: an earlier run\'s lock is still on this issue, and with both labels on the sweep would have started it again without you. Add the label back if the next run should have it.'] : []),
@@ -75,12 +113,13 @@ export function endingEdits(kind, labels) {
 }
 
 // The comment that parks an issue whose run started and then ended with the lock held.
-export function stoppedBody(marker, run) {
+export function stoppedBody(marker, run, trace = null) {
   const log = run.startsWith('http') ? ` The log is at ${run}.` : '';
   return [
     marker,
     '',
     `The run stopped with the lock held: the session took the lock and ended without a report, a question or a stop comment, so no result was posted.${log} Whatever it committed is still on its branch, if it pushed one.`,
+    ...traceLines(trace),
     '',
     'The lock is released. Reply here to start a new run.',
   ].join('\n');

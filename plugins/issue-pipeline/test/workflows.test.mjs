@@ -183,13 +183,17 @@ test('each workflow passes Claude whole flags, the tools its skill needs and the
   const FLAGS = ['--plugin-dir', '--model', '--effort', '--max-budget-usd', '--allowedTools', '--disallowedTools'];
   const readAndReport = ['Bash', 'Read', 'Write', 'Glob', 'Grep'];
   const noReview = ['Bash(gh pr merge:*)', 'Bash(gh pr review:*)', 'Bash(gh pr edit:*)', 'Bash(git push:*)'];
+  // The tools a session could use to end its turn with work still to come. claude-code-action ends
+  // the run at the first turn end, so a session that schedules a wake-up or watches for an event
+  // never gets to see it. Disallowed tools are taken out of the session's tool list.
+  const waits = ['ScheduleWakeup', 'CronCreate', 'Monitor', 'Workflow', 'RemoteTrigger'];
   const expected = {
     'pipeline-ship.yml': {
       allowed: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'Agent', 'Task', 'TodoWrite'],
-      disallowed: ['Bash(gh pr merge:*)', 'Bash(gh pr review:*)', 'Bash(git push --force:*)', 'Bash(git push -f:*)'],
+      disallowed: ['Bash(gh pr merge:*)', 'Bash(gh pr review:*)', 'Bash(git push --force:*)', 'Bash(git push -f:*)', ...waits],
     },
-    'pipeline-review.yml': { allowed: readAndReport, disallowed: noReview },
-    'pipeline-score.yml': { allowed: readAndReport, disallowed: [...noReview, 'Edit'] },
+    'pipeline-review.yml': { allowed: readAndReport, disallowed: [...noReview, ...waits] },
+    'pipeline-score.yml': { allowed: readAndReport, disallowed: [...noReview, 'Edit', ...waits] },
   };
   for (const [name, { allowed, disallowed }] of Object.entries(expected)) {
     const words = shellWords(claudeArgs(rendered(name)));
@@ -232,6 +236,6 @@ test('pipeline-ship checks in code that the session started, against the pipelin
   const afterClaude = t.slice(t.indexOf('uses: anthropics/claude-code-action@v1'));
   // It runs when the Claude step failed, and when the job timed out or was cancelled: a run that
   // reaches the 150-minute limit is the one most likely to still hold the lock.
-  assert.match(afterClaude, /if: \$\{\{ always\(\) \}\}\n\s+env:\n\s+GH_TOKEN: \$\{\{ github\.token \}\}\n[\s\S]*?KEY: \$\{\{ needs\.route\.outputs\.key \}\}\n\s+run: node "\S*pipeline\.mjs" ship-status --home "\$ISSUE_PIPELINE_HOME" --repo \$\{\{ github\.repository \}\} --key "\$KEY" --since "\$ATTEMPT_STARTED" --post-missing$/m);
+  assert.match(afterClaude, /if: \$\{\{ always\(\) \}\}\n\s+env:\n\s+GH_TOKEN: \$\{\{ github\.token \}\}\n[\s\S]*?KEY: \$\{\{ needs\.route\.outputs\.key \}\}\n\s+run: node "\S*pipeline\.mjs" ship-status --home "\$ISSUE_PIPELINE_HOME" --repo \$\{\{ github\.repository \}\} --key "\$KEY" --since "\$ATTEMPT_STARTED" --execution-file "\$RUNNER_TEMP\/claude-execution-output\.json" --post-missing$/m);
 });
 

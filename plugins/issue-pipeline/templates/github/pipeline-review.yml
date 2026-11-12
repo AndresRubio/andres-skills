@@ -42,8 +42,9 @@ jobs:
           CI: 'true'
           ISSUE_PIPELINE_HOME: ${{ runner.temp }}/issue-pipeline
           # claude-code-action ends the run at the session's first result message, and a session that
-          # leaves a subagent or a command in the background ends its turn to wait for it. Off, so that
-          # every dispatch returns inside its turn.
+          # leaves a subagent or a command in the background ends its turn to wait for it. With this
+          # on, the Bash and subagent tools lose run_in_background. The tools that schedule or watch
+          # are taken away in the disallowed list of claude_args.
           CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -56,7 +57,7 @@ jobs:
             --effort high
             --max-budget-usd 15
             --allowedTools "Bash,Read,Write,Glob,Grep"
-            --disallowedTools "Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh pr edit:*),Bash(git push:*)"
+            --disallowedTools "Bash(gh pr merge:*),Bash(gh pr review:*),Bash(gh pr edit:*),Bash(git push:*),ScheduleWakeup,CronCreate,Monitor,Workflow,RemoteTrigger"
       - name: Verdict → check status
         # Skipped when cancelled: a run cancelled by a newer push must not post a verdict for a superseded head.
         if: ${{ !cancelled() }}

@@ -81,8 +81,9 @@ jobs:
           CI: 'true'
           ISSUE_PIPELINE_HOME: ${{ runner.temp }}/issue-pipeline
           # claude-code-action ends the run at the session's first result message, and a session that
-          # leaves a subagent or a command in the background ends its turn to wait for it. Off, so that
-          # every dispatch returns inside its turn.
+          # leaves a subagent or a command in the background ends its turn to wait for it. With this
+          # on, the Bash and subagent tools lose run_in_background. The tools that schedule or watch
+          # are taken away in the disallowed list of claude_args.
           CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -96,7 +97,7 @@ jobs:
             --effort high
             --max-budget-usd 25
             --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill,Agent,Task,TodoWrite"
-            --disallowedTools "Bash(gh pr merge:*),Bash(gh pr review:*),Bash(git push --force:*),Bash(git push -f:*)"
+            --disallowedTools "Bash(gh pr merge:*),Bash(gh pr review:*),Bash(git push --force:*),Bash(git push -f:*),ScheduleWakeup,CronCreate,Monitor,Workflow,RemoteTrigger"
       # A session can end as a success having done nothing (refused its tools, no login, skill not loaded)
       # or having taken the lock and stopped. Setup creates the run folder before anything else, and
       # every proper ending releases the lock, so the CLI looks for both and parks the issue otherwise.
@@ -107,4 +108,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ISSUE_PIPELINE_HOME: ${{ runner.temp }}/issue-pipeline
           KEY: ${{ needs.route.outputs.key }}
-        run: node "$RUNNER_TEMP/issue-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs" ship-status --home "$ISSUE_PIPELINE_HOME" --repo ${{ github.repository }} --key "$KEY" --since "$ATTEMPT_STARTED" --post-missing
+        run: node "$RUNNER_TEMP/issue-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs" ship-status --home "$ISSUE_PIPELINE_HOME" --repo ${{ github.repository }} --key "$KEY" --since "$ATTEMPT_STARTED" --execution-file "$RUNNER_TEMP/claude-execution-output.json" --post-missing

@@ -215,11 +215,22 @@ The cause, as far as it could be shown outside Actions:
 3. So a session that ends its turn to wait for a subagent or a background command is cut off there by the action. Stage 2 is the first stage that dispatches a subagent, and both stopped runs ended soon after taking the lock, before any grade.
 4. The same local session with `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` in its environment sent one result message, with the subagent's answer in it.
 
-Version 0.3.6 sets that variable on the Claude step of `pipeline-ship`, `pipeline-review` and `pipeline-score`. The action hands its whole environment to the session (`parse-sdk-options.ts` copies `process.env`), so a step-level `env` reaches Claude Code. Nothing in the stages needs background tasks: the preview server is started by the plugin's own `preview-start` command.
+A second reader went through that account before the tag and found it too narrow. Three things from that reading:
 
-What is not shown: the runner's sessions were never seen, since the action hides them, so that the two stopped runs were waiting on a background task is inferred from the above. The runner installs Claude Code 2.1.322, five patch versions after the one tested here. Issue 4 has to run again on 0.3.6 before this counts as fixed, and 0.3.6 was not read by a second reader.
+- With a neutral prompt the local session dispatched its subagent in the foreground and sent one result, with or without the variable. The three results came from a session that chose to work in the background. So the variable closes one way of ending a turn early, not the failure itself.
+- With the variable set, a session told to wake itself in a minute still called `ScheduleWakeup`, ended its turn and sent two results. `Monitor`, `CronCreate`, `Workflow` and `RemoteTrigger` were in its tool list as well. A `Monitor` call under the ship workflow's allowed tools is refused, which counts as one permission denial, and the session then ended its turn. Both stopped runs show one permission denial.
+- The stopped run lasted 66 seconds, under the two minutes after which Claude Code moves a long call to the background by itself. Whatever ended that turn was asked for by the session.
 
-An idea for later, which needs the owner's view because it would put text from a hidden session on the issue: the action writes the session to `$RUNNER_TEMP/claude-execution-output.json`, and `ship-status` could quote the session's last message and the names of the tools it was denied in its `blocked` comment. That would have named this cause on the first stopped run.
+So the cause of the two stopped runs is still open between a background dispatch, a refused `Monitor` and a scheduled wake-up. Version 0.3.6 closes all three and makes the next stop say which it was:
+
+1. The Claude step of `pipeline-ship`, `pipeline-review` and `pipeline-score` sets `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'`. The action hands its whole environment to the session (`parse-sdk-options.ts` copies `process.env`), so a step-level `env` reaches Claude Code. The Bash and subagent tools then lose `run_in_background`.
+2. `--disallowedTools` in the three workflows also names `ScheduleWakeup`, `CronCreate`, `Monitor`, `Workflow` and `RemoteTrigger`. A local session started with that list did not have those five tools.
+3. The ship skill has a twelfth hard rule: in automatic mode the run ends the first time the session ends its turn, so nothing is started that would have to be waited for. A session without the tools can still detach a command with `nohup` and stop, which a reviewer's probe did, and only the rule speaks to that.
+4. The check at the end of `pipeline-ship` reads the session's log, which the action writes to `$RUNNER_TEMP/claude-execution-output.json`, and adds one line to its `blocked` comment: the names of the last six tools the main session called and of the tools it was refused. Names only, each checked to be a plain tool name. No text, input or output of the session is read.
+
+Nothing in the stages needs background tasks: the preview server is started by the plugin's own `preview-start` command.
+
+What is not shown: none of this has run in Actions. The runner installs Claude Code 2.1.322, five patch versions after the one tested here, and whether `ScheduleWakeup` is offered inside the action's session was not seen. Issue 4 has to run again on 0.3.6. If it stops again, its `blocked` comment will name the tools. Items 2 to 4 were written after the second reading and were not read again.
 
 ## Conventions this work followed
 

@@ -21,7 +21,7 @@ import { STAGE_POLICY, stageMark, readStages, stageTimings, loadUsage, buildRun,
 import { runReady } from './ready-run.mjs';
 import { runSweep, realSweepDeps } from './sweep-run.mjs';
 import { laneTarget } from './lane.mjs';
-import { sessionStarted, notStartedBody, notStartedEdits, attemptComments, lockLeft, endingEdits, stoppedBody } from './ship-status.mjs';
+import { sessionStarted, sessionTrace, notStartedBody, notStartedEdits, attemptComments, lockLeft, endingEdits, stoppedBody } from './ship-status.mjs';
 import { defaultVars, installFiles } from './setup.mjs';
 import { formatScoreBody } from './score.mjs';
 import { hydrate } from './hydrate-run.mjs';
@@ -199,7 +199,7 @@ export const COMMANDS = {
   // Actions run carries the same run link and must not stand in for this one. A fix run is keyed by
   // its pull request, and the issue it locks is the one its pipeline/<N>-… branch names.
   'ship-status': (argv) => {
-    const v = parse(argv, { home: { type: 'string' }, repo: { type: 'string' }, key: { type: 'string' }, since: { type: 'string' }, 'post-missing': { type: 'boolean' } });
+    const v = parse(argv, { home: { type: 'string' }, repo: { type: 'string' }, key: { type: 'string' }, since: { type: 'string' }, 'execution-file': { type: 'string' }, 'post-missing': { type: 'boolean' } });
     required(v, 'home', 'key');
     if (!KEY_RE.test(v.key)) throw new UsageError('--key must be a run key: an issue number or PR-<n>');
     if (v.since !== undefined && !isIsoDate(v.since)) throw new UsageError('--since must be an ISO date-time');
@@ -221,7 +221,7 @@ export const COMMANDS = {
     // the issue started, wherever its folder went, so it is never told that it did not.
     if (!folder && attemptComments(run, comments, v.since).length === 0) {
       const edits = notStartedEdits(labels);
-      postIssueComment(v.repo, issue, notStartedBody(formatMarker('blocked', { run }), run, edits));
+      postIssueComment(v.repo, issue, notStartedBody(formatMarker('blocked', { run }), run, edits, sessionTrace(v['execution-file'])));
       for (const [flag, label] of edits) edit(flag, label);
       throw new ExitError({ started: false, source: 'posted' });
     }
@@ -229,7 +229,7 @@ export const COMMANDS = {
     if (lock.left === 'held') {
       // What the stop procedure does in automatic mode: the comment, needs-decision, then the lock
       // and pipeline-go with it.
-      postIssueComment(v.repo, issue, stoppedBody(formatMarker('blocked', { run }), run));
+      postIssueComment(v.repo, issue, stoppedBody(formatMarker('blocked', { run }), run, sessionTrace(v['execution-file'])));
       for (const [flag, label] of endingEdits('blocked', labels)) edit(flag, label);
       throw new ExitError({ started: true, finished: false, source: 'posted' });
     }

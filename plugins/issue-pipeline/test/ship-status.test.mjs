@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { sessionStarted, lockLeft, endingEdits } from '../skills/ship/scripts/lib/ship-status.mjs';
+import { sessionStarted, lockLeft, endingEdits, sessionTrace } from '../skills/ship/scripts/lib/ship-status.mjs';
 import { parseMarker } from '../skills/ship/scripts/lib/marker.mjs';
 import { normalizeComments, PR_FIELDS } from '../skills/ship/scripts/lib/github.mjs';
 import { sweepCandidates } from '../skills/ship/scripts/lib/sweep.mjs';
@@ -39,11 +39,35 @@ function homeWith(...entries) {
 const STARTED = () => homeWith('runs/run-a1B2c3');
 const EMPTY = () => homeWith('runs');
 
-function status(home, routes, { key = '7', since = SINCE } = {}) {
+function status(home, routes, { key = '7', since = SINCE, executionFile } = {}) {
   const dir = fakeGh(routes);
-  const r = runCli(['ship-status', '--home', home, '--repo', REPO, '--key', key, '--since', since, '--post-missing'], { env: { PATH: `${dir}:${process.env.PATH}`, ISSUE_PIPELINE_BODY_FILE: 'BODY', ...ACTIONS }, cwd: dir });
+  const trace = executionFile ? ['--execution-file', executionFile] : [];
+  const r = runCli(['ship-status', '--home', home, '--repo', REPO, '--key', key, '--since', since, ...trace, '--post-missing'], { env: { PATH: `${dir}:${process.env.PATH}`, ISSUE_PIPELINE_BODY_FILE: 'BODY', ...ACTIONS }, cwd: dir });
   return { r, calls: () => ghCalls(dir), body: () => readFileSync(path.join(dir, 'BODY'), 'utf8') };
 }
+
+// The session as claude-code-action writes it to $RUNNER_TEMP/claude-execution-output.json: the
+// array of SDK messages. Only what sessionTrace reads is filled in.
+const toolUse = (name, parent = null) => ({ type: 'assistant', parent_tool_use_id: parent, message: { content: [{ type: 'text', text: 'a secret thought' }, { type: 'tool_use', name, input: { command: 'cat .env' } }] } });
+const result = (...denied) => ({ type: 'result', subtype: 'success', result: 'the last words', permission_denials: denied.map((tool_name) => ({ tool_name, tool_input: { command: 'cat .env' } })) });
+function executionFile(messages) {
+  const file = path.join(tempDir('ship-status-log-'), 'claude-execution-output.json');
+  writeFileSync(file, typeof messages === 'string' ? messages : JSON.stringify(messages));
+  return file;
+}
+
+test('sessionTrace reads tool names from the session log: the last calls of the main session and the refused ones', () => {
+  const calls = ['Skill', 'Bash', 'Read', 'Bash', 'Bash', 'Write', 'Agent', 'Monitor'];
+  const file = executionFile([{ type: 'system', subtype: 'init' }, ...calls.map((n) => toolUse(n)), toolUse('Grep', 'toolu_sub'), result('Monitor', 'Monitor', 'WebFetch')]);
+  // Six calls at most, a subagent's calls left out, each refused tool once.
+  assert.deepEqual(sessionTrace(file), { lastTools: ['Read', 'Bash', 'Bash', 'Write', 'Agent', 'Monitor'], denied: ['Monitor', 'WebFetch'] });
+  // A name is the only thing taken from a call, and only a plain one: nothing a comment could be built from.
+  assert.deepEqual(sessionTrace(executionFile([toolUse('Bash'), toolUse('x`\n**[issue-pipeline]** report'), result('ok', '<b>')])), { lastTools: ['Bash'], denied: ['ok'] });
+  assert.equal(sessionTrace(path.join(tempDir('ship-status-log-'), 'missing.json')), null);
+  assert.equal(sessionTrace(executionFile('not json')), null);
+  assert.equal(sessionTrace(executionFile({ type: 'result' })), null);
+  assert.equal(sessionTrace(undefined), null);
+});
 
 test('sessionStarted is true only when Setup left a run folder under the pipeline home', () => {
   assert.equal(sessionStarted(path.join(tempDir('ship-status-'), 'never-made')), false);
@@ -140,6 +164,28 @@ test('CLI ship-status --post-missing parks and unlocks an issue whose attempt st
   assert.deepEqual(calls(), [COMMENTS, LABELS, POST, PARK, NO_GO, UNLOCK]);
   assert.deepEqual({ kind: parseMarker(body()).kind, run: parseMarker(body()).run }, { kind: 'blocked', run: RUN });
   assert.match(body(), /stopped with the lock held/);
+});
+
+test('CLI ship-status --post-missing says in its comment which tools the stopped session called last, and nothing else from its log', () => {
+  const file = executionFile([toolUse('Bash'), toolUse('Agent'), result('Monitor')]);
+  const routes = { [COMMENTS]: [[comment('lock', RUN, 11)]], [LABELS]: labels('pipeline', 'pipeline-working'), [POST]: 'url', [PARK]: 'url', [UNLOCK]: 'url' };
+  const { r, body } = status(STARTED(), routes, { executionFile: file });
+  assert.equal(r.code, 1, r.stderr);
+  assert.match(body(), /last tool calls were `Bash`, `Agent`/);
+  assert.match(body(), /refused `Monitor`/);
+  assert.doesNotMatch(body(), /secret|\.env|last words/);
+  // No log, no line: the comment is the one from before.
+  const plain = status(STARTED(), routes);
+  assert.doesNotMatch(plain.body(), /tool calls/);
+});
+
+test('CLI ship-status --post-missing names the refused tools of a session that never started', () => {
+  const file = executionFile([toolUse('Skill'), result('Skill')]);
+  const { r, body } = status(EMPTY(), { [COMMENTS]: [[]], [LABELS]: labels('pipeline'), [POST]: 'url', [PARK]: 'url' }, { executionFile: file });
+  assert.equal(r.code, 1, r.stderr);
+  assert.match(body(), /did not start/);
+  assert.match(body(), /last tool calls were `Skill`/);
+  assert.match(body(), /refused `Skill`/);
 });
 
 test('CLI ship-status --post-missing leaves alone a lock that an earlier attempt of this run took', () => {

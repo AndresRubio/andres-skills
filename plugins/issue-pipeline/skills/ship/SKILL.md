@@ -40,6 +40,7 @@ These apply in every mode and every stage.
 9. **If the diff grows past `maxPrSize` mid-build, stop and propose a split.**
 10. **Every commit message ends with a `Co-Authored-By: Claude <model> <noreply@anthropic.com>` trailer** naming the model running this session. Commits are authored by the repo's configured git user.
 11. **Keep tool output short.** A command that can print more than ~50 lines sends its output to a file and shows only what the stage needs: `… > "$RUN_DIR/logs/<stage>-<what>.log" 2>&1; tail -n 40 "$RUN_DIR/logs/<stage>-<what>.log"`, or a `grep -E 'error|fail|warn' | head -40` of it. Package installs, dev servers and test runs always go through a log file; test runners get their quiet flag (`--reporter=dot`, `--silent`, `-q`). Never `cat` a file to read it: use the Read tool with a line range or `sed -n`. The evidence Commands table records the log path and the exit code, not the output.
+12. **In automatic mode the run ends the first time you end your turn.** The workflow stops reading the session at that point, whatever is still running. So never end a turn before stage 10's report or the stop procedure, and never start work you would then have to wait for: no background subagent or command, no `nohup` or `&`, no scheduled wake-up, no watcher. Dispatch a subagent in the foreground and stay in the turn until it returns.
 
 ## Stages
 
