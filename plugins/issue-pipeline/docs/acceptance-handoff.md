@@ -164,8 +164,36 @@ What the two runs leave open:
 
 1. Nobody has answered the questions on issue 3, so the resume after an owner's reply is untested. The reply is the owner's to write.
 2. The sessions counted three permission denials on the private run and one on the stop. The action still hides which commands they were.
-3. Five runs in a row have ended properly. The two paths of `ship-status` that post a comment have only run against the fake `gh` of the tests.
-4. The fixtures for an issue that is too big, a protected path, a fix round, `pipeline-go` and `pipeline-score` have not run. Neither results file is written.
+3. The fixtures for an issue that is too big, a protected path, a fix round, `pipeline-go` and `pipeline-score` have not run. Neither results file is written.
+
+## The two failure paths of ship-status, 2026-11-12
+
+Five runs in a row had ended properly, so the two paths of `ship-status` that post a comment were forced by cancelling a run on the public sandbox at a chosen moment. Both did what the tests say.
+
+A session that stops with the lock held, on issue 14 (run 43245645421). The run was cancelled two seconds after the `lock` comment appeared, with `pipeline-working` on the issue. The last step ran under `always()`, printed `{"started":true,"finished":false,"source":"posted"}` and failed the job. It posted a `blocked` comment ("The run stopped with the lock held"), added `needs-decision` and removed `pipeline-working`. Read back through the CLI, the comment by `github-actions[bot]` counts as a pipeline comment, `lock-status` gives `locked: false`, and a dry run of the sweep starts nothing.
+
+A session that never starts, on issue 13 (run 43246184029). The run was cancelled as the Claude step began, before any comment. The last step printed `{"started":false,"source":"posted"}` and failed the job. It posted a `blocked` comment ("The run did not start"), added `needs-decision`, and had no lock to remove.
+
+Issues 13 and 14 are left as the check parked them, with `pipeline` and `needs-decision` and one `blocked` comment each. A cancel is not the same as a session that gives up by itself, which is how the first attempt on issue 1 ended, but the state the check reads is the same: the label, the comments and the run folder. What neither test covers is the owner's reply that should start a new run.
+
+## Version 0.3.5, after a third review, 2026-11-12
+
+A second reader went through 0.3.4, which nobody but its author had read, with 43 mutations of the `ship-status` code against its tests. Two of its findings are fixed in 0.3.5.
+
+1. 0.3.4 kept `pipeline-go` on an issue whose session never started. When an earlier run's `pipeline-working` is still on that issue, the sweep counts it as a stale lock, and `pipeline-go` lets it through `needs-decision`. Every sweep would then start the issue again, and while starts kept failing every attempt would post another `blocked` comment. 0.3.5 removes `pipeline-go` in that one case and keeps it otherwise. A test feeds the labels the check leaves to the sweep and expects it to start nothing.
+2. `split` was treated as the stop procedure. Stage 3 says of the split "This isn't the stop procedure, and no `needs-decision` is added", and its only label change is removing `pipeline-working`. A split that died before that step got `needs-decision` and lost `pipeline-go`. 0.3.5 only unlocks it, and the test that asserted the wrong behaviour is corrected.
+
+One behaviour the mutations showed unpinned now has a test: when a back-off comment is followed by a `blocked` in the same attempt, the later one decides the labels.
+
+Left open from that review, none of them seen in a run:
+
+- A fix run and an issue run on one issue have different concurrency groups, so they can overlap. If one has ended and the other has added `pipeline-working` but not yet posted its lock, the first one's check removes the second one's label.
+- An attempt that added `pipeline-working` and died before its lock comment reads as free. The job is green and the issue stays locked until the lock is stale, three hours by default, when the sweep starts it again.
+- A session that removes `pipeline-working` and dies before removing `pipeline-go` in stage 10 leaves `pipeline-go` on.
+- After a fix run's report the check also removes `pipeline-go`, where the fix stage removes only the lock.
+- The issue behind a fix run is taken from the branch name. A branch such as `pipeline/issue-7-x` gives no issue and the lock is not checked, and a key that is neither a number nor `PR-<n>` ends in an error.
+
+The two forced failures above ran on 0.3.4. The never-started path now goes through the new rule, which gives the same result for the labels issue 13 had. 0.3.5 has not run in Actions.
 
 ## Conventions this work followed
 

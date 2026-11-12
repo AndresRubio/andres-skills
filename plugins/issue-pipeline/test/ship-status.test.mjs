@@ -5,6 +5,8 @@ import path from 'node:path';
 import { sessionStarted, lockLeft, endingEdits } from '../skills/ship/scripts/lib/ship-status.mjs';
 import { parseMarker } from '../skills/ship/scripts/lib/marker.mjs';
 import { normalizeComments, PR_FIELDS } from '../skills/ship/scripts/lib/github.mjs';
+import { sweepCandidates } from '../skills/ship/scripts/lib/sweep.mjs';
+import { validateConfig } from '../skills/ship/scripts/lib/config.mjs';
 import { runCli } from './helpers/cli.mjs';
 import { fakeGh, ghCalls } from './helpers/fake-gh.mjs';
 import { tempDir } from './helpers/git.mjs';
@@ -77,10 +79,12 @@ test('endingEdits finishes what each ending comment\'s procedure does to the lab
   const noGo = ['--remove-label', 'pipeline-go'];
   const unlock = ['--remove-label', 'pipeline-working'];
   // The stop procedure: needs-decision, then the lock, and pipeline-go with it.
-  for (const kind of ['blocked', 'questions', 'split']) assert.deepEqual(endingEdits(kind, all), [park, noGo, unlock], kind);
-  // Stage 10 releases the lock and a leftover pipeline-go. A back-off releases the lock and nothing else.
+  for (const kind of ['blocked', 'questions']) assert.deepEqual(endingEdits(kind, all), [park, noGo, unlock], kind);
+  // Stage 10 releases the lock and a leftover pipeline-go.
   assert.deepEqual(endingEdits('report', all), [noGo, unlock]);
-  assert.deepEqual(endingEdits('deferred', all), [unlock]);
+  // A back-off and a split release the lock and nothing else. Stage 3 says of the split: "This isn't
+  // the stop procedure, and no needs-decision is added"; the parent waits for its sub-issues.
+  for (const kind of ['deferred', 'split']) assert.deepEqual(endingEdits(kind, all), [unlock], kind);
   assert.deepEqual(endingEdits('blocked', ['pipeline', 'pipeline-working']), [park, unlock], 'no pipeline-go to remove');
 });
 
@@ -159,6 +163,39 @@ test('CLI ship-status --post-missing finishes the labels of an attempt that post
   const deferred = ended('deferred', { [UNLOCK]: 'url' });
   assert.equal(deferred.r.code, 0, deferred.r.stderr);
   assert.deepEqual(deferred.calls(), [COMMENTS, LABELS, UNLOCK]);
+});
+
+test('CLI ship-status --post-missing applies the last ending comment when a back-off was followed by a stop', () => {
+  // Stage 3's wait posts `deferred`; when the wait does not read back, hard rule 7 posts `blocked`.
+  const { r, calls } = status(STARTED(), { [COMMENTS]: [[comment('lock', RUN, 11), comment('deferred', RUN, 12), comment('blocked', RUN, 13)]], [LABELS]: labels('pipeline', 'pipeline-working'), [PARK]: 'url', [UNLOCK]: 'url' });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(r.json(), { started: true, unlocked: true, after: 'blocked' });
+  assert.deepEqual(calls(), [COMMENTS, LABELS, PARK, UNLOCK]);
+});
+
+test('CLI ship-status --post-missing parks a session that never started so that the sweep does not start it again', () => {
+  // An earlier run crashed with the lock, and the issue carries pipeline-go. The sweep restarts a
+  // stale lock, and pipeline-go lets an issue through needs-decision, so with both left on every
+  // sweep would start the issue again and every failed start would post another comment.
+  const before = ['pipeline', 'pipeline-working', 'pipeline-go'];
+  const crashed = comment('lock', OTHER, 1);
+  const { r, calls, body } = status(EMPTY(), { [COMMENTS]: [[crashed]], [LABELS]: labels(...before), [POST]: 'url', [PARK]: 'url', [NO_GO]: 'url' });
+  assert.equal(r.code, 1, r.stderr);
+  assert.deepEqual(r.json(), { started: false, source: 'posted' });
+  assert.deepEqual(calls(), [COMMENTS, LABELS, POST, PARK, NO_GO]);
+
+  // The issue as those calls leave it, read by the sweep once the crashed run's lock is stale.
+  const edits = calls().map((c) => c.match(/--(add|remove)-label (\S+)$/)).filter(Boolean);
+  const after = edits.reduce((ls, [, verb, label]) => (verb === 'add' ? [...ls, label] : ls.filter((l) => l !== label)), before);
+  const posted = { id: 20, user: { login: 'github-actions[bot]' }, author_association: 'NONE', body: body(), created_at: at(20) };
+  const issue = {
+    number: 7, title: 't', body: '', state: 'open', author: 'AndresRubio', authorAssociation: 'OWNER', isPullRequest: false,
+    labels: after, openBlockedBy: [], openSubIssues: [], comments: normalizeComments([crashed, posted]), createdAt: at(0), labeledBy: 'AndresRubio',
+  };
+  const config = validateConfig({ tracker: { type: 'github' } });
+  const sweep = sweepCandidates({ issues: [issue], prs: [], closedPrs: [], config, owner: 'AndresRubio', now: new Date('2026-11-12T06:00:00Z') });
+  assert.deepEqual(sweep.start, []);
+  assert.deepEqual(sweep.skipped.map((x) => x.why), ['needs-decision with no new reply']);
 });
 
 test('CLI ship-status --post-missing leaves a lock that a later run holds', () => {

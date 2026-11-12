@@ -24,6 +24,17 @@ export function notStartedBody(marker, run) {
   ].join('\n');
 }
 
+// The label edits that park an issue whose session never started. The session used no approval, so
+// pipeline-go stays, with one exception: an earlier run's lock still on the issue. The sweep starts
+// a stale lock again, and pipeline-go lets an issue through needs-decision (eligibility.mjs), so
+// with both left on every sweep would start the issue and every failed start would post a comment.
+// The lock is not this session's to remove, so the approval goes.
+export function notStartedEdits(labels) {
+  const edits = [['--add-label', 'needs-decision']];
+  if (labels.includes('pipeline-working') && labels.includes('pipeline-go')) edits.push(['--remove-label', 'pipeline-go']);
+  return edits;
+}
+
 const sameOrAfter = (iso, since) => !since || new Date(iso).getTime() >= new Date(since).getTime();
 
 // The pipeline comments this attempt posted. Every attempt of an Actions run carries the same run
@@ -48,10 +59,10 @@ export function lockLeft(run, { labels, comments, since }) {
 }
 
 // The label edits that finish an ending comment's procedure, in its order. The stop procedure
-// (`blocked`, and the `questions` and `split` stops) adds needs-decision and removes pipeline-go with
-// the lock. Stage 10's `report` removes pipeline-go with the lock. A back-off (`deferred`) releases
-// the lock and nothing else.
-const PARKS = ['blocked', 'questions', 'split'];
+// (`blocked` and `questions`) adds needs-decision and removes pipeline-go with the lock. Stage 10's
+// `report` removes pipeline-go with the lock. A back-off (`deferred`) and a `split` release the lock
+// and nothing else: the split parent waits for its sub-issues and asks the owner nothing.
+const PARKS = ['blocked', 'questions'];
 export function endingEdits(kind, labels) {
   const edits = [];
   if (PARKS.includes(kind)) edits.push(['--add-label', 'needs-decision']);

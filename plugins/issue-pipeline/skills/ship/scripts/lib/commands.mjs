@@ -21,7 +21,7 @@ import { STAGE_POLICY, stageMark, readStages, stageTimings, loadUsage, buildRun,
 import { runReady } from './ready-run.mjs';
 import { runSweep, realSweepDeps } from './sweep-run.mjs';
 import { laneTarget } from './lane.mjs';
-import { sessionStarted, notStartedBody, attemptComments, lockLeft, endingEdits, stoppedBody } from './ship-status.mjs';
+import { sessionStarted, notStartedBody, notStartedEdits, attemptComments, lockLeft, endingEdits, stoppedBody } from './ship-status.mjs';
 import { defaultVars, installFiles } from './setup.mjs';
 import { formatScoreBody } from './score.mjs';
 import { hydrate } from './hydrate-run.mjs';
@@ -218,11 +218,10 @@ export const COMMANDS = {
     const labels = ghJson(['issue', 'view', issue, '--repo', v.repo, '--json', 'labels']).labels.map((l) => l.name);
     const edit = (flag, label) => ghText(['issue', 'edit', issue, '--repo', v.repo, flag, label]);
     // The run folder is looked for where the workflow says the home is. An attempt that commented on
-    // the issue started, wherever its folder went, so it is never told that it did not. pipeline-go
-    // stays: a session that never started used no approval.
+    // the issue started, wherever its folder went, so it is never told that it did not.
     if (!folder && attemptComments(run, comments, v.since).length === 0) {
       postIssueComment(v.repo, issue, notStartedBody(formatMarker('blocked', { run }), run));
-      edit('--add-label', 'needs-decision');
+      for (const [flag, label] of notStartedEdits(labels)) edit(flag, label);
       throw new ExitError({ started: false, source: 'posted' });
     }
     const lock = lockLeft(run, { labels, comments, since: v.since });

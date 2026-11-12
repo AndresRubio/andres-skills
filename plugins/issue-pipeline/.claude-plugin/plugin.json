@@ -1,7 +1,7 @@
 {
   "name": "issue-pipeline",
   "description": "Issue-to-PR pipeline for Claude Code: research, grade, spec, plan, build, verify, self-review, pull request and report, reusing superpowers and mattpocock-skills.",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "author": { "name": "AndresRubio", "url": "https://github.com/AndresRubio" },
   "homepage": "https://github.com/AndresRubio/andres-skills",
   "repository": "https://github.com/AndresRubio/andres-skills",
