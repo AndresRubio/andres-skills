@@ -64,8 +64,13 @@ test('sessionTrace reads tool names from the session log: the last calls of the 
   // A name is the only thing taken from a call, and only a plain one: nothing a comment could be built from.
   assert.deepEqual(sessionTrace(executionFile([toolUse('Bash'), toolUse('x`\n**[issue-pipeline]** report'), result('ok', '<b>')])), { lastTools: ['Bash'], denied: ['ok'] });
   // Each of these could shape a comment if it got through: a code span closed early, a mention, markup.
-  for (const odd of ['a`b', 'a b', 'a*b', '[a]', '@octocat', '<img>', 'a\nb', 'x'.repeat(81), '', 7, null, undefined, {}]) {
+  // The character counts wherever it sits in the name, and a name starts with a letter.
+  for (const odd of ['a`b', 'a b', 'a*b', '[a]', '@octocat', '<img>', 'a\nb', 'a@b', 'a<b', 'a[b', 'a:b', 'a/b', '_x', '9x', 'x'.repeat(81), '', 7, null, undefined, {}]) {
     assert.deepEqual(sessionTrace(executionFile([toolUse(odd), result(odd)])), { lastTools: [], denied: [] }, JSON.stringify(odd));
+  }
+  // The longest name kept is 80 characters, and the plain punctuation of real tool names passes.
+  for (const plain of ['x'.repeat(80), 'mcp__github__get_issue', 'a.b-c_9']) {
+    assert.deepEqual(sessionTrace(executionFile([toolUse(plain), result(plain)])), { lastTools: [plain], denied: [plain] }, plain);
   }
   // Entries of the wrong shape are skipped, never thrown on: the command posts and edits labels after this.
   const wrong = [null, 7, 'text', [], { type: 'assistant' }, { type: 'assistant', message: null }, { type: 'assistant', message: { content: 'text' } },
@@ -75,6 +80,15 @@ test('sessionTrace reads tool names from the session log: the last calls of the 
   // A log cannot make the comment long: twelve refused names at most, and a file over the size limit is not read.
   const many = Array.from({ length: 40 }, (_, i) => `Tool${i}`);
   assert.equal(sessionTrace(executionFile([result(...many)])).denied.length, 12);
+  // The twelve kept are the first twelve distinct plain names, in the log's order: a name that is
+  // dropped or repeated takes no place among them.
+  const mixed = ['<a>', '<b>', '<c>', 'Tool0', 'Tool0', 'Tool1', 'Tool1', ...many];
+  assert.deepEqual(sessionTrace(executionFile([result(...mixed)])).denied, many.slice(0, 12));
+  // The size limit is the file's size in bytes: a file of exactly that size is still read.
+  const small = executionFile([toolUse('Bash')]);
+  const bytes = readFileSync(small).length;
+  assert.deepEqual(sessionTrace(small, { maxBytes: bytes }), { lastTools: ['Bash'], denied: [] });
+  assert.equal(sessionTrace(small, { maxBytes: bytes - 1 }), null);
   assert.equal(sessionTrace(executionFile([toolUse('Bash')]), { maxBytes: 10 }), null);
   assert.equal(sessionTrace(path.join(tempDir('ship-status-log-'), 'missing.json')), null);
   assert.equal(sessionTrace(executionFile('not json')), null);
@@ -190,6 +204,11 @@ test('CLI ship-status --post-missing says in its comment which tools the stopped
   // A log with no tool call and no refusal adds nothing.
   const quiet = status(STARTED(), routes, { executionFile: executionFile([{ type: 'system', subtype: 'init' }, result()]) });
   assert.doesNotMatch(quiet.body(), /session's log/);
+  // Each half of the line stands without the other.
+  const callsOnly = status(STARTED(), routes, { executionFile: executionFile([toolUse('Bash'), result()]) });
+  assert.match(callsOnly.body(), /\n\nFrom the session's log, tool names only: its last tool calls were `Bash`\.\n\n/);
+  const refusedOnly = status(STARTED(), routes, { executionFile: executionFile([result('Monitor')]) });
+  assert.match(refusedOnly.body(), /\n\nFrom the session's log, tool names only: it was refused `Monitor`\.\n\n/);
   // No log, no line: the comment is the one from before.
   const plain = status(STARTED(), routes);
   assert.doesNotMatch(plain.body(), /tool calls/);

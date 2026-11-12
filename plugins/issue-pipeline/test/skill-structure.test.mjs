@@ -76,10 +76,11 @@ test('SKILL.md is a model-invocable skill named ship', () => {
   assert.doesNotMatch(front[1], /disable-model-invocation/);
 });
 
-test('SKILL.md carries the eleven hard rules and the stop procedure', () => {
+test('SKILL.md carries the twelve hard rules and the stop procedure', () => {
   const text = read('SKILL.md');
   const rules = text.split('## Hard rules')[1]?.split('\n## ')[0] ?? '';
-  for (let n = 1; n <= 11; n += 1) assert.match(rules, new RegExp(`^${n}\\. \\*\\*`, 'm'), `hard rule ${n} missing`);
+  for (let n = 1; n <= 12; n += 1) assert.match(rules, new RegExp(`^${n}\\. \\*\\*`, 'm'), `hard rule ${n} missing`);
+  assert.doesNotMatch(rules, /^13\. /m, 'a thirteenth hard rule needs this test to name it');
   assert.ok(headings(text).includes('Stop procedure'));
   assert.ok(headings(text).includes('Model policy'));
 });

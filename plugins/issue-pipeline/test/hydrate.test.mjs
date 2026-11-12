@@ -31,18 +31,27 @@ test('scanText: a malformed percent escape in a permalink path does not throw', 
 
 // Linear time is checked as growth, never as a time limit: a limit in milliseconds fails on a busy
 // machine (the 200 KB scan takes 60 ms alone and took 750 ms with the suite running under load).
-// Four times the input may take up to eight times as long; a quadratic scan takes sixteen. The
-// best of three runs is compared, and a scan under 5 ms counts as 5 so that noise near zero
-// cannot fail the test.
+// Four times the input may take up to eight times as long; a quadratic scan takes sixteen. Each
+// size is timed five times, the two sizes in turn so that a busy moment falls on both, and the
+// best times are compared. A scan under 5 ms counts as 5 so that noise near zero cannot fail the
+// test. A failed comparison is measured once more: load passes, a quadratic scan stays quadratic.
 function growsLinearly(run, n) {
-  const best = (size) => Math.min(...[0, 1, 2].map(() => {
+  const time = (size) => {
     const t0 = performance.now();
     run(size);
     return performance.now() - t0;
-  }));
-  const small = best(n);
-  const big = best(4 * n);
-  return { ok: big < 8 * Math.max(small, 5), small: Math.round(small), big: Math.round(big) };
+  };
+  const measure = () => {
+    let small = Infinity;
+    let big = Infinity;
+    for (let round = 0; round < 5; round += 1) {
+      small = Math.min(small, time(n));
+      big = Math.min(big, time(4 * n));
+    }
+    return { ok: big < 8 * Math.max(small, 5), small: Math.round(small), big: Math.round(big) };
+  };
+  const first = measure();
+  return first.ok ? first : measure();
 }
 
 test('growsLinearly tells a linear scan from a quadratic one', () => {

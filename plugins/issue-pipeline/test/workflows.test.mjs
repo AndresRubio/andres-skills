@@ -222,6 +222,34 @@ test('every Claude step runs with background tasks off, so the session cannot en
   }
 });
 
+test('the review and the fix run may run the code of a pipeline pull request, and only of one', () => {
+  // Since 2026-11-12 claude-code-action denies node, npm, shells and other commands that run code
+  // from the checkout on a pull request whose author has no write access, and it counts every bot
+  // as such an author. The pipeline's pull requests are opened by a bot, so with the default on
+  // the review cannot call the pipeline CLI or re-run the evidence (pull requests 28 and 29 of the
+  // sandbox ended as human-decision-needed that way). The switch is off only where the workflow
+  // has already checked that the branch is the pipeline's own, in this repository.
+  const withBlock = (name) => rendered(name).match(/uses: anthropics\/claude-code-action@v1\n        env:\n(?:          .*\n)+?        with:\n((?:          .*\n)+)/)?.[1] ?? '';
+  const review = rendered('pipeline-review.yml');
+  assert.match(withBlock('pipeline-review.yml'), /^          restrict_untrusted_prs: "false"$/m);
+  // The whole condition, word for word: an `||` anywhere in it would let a fork's pipeline/x branch through.
+  const jobIf = review.match(/^  pipeline-review:\n    name: pipeline-review\n    if: (.*)$/m)?.[1];
+  assert.equal(jobIf, "github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.draft == false && startsWith(github.event.pull_request.head.ref, 'pipeline/')");
+  // And the only trigger is pull_request, which runs a fork's pull request without this repository's secrets.
+  const triggers = (text) => text.slice(text.indexOf('\non:\n'), text.indexOf('\npermissions:'));
+  assert.equal(triggers(review), '\non:\n  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]\n');
+  // The only pull request event the router lets through to the ship job is a pipeline-fix label on
+  // a pipeline/* branch of this repository (lane.test.mjs), and the job runs on the router's word alone.
+  const ship = rendered('pipeline-ship.yml');
+  assert.match(withBlock('pipeline-ship.yml'), /^          restrict_untrusted_prs: "false"$/m);
+  assert.match(ship, /^  ship:\n    needs: route\n    if: needs\.route\.outputs\.run == 'true'$/m);
+  assert.match(triggers(ship), /^  pull_request:\n    types: \[labeled\]$/m);
+  assert.doesNotMatch(triggers(ship), /pull_request_target|workflow_run/);
+  // Scoring is dispatched by hand or by pipeline-ready, never by a pull request event, so there is nothing to turn off.
+  assert.doesNotMatch(rendered('pipeline-score.yml'), /restrict_untrusted_prs/);
+  assert.doesNotMatch(rendered('pipeline-score.yml'), /^  pull_request/m);
+});
+
 test('pipeline-ship checks in code that the session started, against the pipeline home the Claude step used', () => {
   const t = rendered('pipeline-ship.yml');
   assert.match(t, /^      key: \$\{\{ steps\.target\.outputs\.key \}\}$/m);

@@ -144,6 +144,22 @@ test('hard rule 7 only runs the stop procedure once the lock is taken (R3)', () 
   assert.match(rule7, /before the lock, just stop, changing nothing on the tracker/);
 });
 
+test('hard rule 12 ties the end of an automatic run to the end of the turn, and names every proper ending', () => {
+  const rules = read('SKILL.md').split('## Hard rules')[1]?.split('\n## ')[0] ?? '';
+  const rule12 = rules.match(/^12\. \*\*.*$/m)?.[0] ?? '';
+  assert.match(rule12, /In automatic mode the run ends the first time you end your turn/);
+  assert.match(rule12, /never end a turn while the run still has a step to do/);
+  // The endings a run may have. Leaving one out would forbid a proper stop.
+  for (const ending of ['after stage 10', "after fix mode's last step", "after a stage's own stop", 'a back-off', 'a wait', 'a split', 'a stop before the lock', 'after the stop procedure']) {
+    assert.ok(rule12.includes(ending), `hard rule 12 no longer names: ${ending}`);
+  }
+  // What a session could wait with, each named.
+  for (const wait of ['background subagent or command', '`nohup`', '`&`', 'scheduled wake-up', 'watcher']) {
+    assert.ok(rule12.includes(wait), `hard rule 12 no longer forbids: ${wait}`);
+  }
+  assert.match(rule12, /Dispatch a subagent in the foreground and stay in the turn until it returns/);
+});
+
 test('the existing-PR gate is paginated and matches the slug-less branch too (R4)', () => {
   const resolve = read('stages/00-resolve.md');
   assert.match(resolve, /--limit 100/);

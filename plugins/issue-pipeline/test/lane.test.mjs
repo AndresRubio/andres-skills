@@ -54,6 +54,18 @@ test('pipeline-fix on a same-repo pipeline PR starts a fix run; needs-local and 
   assert.equal(laneTarget({ name: 'pull_request', payload: prLabeled('pipeline-fix', { head: { ref: 'feat/x', repo: { full_name: 'o/r' } } }) }, { openPrs: [] }).run, false);
 });
 
+test('a pull request reaches a run only through the pipeline-fix label being added', () => {
+  // The ship workflow lets its session run a pull request's code (restrict_untrusted_prs is off there),
+  // so no other pull request event may be routed, whatever labels the pull request already has.
+  const fixLabelled = (action) => ({ ...prLabeled('pipeline-fix', { labels: [{ name: 'pipeline-fix' }] }), action });
+  for (const action of ['opened', 'synchronize', 'reopened', 'ready_for_review', 'unlabeled', 'edited', 'closed']) {
+    assert.equal(laneTarget({ name: 'pull_request', payload: fixLabelled(action) }, { openPrs: [] }).run, false, action);
+  }
+  for (const name of ['pull_request_target', 'pull_request_review', 'pull_request_review_comment', 'workflow_run']) {
+    assert.equal(laneTarget({ name, payload: fixLabelled('labeled') }, { openPrs: [] }).run, false, name);
+  }
+});
+
 test('other events never run', () => {
   assert.equal(laneTarget({ name: 'push', payload: {} }, { openPrs: [] }).run, false);
   assert.equal(laneTarget({ name: 'issues', payload: { action: 'opened', issue: issue() } }, { openPrs: [] }).run, false);

@@ -90,6 +90,12 @@ jobs:
           # claude-code-action takes a comma-separated list. A sweep dispatch made with the default
           # github.token runs as github-actions[bot], which the action refuses unless it is listed.
           allowed_bots: "claude[bot],github-actions[bot]"
+          # The action denies node, npm and shells on a pull request whose author has no write access,
+          # and it counts every bot as one. A fix run started by the pipeline-fix label is a pull
+          # request event on a pull request a bot opened, so with the default on it cannot call the
+          # pipeline CLI. It is off here because the router lets through only a pipeline/* branch of
+          # this repository. Do not route other pull requests to this job while this stays off.
+          restrict_untrusted_prs: "false"
           prompt: ${{ needs.route.outputs.prompt }}
           # The agent loads the pinned clone above, so its skills, stages and hooks match the CLI it calls.
           claude_args: |

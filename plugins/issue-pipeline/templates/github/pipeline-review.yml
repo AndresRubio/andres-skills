@@ -49,6 +49,12 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allowed_bots: "claude[bot]"
+          # The action denies node, npm and shells on a pull request whose author has no write access,
+          # and it counts every bot as one. The pipeline's pull requests are opened by a bot, so with
+          # the default on the review cannot call the pipeline CLI or re-run the evidence. It is off
+          # here because the job's `if` already limits it to pipeline/* branches of this repository,
+          # whose code the ship run wrote and ran. Do not widen that `if` while this stays off.
+          restrict_untrusted_prs: "false"
           prompt: "/issue-pipeline:review ${{ github.event.pull_request.number }} --head ${{ github.event.pull_request.head.sha }}"
           # The agent loads the pinned clone above, so its skills, stages and hooks match the CLI it calls.
           claude_args: |
