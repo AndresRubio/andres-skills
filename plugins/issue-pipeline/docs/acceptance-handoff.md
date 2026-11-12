@@ -250,6 +250,49 @@ What this does and does not show:
 2. The grade did not split the issue, which is what the fixture was written to produce. It judged the change to fit, at the limit of six files, and stopped on the number of assumptions: seven against a limit of three for an unattended run. Whether that is the grade working or the fixture being too small is for the owner to judge.
 3. Open on issue 4: a reply, or `pipeline-go` to accept the seven assumptions. Either would be the first resume seen in Actions.
 
+## Three more runs on 0.3.6, 2026-11-12
+
+Issues 2, 5 and 9 of the public sandbox ran one after another on 0.3.6. Nothing was parked or locked on them before.
+
+| Issue | Ship run | Time | Turns | Cost | Denials | Pull request |
+|---|---|---|---|---|---|---|
+| 2 | 43309805263 | 331 s | 108 | 1.33 dollars | 2 | 28 |
+| 5 | 43310861779 | 314 s | 99 | 1.17 dollars | 1 | 29 |
+| 9 | 43311914680 | 293 s | 107 | 1.32 dollars | 0 | 30 |
+
+Each run posted `lock`, `grade`, `assumptions` and `report`, opened its pull request, left the issue without `pipeline-working`, and its last step printed `{"started":true}`. CI passed on the three pull requests.
+
+With issue 4 that is four runs on 0.3.6 and four proper endings. Two of the eight runs before had stopped after the lock. At that rate four good runs in a row would still happen about one time in three, so the stops are less likely than before and not yet shown to be gone.
+
+A second reader went through commit `89071ba`, the last one of 0.3.6, with 54 mutations. No blocker and nothing to fix in the code. Its test gaps are closed in 0.3.7: which twelve refused names are kept, each half of the trace line standing alone, the characters of a tool name wherever they sit, the size limit at its edge, and a test that pins hard rule 12. The fifteen mutations that had survived are now caught. Hard rule 12 also names the `wait` ending of stage 3, which its list had left out.
+
+## The action's new rule on bot pull requests, and version 0.3.7, 2026-11-12
+
+The review of the three pull requests failed, and the cause was outside the plugin.
+
+- `pipeline-review` on pull requests 28, 29 and 30 (runs 43310732822, 43311776457 and 43312735358) counted eight permission denials each and posted `human-decision-needed`. The sessions said that `node`, `npm` and `npx` were denied, so the pipeline CLI, the evidence re-run, the revert check and the diff-risk scan could not run. They cost 1.41, 2.48 and 1.78 dollars.
+- The review of pull request 25 at 14:59 UTC the same day had none of this (run 43242980964, no denial). Between the two, the floating tag `anthropics/claude-code-action@v1` moved from commit `4fa93a88` to `8a29bc6f`. The Claude Code version on the runner was 2.1.322 in both.
+- The new version has a rule, added in the action's commit `3fd08952` at 17:14 UTC: on a pull request whose author has no write access it denies a list of commands that run code from the checkout, among them `node`, `npm`, `npx`, `bash`, `sh`, `git config` and `git -c`. Every `[bot]` author counts as having no write access, even one named in `allowed_bots`. The log of the failed reviews carries the action's warning: "The author of pull request #28 is not confirmed to have write access, so commands that run code from the checkout are denied."
+- The pipeline's pull requests are opened by a bot, so every review would end this way from now on. A fix run started by the `pipeline-fix` label is a pull request event too and would be denied the same commands. Ship runs on issue events are not touched, which is why issues 2, 5 and 9 ran.
+
+The action's input `restrict_untrusted_prs: "false"` turns the rule off, and 0.3.7 sets it on the Claude step of `pipeline-review` and `pipeline-ship`. The reasoning, which the owner accepts by merging the regenerated workflows:
+
+1. The review job runs only for a pull request whose head is a `pipeline/` branch of the same repository. Putting code on such a branch takes write access.
+2. The only pull request event the router sends to the ship job is a `pipeline-fix` label on a `pipeline/` branch of the same repository.
+3. The code on that branch was written by the ship run, whose session had already run it while holding the same kind of token the review session holds.
+
+`pipeline-score` is left as it was: it is dispatched and never runs on a pull request event. Tests pin the review job's condition word for word, the triggers of the two workflows and the one pull request event the router accepts, and fail if the score workflow gains the switch.
+
+A second reader attacked that reasoning before the tag and found it to hold for code: nobody without write access can get code they control run by either session. Three things from that reading. The test as first written accepted a review condition with an `||` in it, which would have let a fork's `pipeline/x` branch through; it now compares the whole line. An earlier wording here leaned on the `npm ci` step that the review workflow runs before the session, and that step holds only the job's read token, while the session posts as `claude[bot]` and so holds the Claude app's token, which the workflow's `permissions` block does not narrow. And with the switch off the action no longer turns git hooks off during the session, so a hook that the repository's install sets up runs on the session's own commits, at the same level of trust as its tests. An outsider can still open a pull request between two branches of the repository and so choose its title and body; that text reaches the review with the switch on or off. The alternative, pinning the action to its earlier commit, would also have dropped the action's other fixes of that day.
+
+Other changes in that version of the action were read for their effect here. The action now starts sessions in auto mode by default, except when `allowed_bots` is set, and the three workflows set it, so their permission mode is unchanged. The action also restores `GITHUB_ENV`, `GITHUB_PATH` and git's config files after the session; the ship runs above ran on the new version and their last step still read `ATTEMPT_STARTED`.
+
+What is not shown: 0.3.7 has not run in Actions, and a fix run started by the `pipeline-fix` label has never been seen there on any version.
+
+Left for the owner: the workflows follow the floating tag `@v1`, which is how this change arrived in the middle of a day of runs. Pinning the action to a commit would stop that and would mean updating it by hand.
+
+`pipeline-ready` failed five times during these runs with "Resource not accessible by personal access token (addComment)": `PIPELINE_TOKEN` cannot comment on issues of the public sandbox, on top of not seeing the private one. Until the owner gives it read and write on Issues and Pull requests, no pull request is marked ready and no issue is told that its review needs a decision. One nit seen in its output: a step that fails is still listed under `done`, because the step is recorded before it runs.
+
 ## Conventions this work followed
 
 Git identity `AndresRubio <2109109+AndresRubio@users.noreply.github.com>`. On this machine the default SSH key for `github.com` belongs to another account; AndresRubio repositories push through the `github.com-personal` alias, which the clones already use. Commit messages and pull request bodies carry no attribution lines. Pull requests are merged by the owner, since the app's permission classifier refuses a merge from a session. Commit message files go in the session scratchpad under a unique name, and their first line is checked in a call of its own before the commit, because two hooks in this repository can refuse a whole Bash command and a retry then commits a stale file.
