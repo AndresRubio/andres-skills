@@ -80,6 +80,27 @@ Version 0.3.1 holds the three workflow fixes (items 3, 6 and 7). The sandboxes s
 
 The local acceptance of Phase 1 (Task 18 of the Phase 1 plan) has not run either, and the Phase 2a plan asks for it first. It runs `claude -p "/issue-pipeline:ship #N --mode auto"` on this machine, and its prerequisites are the owner's: a fine-grained token limited to the two sandboxes, saved at `~/.config/issue-pipeline/sandbox-token`, HTTPS remotes in the sandbox clones so that pushes use that token, and branch protection on the public sandbox's `main`. On 2026-11-12 none of the three was in place: the folder does not exist, the clones push over SSH with the owner's key, and `main` is not protected. A local run without them would hold the owner's whole GitHub account, so none was started.
 
+## First complete run, 2026-11-12
+
+After pull request 20 put the allowed tools on `main` of the public sandbox, issue 1 ("Added dates show the wrong month") went from label to pull request 21.
+
+- Attempt 1 of run 43175653397 took the lock and ended two minutes later as a success: 37 turns, 0.46 dollars, one permission denial, and no grade, branch or stop comment. It left `pipeline-working` on the issue. The cause is unknown. The action hides the session, and a rerun with debug logging does not show it either.
+- Attempt 2, the same run after `pipeline-working` was removed by hand, went through stages 0 to 10 in 304 seconds: 113 turns, 1.39 dollars by the action's count and 1.18 in `run.json`. The grade was `small-gaps` with two assumptions. The change is one line in `src/list.ts` and three tests, and CI passed.
+- `pipeline-review` ran on `claude-fable-5-1` for 210 seconds (24 turns, 1.94 dollars) and posted `human-decision-needed` with one Important judgment finding: the spec's own criterion "checked by running the app" has no screenshot. The check failed, which is what a verdict other than `accepted` is meant to do.
+- `pipeline-ready` then failed. `gh issue comment 1` was refused with "Resource not accessible by personal access token (addComment)", so the `PIPELINE_TOKEN` has no write access to issues.
+
+What the run showed about the plugin:
+
+1. The workflows check the plugin out at `.issue-pipeline-plugin/` inside the repository. `npm test` then collects the plugin's own tests and fails with 59 files. The agent ran `vitest` with that folder excluded and said so in evidence.md. The plugin should be checked out outside the workspace.
+2. `mattpocock-skills:code-review` and confession-box were not installed, so stage 8 was Claude reviewing its own 18-line diff, as evidence.md states. This is item 9 above, seen in practice.
+3. The preview did not start. Its command was denied permission and the session has no browser tool, so no screenshot was taken. That is the finding the reviewer raised.
+4. evidence.md says "Cost: Unknown" while `run.json` on the same branch holds the cost.
+5. Every pipeline comment starts a `pipeline-ship` run that the route job turns down, four in this run. They cost seconds and no Claude usage.
+6. A scheduled `pipeline-ready` run did appear, at 03:59 UTC, four and a half hours after the merge. Item 10 above was written before it.
+7. The `ship-status` step of version 0.3.1 would not have caught attempt 1, because that session started and then stopped with the lock held. The lock goes stale after `lockTtlHours` (3 hours) and the sweep should then start the issue again. That was not waited for.
+
+Neither results file is written. This was one fixture on one sandbox, and the acceptance tasks in the plans cover more.
+
 ## Conventions this work followed
 
 Git identity `AndresRubio <2109109+AndresRubio@users.noreply.github.com>`. On this machine the default SSH key for `github.com` belongs to another account; AndresRubio repositories push through the `github.com-personal` alias, which the clones already use. Commit messages and pull request bodies carry no attribution lines. Pull requests are merged by the owner, since the app's permission classifier refuses a merge from a session. Commit message files go in the session scratchpad under a unique name, and their first line is checked in a call of its own before the commit, because two hooks in this repository can refuse a whole Bash command and a retry then commits a stale file.
