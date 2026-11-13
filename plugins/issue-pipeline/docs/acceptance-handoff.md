@@ -325,6 +325,41 @@ Three things in this stretch went beyond what the rules above allow, and they ca
 
 Still not seen in Actions: a fix run started by the `pipeline-fix` label, and a resume by a reply or by `pipeline-go`. Only the review workflow has run a session on 0.3.7, and only on the public sandbox. `pipeline-ready` still fails with "Resource not accessible by personal access token (addComment)" whenever it has something to say, since `PIPELINE_TOKEN` is unchanged.
 
+## The owner's open items and three complete runs, 2026-11-13
+
+The owner went through the open items one at a time, with the session as guide.
+
+The owner created a new fine-grained token with both sandboxes selected and read and write on Actions, Contents, Issues and Pull requests, and stored it as `PIPELINE_TOKEN` on both sandboxes at 11:57 UTC. A `pipeline-ready` run started by hand on the private sandbox (43421205865) then passed, the first green run of that workflow there.
+
+The owner then replied on three parked issues of the public sandbox. Each went from the reply to a pull request with the `ready` label with nobody touching it in between, which no issue had done before. All sessions ran on plugin version 0.3.7 and on build `4d75e5f3` of the action (release v1.0.275, where the tag `@v1` has pointed since 23:13 UTC on 2026-11-12).
+
+| Issue | Pull request | Ship run | Review | Cost of the issue |
+|---|---|---|---|---|
+| 13 | 33 | 43423504731: 189 s, 71 turns, 0.82 dollars, 0 denials | 43423983970: `accepted`, 83 s, 1.17 dollars | 1.99 dollars |
+| 14 | 34 | 43425232951: 252 s, 75 turns, 1.17 dollars, 1 denial | 43425898628: `accepted`, 79 s, 1.22 dollars | 2.39 dollars |
+| 4 | 35 | 43425893546: 9 minutes and 2.08 dollars by its report | three reviews, described below | 8.60 dollars |
+
+The three issues cost 12.98 dollars. Which tool call the ship run of issue 14 was denied has not been looked up.
+
+What these runs showed in Actions for the first time:
+
+- A reply on an issue with `needs-decision` starts a new run. It did so three times, each within seconds of the reply.
+- `pipeline-ready` works with a token that can write. It posted "Ready to merge" on the pull request and on the issue, added the `ready` label, and for pull request 35 dispatched `pipeline-score` (run 43428950127, sampled 1 in 4, 0.01 dollars, task `compliant`, review `actionable`). The comments appear under the owner's name, since the workflow posts with the owner's token.
+- A fix run started by the `pipeline-fix` label. The first review of pull request 35 (run 43427267154, 2.15 dollars) ended `revision-needed` with one important finding: the browser check in the evidence was run by a script kept outside the repository, so nobody can repeat it. `pipeline-ready` (run 43427677480) added `pipeline-fix`, and the fix run (43427718047: 136 s, 48 turns, 0.52 dollars, 0 denials) removed the label, pushed one commit that fixes three of the findings and one that redoes the evidence.
+- `pipeline-ready` updates a branch that is behind. Pull request 34 was merged while pull request 35 was in its fix round, and run 43428452055 brought `main` into the branch.
+
+Still not seen: the `pipeline-go` label. The owner's reply on issue 4 was the text "pipeline-go", and the grade stage read it as the answer to its one question, accepting assumptions A1 to A7. That is a resume by a reply. Nobody has put the label on an issue in Actions yet. No session has run on the private sandbox on 0.3.7 either.
+
+One thing about cost. Pull request 35 was reviewed three times, and the reviews were 5.99 of its 8.60 dollars. The review of the fix (run 43428085089, head `a81f98b`, 1.72 dollars) had just passed when `pipeline-ready` saw the branch behind `main` and updated it, and the merge commit (`5fb1f7c`) then got a review of its own (run 43428497449, `accepted`, 2.12 dollars). `pipeline-ready` looks at the review before it looks at whether the branch is behind, so a branch that falls behind during its review pays for one review more. Updating the branch before the review runs would avoid that. Left for the next version.
+
+The session merged pull requests 33, 34 and 35 by squash, each at the commit its review accepted and each on the owner's word for that pull request. Issue 3 was closed as not planned at the owner's word: it is the vague fixture, and the pipeline had asked its three questions instead of inventing answers. The 22 branches of merged pull requests on the two sandboxes were deleted at the owner's word, 14 on the public one and 8 on the private one. One of them, `issue-pipeline-allowed-tools` on the private sandbox, held a commit that `main` does not have (`f35463a`, an early move of the workflows to 0.3.2 that the later pull request replaced). The public sandbox's `main` is at `ad3e944` and passes its 42 tests. The private one is unchanged at `bc2e15c`. Neither has an open pull request, and no issue carries `needs-decision`.
+
+Decided by the owner for the next version: pin `claude-code-action` to a commit instead of following `@v1`. When the owner decided, the candidate was the commit of v1.0.274 (`7ca5eaf9`), on which the two reviews of 2026-11-12 had run. Today's ship, fix, review and score sessions all ran on v1.0.275 (`4d75e5f390ee76b2e09c1980ecc99ff3a2e088c8`), so that commit now has more runs behind it. Which of the two to pin is the owner's to confirm.
+
+For the next version, batched: the pin, the dash in the headings of the four run-record templates, updating a branch before its review, a pull request whose review failed for an outside reason staying stuck, and the step that `pipeline-ready` lists under `done` before it has run.
+
+Still the owner's: delete the old pipeline token on GitHub, and revoke the Claude tokens from earlier `claude setup-token` runs that no secret uses.
+
 ## Conventions this work followed
 
 Git identity `AndresRubio <2109109+AndresRubio@users.noreply.github.com>`. On this machine the default SSH key for `github.com` belongs to another account; AndresRubio repositories push through the `github.com-personal` alias, which the clones already use. Commit messages and pull request bodies carry no attribution lines. Pull requests are merged by the owner, or by the session once the owner has said so in that session in their own message; without that the app's permission classifier refuses a merge. Commit message files go in the session scratchpad under a unique name, and their first line is checked in a call of its own before the commit, because two hooks in this repository can refuse a whole Bash command and a retry then commits a stale file.
