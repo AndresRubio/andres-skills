@@ -59,6 +59,27 @@ test('templates have their required sections', () => {
   assert.match(read('templates/spec.md'), /Adapted from mattpocock\/skills \(MIT License, Copyright \(c\) 2026 Matt Pocock\)/);
 });
 
+test('the run-record templates carry no em or en dash into the files written from them', () => {
+  // The run records are committed to the target repository, where a writing hook may reject a
+  // dash in prose: a merge commit on a pipeline branch of the sandbox was refused that way over
+  // the headings these templates gave it.
+  for (const file of ['templates/spec.md', 'templates/grade.md', 'templates/evidence.md', 'templates/progress.md']) {
+    const hits = read(file).split('\n').filter((line) => /[–—]/.test(line));
+    assert.deepEqual(hits, [], `${file} has a dash`);
+  }
+  assert.match(read('templates/spec.md'), /^# Spec for <KEY>: <issue title>$/m);
+  for (const name of ['Grade', 'Evidence', 'Progress']) assert.match(read(`templates/${name.toLowerCase()}.md`), new RegExp(`^# ${name} for <KEY>$`, 'm'));
+  // The stages that fill those sections give the agent the same line formats as the templates.
+  assert.match(read('templates/progress.md'), /`Task N: summary \(<commit sha>\)`/);
+  assert.match(read('stages/06-build.md'), /Append "Task N: summary \(<sha>\)" to progress\.md's Tasks section/);
+  assert.match(read('templates/evidence.md'), /one line per hit as `rule: file: detail`/);
+  assert.match(read('stages/08-review.md'), /under "Diff risk" in evidence\.md as `rule: file: detail`/);
+  // Two more lines the stages dictate end up in a run record: the screenshot failure in evidence.md,
+  // and a question's recommendation, which stage 3 copies under Decisions in grade.md once answered.
+  assert.match(read('stages/07-verify.md'), /write "Visual check needed: screenshot failed: <the error>"/);
+  assert.match(read('stages/03-grade.md'), /each followed by "Recommended: <answer> \(<why>\)"\. For a missing value, write "Recommended: none, please supply the value\."/);
+});
+
 test('the adapter links sub-issues and blockers in single commands', () => {
   const text = read('trackers/github.md');
   assert.match(text, /-F sub_issue_id="\$\(gh api/);

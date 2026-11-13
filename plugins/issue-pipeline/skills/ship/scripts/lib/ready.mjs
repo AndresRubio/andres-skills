@@ -64,11 +64,15 @@ export function decideReady({ pr, config, verdict }) {
   }
   const failing = config.ciChecks.filter((name) => checkState(pr.statusCheckRollup, name) === 'failure');
   if (failing.length) return { action: 'fix', reason: 'ci', failing, ...stale };
+  // A branch that is behind takes its base in before its checks are waited for: the review is the
+  // costly check, and a review of a head that is about to change is paid for a second time on the
+  // merge. Only a branch GitHub calls mergeable: update-branch refuses a conflict, and UNKNOWN
+  // means GitHub has yet to say.
+  if (pr.mergeable === 'MERGEABLE' && pr.mergeStateStatus === 'BEHIND') return { action: 'update', reason: 'behind base', ...stale };
   const notDone = [...config.ciChecks, REVIEW_CHECK].filter((name) => checkState(pr.statusCheckRollup, name) !== 'success');
   if (notDone.length) return { action: 'wait', reason: `not success yet: ${notDone.join(', ')}`, ...stale };
   // GitHub computes mergeability lazily; UNKNOWN (common right after the base moves) is not "clean".
   if (pr.mergeable === 'UNKNOWN' || pr.mergeStateStatus === 'UNKNOWN') return { action: 'wait', reason: 'merge state not computed yet', ...stale };
-  if (pr.mergeStateStatus === 'BEHIND') return { action: 'update', reason: 'behind base', ...stale };
   if (pr.mergeable === 'CONFLICTING') return { action: 'fix', reason: 'conflict', ...stale };
   if (hasReady) return { action: 'already-ready' };
   return { action: 'ready' };

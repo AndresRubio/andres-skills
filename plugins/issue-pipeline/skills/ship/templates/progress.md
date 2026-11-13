@@ -1,4 +1,4 @@
-# Progress — <KEY>
+# Progress for <KEY>
 
 ## Run
 
@@ -32,4 +32,4 @@
 
 ## Tasks
 
-One line per finished task: `Task N — summary — <commit sha>`.
+One line per finished task: `Task N: summary (<commit sha>)`.

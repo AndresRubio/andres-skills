@@ -35,7 +35,9 @@ jobs:
       - name: Install the repo's dependencies for the evidence re-run
         run: if [ -f package-lock.json ]; then npm ci; fi
       - name: Review
-        uses: anthropics/claude-code-action@v1
+        # A commit, since the tag v1 moves with every release of the action. To take a newer
+        # release, change this line in the three pipeline workflows after a run on a sandbox.
+        uses: anthropics/claude-code-action@4d75e5f390ee76b2e09c1980ecc99ff3a2e088c8 # v1.0.275
         env:
           ISSUE_PIPELINE_LANE: github
           ISSUE_PIPELINE_GUARD: '1'

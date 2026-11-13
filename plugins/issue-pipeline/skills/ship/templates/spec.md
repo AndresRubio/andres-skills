@@ -1,5 +1,5 @@
 <!-- Adapted from mattpocock/skills (MIT License, Copyright (c) 2026 Matt Pocock): the to-spec template. -->
-# Spec — <KEY>: <issue title>
+# Spec for <KEY>: <issue title>
 
 **Source:** <issue URL>
 

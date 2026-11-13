@@ -225,7 +225,7 @@ test('wait: the waitLine, posted last in a deferred comment the way stage 3 post
   assert.deepEqual(verdict.waitFor, ['100', '7', '10']);
   const at = '2026-10-06T11:05:00Z';
   const body = [
-    `**[issue-pipeline]** deferred · ${at} · local`, '', '# Grade — 5', '', '**Verdict:** `wait`', '',
+    `**[issue-pipeline]** deferred · ${at} · local`, '', '# Grade for 5', '', '**Verdict:** `wait`', '',
     '## Waiting for', '', '- #7 (same-code): src/list.ts:12', '',
     'This issue becomes eligible again once none of these runs is in progress: the sweep or the next poll picks it up, or run `/ship #5` again. To run it alongside them anyway, add `pipeline-go`.',
     verdict.waitLine,

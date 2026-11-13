@@ -178,3 +178,24 @@ test('a queued re-run with no timestamps outranks an older failure (final review
   assert.equal(checkState([failed, queued], 'pipeline-review'), 'pending');
   assert.equal(checkState([queued, failed], 'pipeline-review'), 'pending');
 });
+
+test('a branch behind its base takes it in before its checks are waited for', () => {
+  // The review is the costly check. Waiting for it on a head that is about to change pays for it
+  // twice: pull request 35 of the sandbox got a second review of the same change that way.
+  const reviewing = [run('test', 'SUCCESS'), run('pipeline-review', null, 'IN_PROGRESS')];
+  assert.deepEqual(decideReady({ pr: pr({ mergeStateStatus: 'BEHIND', statusCheckRollup: reviewing }), config, verdict: null }), { action: 'update', reason: 'behind base' });
+  const noChecksYet = pr({ mergeStateStatus: 'BEHIND', statusCheckRollup: [], labels: ['ready'] });
+  assert.deepEqual(decideReady({ pr: noChecksYet, config, verdict: null }), { action: 'update', reason: 'behind base', removeReady: true });
+  // A failed check still goes first: the fix run it asks for brings the branch up to date itself.
+  const redCi = pr({ mergeStateStatus: 'BEHIND', statusCheckRollup: [run('test', 'FAILURE'), run('pipeline-review', null, 'IN_PROGRESS')] });
+  assert.equal(decideReady({ pr: redCi, config, verdict: null }).reason, 'ci');
+  const redReview = pr({ mergeStateStatus: 'BEHIND', statusCheckRollup: [run('test', 'SUCCESS'), run('pipeline-review', 'FAILURE')] });
+  assert.equal(decideReady({ pr: redReview, config, verdict: { ...accepted, verdict: 'revision-needed' } }).reason, 'review');
+  // A branch GitHub cannot merge is not updated, since update-branch refuses a conflict: once its
+  // checks are done it goes to a fix run, as before.
+  const conflicting = pr({ mergeable: 'CONFLICTING', mergeStateStatus: 'BEHIND' });
+  assert.equal(decideReady({ pr: { ...conflicting, statusCheckRollup: reviewing }, config, verdict: null }).action, 'wait');
+  assert.deepEqual(decideReady({ pr: conflicting, config, verdict: accepted }), { action: 'fix', reason: 'conflict' });
+  // And a merge state GitHub has not computed yet is still not acted on.
+  assert.equal(decideReady({ pr: pr({ mergeable: 'UNKNOWN', mergeStateStatus: 'BEHIND', statusCheckRollup: reviewing }), config, verdict: null }).action, 'wait');
+});

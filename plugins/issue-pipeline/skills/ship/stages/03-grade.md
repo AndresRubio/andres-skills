@@ -28,7 +28,7 @@ Decide whether the issue can be built as it is, needs recorded assumptions, need
 5. Write `docs/pipeline/<KEY>/grade.md` from `templates/grade.md`. The verdict line must read exactly `**Verdict:** \`<verdict>\``. Write any `notes` from grade.json into "Why". A `went ahead alongside` note also goes under "## Decisions" as "Went ahead alongside <labels>: <who>", where <who> is "the `pipeline-go` label" or "you" (the user, in interactive mode; grade.md speaks to the owner). Exception: when this run stops at a fork or too-big in automatic mode, it builds nothing, so the note stays only under "Why" and no Decisions line is written.
 6. Act on the verdict (see the mode sections).
 
-**Questions (for a fork):** one per fork reason and one per missing value. Number them **Q1.**, **Q2.**, …, each followed by "Recommended: <answer> — <why>". For a missing value, write "Recommended: none — please supply the value."
+**Questions (for a fork):** one per fork reason and one per missing value. Number them **Q1.**, **Q2.**, …, each followed by "Recommended: <answer> (<why>)". For a missing value, write "Recommended: none, please supply the value."
 
 **Proposed split (for too-big):** 2–6 vertical slices in dependency order. Each slice cuts through every layer end to end and is valuable alone. For wide mechanical changes, use expand → migrate → contract slices instead (the tracer-bullet approach from mattpocock/skills to-tickets). Each slice gets a title, a 2–4 line description, acceptance criteria, and an estimated size under `maxPrSize`.
 

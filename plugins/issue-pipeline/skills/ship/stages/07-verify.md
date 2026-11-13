@@ -23,7 +23,7 @@ WT, BASE_SHA, `$RUN_DIR/checks.txt`, `$RUN_DIR/config.json` (`preview`), `docs/p
    4. For a state that needs interaction (clicking, typing), use the session's browser tool if one exists, and describe what you saw.
    5. List every screenshot under "Screenshots": the file, what it shows, and which AC it demonstrates.
    6. `node "$PIPELINE" preview-stop --pid-file "$RUN_DIR/preview.pid"`, on every path out of step 5.
-   7. If `screenshot` fails for any reason, write "Visual check needed: screenshot failed — <the error>" and carry on.
+   7. If `screenshot` fails for any reason, write "Visual check needed: screenshot failed: <the error>" and carry on.
 6. **If yes and there's no `preview`:** write "Visual check needed: no preview command configured." **If no:** write "Not applicable."
 7. Under "Departures from spec", list every place the implementation differs from spec.md and why, or write "None."
 8. Tick stage 7. Commit (`docs(pipeline): evidence for #<NUMBER>`) and push: `git push origin "$BRANCH"`.

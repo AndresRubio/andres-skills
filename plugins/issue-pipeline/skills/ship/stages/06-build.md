@@ -13,7 +13,7 @@ Implement the plan test-first, committing and pushing as you go.
    1. For a task that changes behaviour, follow superpowers:test-driven-development, matching stage 5's rule: write the failing test, watch it fail, write the minimal code, watch it pass. Other tasks just do the step.
    2. Run the task's tests, plus the typecheck if `checks.txt` has one. Send the output to a log in one command, using the runner's quiet flag (`--reporter=dot`, `--silent`, `-q`): `<command> > "$RUN_DIR/logs/build-<what>.log" 2>&1`. Read it in a separate command: `tail -n 40 "$RUN_DIR/logs/build-<what>.log"`, or `grep -E 'error|fail|warn' "$RUN_DIR/logs/build-<what>.log" | head -40`. Installs, dev servers, builds and typechecks go through a log the same way. Never `cat` the log.
    3. Write the message `<type>(<scope>): <task summary> (#<NUMBER>)` plus the trailer to `$RUN_DIR/commit-msg.txt` with the file-writing tool (the task summary is free text), commit with `git commit -F "$RUN_DIR/commit-msg.txt"`, and push: `git push origin "$BRANCH"`.
-   4. Append "Task N — summary — <sha>" to progress.md's Tasks section. Don't commit this now: it goes in with the next task's commit (the last task's line goes in with the stage-6 tick, step 5). No amend.
+   4. Append "Task N: summary (<sha>)" to progress.md's Tasks section. Don't commit this now: it goes in with the next task's commit (the last task's line goes in with the stage-6 tick, step 5). No amend.
 3. **TASKS > 3:** use superpowers:subagent-driven-development on plan.md, with these overrides:
    - The worktree already exists: skip its worktree setup.
    - Implementers run on sonnet (opus for fix rounds 4–5) and reviewers on opus. Name the model every time.

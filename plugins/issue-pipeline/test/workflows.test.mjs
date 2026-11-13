@@ -6,6 +6,23 @@ import { renderWorkflow, defaultVars } from '../skills/ship/scripts/lib/setup.mj
 const tpl = (name) => readFileSync(new URL(`../templates/github/${name}`, import.meta.url), 'utf8');
 const rendered = (name) => renderWorkflow(tpl(name), defaultVars());
 
+// The Claude step names the action by commit, with the release it belongs to in a comment.
+const CLAUDE_USES = String.raw`uses: anthropics\/claude-code-action@[0-9a-f]{40} # v\d+\.\d+\.\d+`;
+const CLAUDE_WORKFLOWS = ['pipeline-ship.yml', 'pipeline-review.yml', 'pipeline-score.yml'];
+
+test('every Claude step pins the action to one commit, never to a tag that can move', () => {
+  // The tag @v1 moved four times on 2026-11-12, and one of those builds started denying node and
+  // npm on pull requests opened by a bot, which broke the reviews with no change on this side.
+  // With a commit, the action changes only when a plugin version changes this line.
+  const refs = CLAUDE_WORKFLOWS.map((name) => {
+    const uses = [...rendered(name).matchAll(/^\s+uses: anthropics\/claude-code-action@(.*)$/gm)].map((m) => m[1]);
+    assert.equal(uses.length, 1, `${name}: one Claude step`);
+    assert.match(uses[0], /^[0-9a-f]{40} # v\d+\.\d+\.\d+$/, `${name}: a full commit and its release`);
+    return uses[0];
+  });
+  assert.deepEqual(refs, [refs[0], refs[0], refs[0]], 'the three workflows run the same build');
+});
+
 test('pipeline-review: job and check are both named pipeline-review; it never approves; the status step runs unless cancelled', () => {
   const t = rendered('pipeline-review.yml');
   assert.match(t, /^name: pipeline-review$/m);
@@ -215,8 +232,8 @@ test('every Claude step runs with background tasks off, so the session cannot en
   // subagent or a command in the background ends its turn to wait, which sends a result, and the
   // action ends the run there: the ship run on issue 4 of the sandbox stopped that way with the
   // lock held. With background tasks off, a subagent returns inside the turn that dispatched it.
-  for (const name of ['pipeline-ship.yml', 'pipeline-review.yml', 'pipeline-score.yml']) {
-    const step = rendered(name).match(/uses: anthropics\/claude-code-action@v1\n        env:\n((?:          .*\n)+?)        with:/);
+  for (const name of CLAUDE_WORKFLOWS) {
+    const step = rendered(name).match(new RegExp(`${CLAUDE_USES}\\n        env:\\n((?:          .*\\n)+?)        with:`));
     assert.ok(step, `${name}: the Claude step has an env block`);
     assert.match(step[1], /^          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'$/m, name);
   }
@@ -229,7 +246,7 @@ test('the review and the fix run may run the code of a pipeline pull request, an
   // the review cannot call the pipeline CLI or re-run the evidence (pull requests 28 and 29 of the
   // sandbox ended as human-decision-needed that way). The switch is off only where the workflow
   // has already checked that the branch is the pipeline's own, in this repository.
-  const withBlock = (name) => rendered(name).match(/uses: anthropics\/claude-code-action@v1\n        env:\n(?:          .*\n)+?        with:\n((?:          .*\n)+)/)?.[1] ?? '';
+  const withBlock = (name) => rendered(name).match(new RegExp(`${CLAUDE_USES}\\n        env:\\n(?:          .*\\n)+?        with:\\n((?:          .*\\n)+)`))?.[1] ?? '';
   const review = rendered('pipeline-review.yml');
   assert.match(withBlock('pipeline-review.yml'), /^          restrict_untrusted_prs: "false"$/m);
   // The whole condition, word for word: an `||` anywhere in it would let a fork's pipeline/x branch through.
@@ -261,7 +278,7 @@ test('pipeline-ship checks in code that the session started, against the pipelin
   const ship = t.slice(t.indexOf('\n  ship:\n'));
   const noted = ship.indexOf('run: echo "ATTEMPT_STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"');
   assert.ok(noted !== -1 && noted < ship.indexOf('uses: actions/checkout@v4'), 'the start time is the first step');
-  const afterClaude = t.slice(t.indexOf('uses: anthropics/claude-code-action@v1'));
+  const afterClaude = t.slice(t.indexOf('uses: anthropics/claude-code-action@'));
   // It runs when the Claude step failed, and when the job timed out or was cancelled: a run that
   // reaches the 150-minute limit is the one most likely to still hold the lock.
   assert.match(afterClaude, /if: \$\{\{ always\(\) \}\}\n\s+env:\n\s+GH_TOKEN: \$\{\{ github\.token \}\}\n[\s\S]*?KEY: \$\{\{ needs\.route\.outputs\.key \}\}\n\s+run: node "\S*pipeline\.mjs" ship-status --home "\$ISSUE_PIPELINE_HOME" --repo \$\{\{ github\.repository \}\} --key "\$KEY" --since "\$ATTEMPT_STARTED" --execution-file "\$RUNNER_TEMP\/claude-execution-output\.json" --post-missing$/m);

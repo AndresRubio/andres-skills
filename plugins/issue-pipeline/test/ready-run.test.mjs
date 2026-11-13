@@ -324,3 +324,40 @@ test('a branch whose key is not a plain id is skipped before run.json is looked 
   assert.deepEqual(runJsonCalls, []);
   assert.deepEqual(calls, []);
 });
+
+const reviewing = (over = {}) => basePr({ statusCheckRollup: [run('test', 'SUCCESS'), { __typename: 'CheckRun', name: 'pipeline-review', status: 'IN_PROGRESS', conclusion: null }], ...over });
+
+test('a PR behind its base (compare API) while its review still runs gets the base now, so the review is paid for once', async () => {
+  const behind = fakeDeps({ prs: [reviewing()], behindBy: 2 });
+  const r = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, behind.deps);
+  assert.deepEqual(r.actions.map((a) => [a.action, a.reason, a.done]), [['update', 'behind base', ['update branch']]]);
+  assert.deepEqual([behind.compares, behind.calls], [[[REPO, 'main', HEAD]], [['updateBranch', 7]]]);
+  const current = fakeDeps({ prs: [reviewing()] });
+  const c = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, current.deps);
+  assert.deepEqual([c.actions[0].action, c.actions[0].reason, current.calls], ['wait', 'not success yet: pipeline-review', []]);
+  // The lock of a run that is still pushing holds the update back, as it does for a green PR.
+  const locked = fakeDeps({ prs: [reviewing()], behindBy: 2, issue: issue(['pipeline', 'pipeline-working'], lockAt('2026-10-07T09:30:00Z')) });
+  const l = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, locked.deps);
+  assert.deepEqual([l.actions[0].reason, locked.calls], ['fix run in progress (pipeline-working on issue 5)', []]);
+  // A PR that needs a fix is not compared: the fix run brings the base in, and an update here
+  // would pay for a review of a head the fix is about to replace.
+  const fixing = fakeDeps({ prs: [basePr({ statusCheckRollup: [run('test', 'SUCCESS'), run('pipeline-review', 'FAILURE')] })], comments: revision, behindBy: 2 });
+  const f = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, fixing.deps);
+  assert.deepEqual([f.actions[0].action, fixing.compares, fixing.calls], ['fix', [], [['addLabel', 'pr', 7, 'pipeline-fix']]]);
+});
+
+test('a waiting PR that GitHub cannot merge cleanly, or has not judged yet, is left to wait and is not compared', async () => {
+  // update-branch answers 422 on a conflict, which would turn a wait into an error on every run.
+  for (const mergeable of ['CONFLICTING', 'UNKNOWN']) {
+    const { deps, calls, compares } = fakeDeps({ prs: [reviewing({ mergeable })], behindBy: 2 });
+    const r = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, deps);
+    assert.deepEqual([r.actions[0].action, compares, calls], ['wait', [], []], mergeable);
+  }
+});
+
+test('a step that fails is not listed as done', async () => {
+  const { deps } = fakeDeps({ prs: [basePr()], comments: verdictComment('accepted') });
+  deps.addLabel = () => { throw new Error('Resource not accessible by personal access token'); };
+  const r = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, deps);
+  assert.deepEqual(r.actions, [{ pr: 7, action: 'error', reason: 'Resource not accessible by personal access token', done: ['comment on PR 7', 'comment on issue 5'] }]);
+});

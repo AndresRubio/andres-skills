@@ -1,4 +1,4 @@
-# Evidence — <KEY>
+# Evidence for <KEY>
 
 ## Commands
 
@@ -11,7 +11,7 @@ Yes or no, and why.
 
 ## Screenshots
 
-One line per file: `screenshots/<file>` — what it shows — which AC it demonstrates. Or "Visual check needed: <reason>." Or "Not applicable."
+One line per file: `screenshots/<file>`, what it shows, and which AC it demonstrates. Or "Visual check needed: <reason>." Or "Not applicable."
 
 ## Departures from spec
 
@@ -23,7 +23,7 @@ Result of `revert-check`: the test files from HEAD against the base's source. "S
 
 ## Diff risk
 
-Output of `diff-risk`: one line per hit as `rule: file — detail`, or "None."
+Output of `diff-risk`: one line per hit as `rule: file: detail`, or "None."
 
 ## Self-review
 

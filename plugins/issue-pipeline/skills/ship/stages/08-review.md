@@ -13,7 +13,7 @@ WT, BASE_SHA (in fix mode, set by `fix.md` step 9), `docs/pipeline/<KEY>/spec.md
    - Spec: `docs/pipeline/<KEY>/spec.md`, and the note "The spec is this file; do not look it up in an issue tracker."
    - Both sub-agents on model opus.
 2. Use the confession-box skill if it's installed. Otherwise, list yourself every skipped or weakened test, suppressed error or type check, value hardcoded to pass a test, swallowed exception, and `--no-verify` in this run's commits.
-3. `node "$PIPELINE" diff-risk --base "$BASE_SHA" > "$RUN_DIR/risk.json"`. Write every hit under "Diff risk" in evidence.md as `rule: file — detail`, or "None." A `skip-marker` hit on a test file, or an `assertions-lost` hit, is a **Confession: Critical** finding in the classification below (a skipped or weakened test). A `test-config-changed` hit whose detail mentions a coverage threshold is Confession: Critical too. Other hits are listed, not classified.
+3. `node "$PIPELINE" diff-risk --base "$BASE_SHA" > "$RUN_DIR/risk.json"`. Write every hit under "Diff risk" in evidence.md as `rule: file: detail`, or "None." A `skip-marker` hit on a test file, or an `assertions-lost` hit, is a **Confession: Critical** finding in the classification below (a skipped or weakened test). A `test-config-changed` hit whose detail mentions a coverage threshold is Confession: Critical too. Other hits are listed, not classified.
 4. Classify every finding in evidence.md's Classification table:
 
    | Finding | Severity |

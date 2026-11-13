@@ -435,15 +435,17 @@ for each open non-draft PR with head pipeline/* from this repo, oldest first:
             label pipeline-fix once per head SHA; continue
     if any of ciChecks concluded failure on head SHA:
         label pipeline-fix once per head SHA; continue
-    if any required conclusion != success on head SHA: continue   # pending or skipped counts as not success
-    if head is behind base:
+    if head is behind base and GitHub calls it mergeable:
         remove label ready if present; update branch; continue    # checks re-run, workflow fires again
+    if any required conclusion != success on head SHA: continue   # pending or skipped counts as not success
     if not mergeable (conflict):
         remove label ready if present; label pipeline-fix; continue
     if PR has label ready: continue                                 # already reported for this head SHA
     label ready; post `ready` report on the PR and on the issue; stop   # one per invocation
 on pull_request closed with merged == true (Phase 2b): dispatch the sweep (§8.1)
 ```
+
+Revised 2026-11-13 (version 0.3.8): the behind check used to come after the pending check. A branch that fell behind while its review ran was then reviewed, updated, and reviewed again on the merge, and the review is the costly check (pull request 35 of the sandbox paid 2.12 dollars for that second review). The update now comes first, and `pipeline-review` cancels the run of the old head.
 
 **The ready report** (marker kind `ready`) is one comment, written from data `pipeline-ready` already has:
 - head SHA, the checks that passed and the verdict's link;

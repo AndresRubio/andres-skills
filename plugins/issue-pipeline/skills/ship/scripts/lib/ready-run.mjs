@@ -8,6 +8,9 @@ import { keyFromBranch } from './naming.mjs';
 import { summaryLine } from './run-record.mjs';
 
 const LOCK_GATED = new Set(['fix', 'update', 'needs-decision']);
+// The decisions that a branch behind its base turns into an update. A waiting PR is one of them,
+// so that it takes its base in before the review it waits for has been paid for (see decideReady).
+const TAKES_BASE = new Set(['ready', 'already-ready', 'wait']);
 
 export function realDeps(repo) {
   return {
@@ -57,7 +60,11 @@ export async function runReady({ repo, config, now = new Date(), dryRun = false,
   const actions = [];
   for (const listed of prs) {
     const done = [];
-    const act = (label, fn) => { done.push(dryRun ? `would ${label}` : label); if (!dryRun) fn(); };
+    // A step is listed once it has run, so a step that throws is not reported as done.
+    const act = (label, fn) => {
+      if (!dryRun) fn();
+      done.push(dryRun ? `would ${label}` : label);
+    };
     try {
       const pr = deps.fetchPr(repo, listed.number);
       const prComments = deps.fetchPrComments(repo, pr.number);
@@ -65,8 +72,9 @@ export async function runReady({ repo, config, now = new Date(), dryRun = false,
       const verdict = latestVerdict(prComments, pr.headRefOid);
       let decision = decideReady({ pr, config, verdict });
       if (decision.action === 'skip') continue;
-      // A PR is ready only when it holds every commit of its base (verify on the first sandbox run).
-      if (decision.action === 'ready' || decision.action === 'already-ready') {
+      // A PR is ready only when it holds every commit of its base. update-branch refuses a branch
+      // that conflicts, so only a branch GitHub calls mergeable is compared; a ready one always is.
+      if (TAKES_BASE.has(decision.action) && pr.mergeable === 'MERGEABLE') {
         const { behind_by: behindBy } = deps.compare(repo, pr.baseRefName, pr.headRefOid);
         if (behindBy > 0) decision = { action: 'update', reason: 'behind base', ...(pr.labels.includes('ready') ? { removeReady: true } : {}) };
       }

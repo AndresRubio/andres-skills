@@ -1,4 +1,4 @@
-# Grade — <KEY>
+# Grade for <KEY>
 
 **Verdict:** `<verdict>`
 

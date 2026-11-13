@@ -360,6 +360,30 @@ For the next version, batched: the pin, the dash in the headings of the four run
 
 Still the owner's: delete the old pipeline token on GitHub, and revoke the Claude tokens from earlier `claude setup-token` runs that no secret uses.
 
+## Version 0.3.8, 2026-11-13
+
+Built in the same session at the owner's word, on `main` of this repository. It holds four changes, each with a test written first and seen to fail. The suite has 707 tests and `npm run check` passes.
+
+1. The three workflows that start Claude name the action by commit: `anthropics/claude-code-action@4d75e5f390ee76b2e09c1980ecc99ff3a2e088c8`, release v1.0.275. A test fails if a template names anything but a full commit, or if the three differ. Taking a newer release means changing that line in the three templates in a plugin version.
+2. The four run-record templates have no dash left. The headings read "# Grade for <KEY>" and so on, a task line in progress.md is "Task N: summary (<commit sha>)", and a diff-risk line in evidence.md is "rule: file: detail". Stages 6 and 8 give the agent the same formats, and two more lines that stages 3 and 7 dictate into a run record lost their dash as well: a question's recommendation and the note for a failed screenshot. No code reads these lines.
+3. `pipeline-ready` updates a branch that is behind its base before it waits for the checks, where it used to wait first. The review workflow cancels the run of the old head, so the change is reviewed once, on the updated branch. Two conditions hold the update back: a lock on the issue, as before, and a branch that GitHub does not call mergeable, since `update-branch` refuses a conflict and the run would end in an error. A pull request that needs a fix run is not updated either, since the fix run brings the base in. The pseudocode in §7.1 of the design has the new order.
+4. `pipeline-ready` lists a step under `done` after it has run, so a step that throws no longer appears there.
+
+Left as it was, on purpose:
+
+- A pull request whose review failed for a reason outside its code still waits for the owner. `pipeline-ready` cannot tell such a failure from a real "human decision needed", and acting on that verdict by itself would go against what the verdict means. The owner has two ways out: run the failed review job again from its page in Actions, or press "Update branch" on the pull request when the workflow files changed on `main`.
+- A branch that conflicts with its base is still sent to a fix run only after its checks have finished.
+- The comments the CLI posts on GitHub keep their dashes. They are comments, and the hook that rejects dashes only sees files in a commit.
+- The fixture files under `sandbox/prs/` keep the old headings.
+
+A second reader went through the diff before the commit, with mutations on a copy. It found no blocker. Its two findings that changed something are the stage lines named in item 2 and a test that a pull request needing a fix is never compared with its base. Three limits it named stay as they are:
+
+- Right after a merge moves the base, GitHub often reports the other pull requests as `mergeable: UNKNOWN`, and the earlier update skips those. It then depends on a later run of `pipeline-ready`, such as the one that follows the CI of the push to `main`, coming before the review has finished. Whether the review is really saved has to be seen on a sandbox.
+- A pull request whose body has no "Fixes #N" has no lock to hold an update back, and the update can now come while its checks are pending. Stage 9 always writes that line, so only a body edited by hand is exposed.
+- Every waiting pull request now costs one compare call per run of `pipeline-ready`.
+
+Version 0.3.8 is not released. It has no tag, both sandboxes still pin `issue-pipeline--v0.3.7`, and none of its changes has run in Actions. The tag and the update of the public sandbox wait for the owner's yes.
+
 ## Conventions this work followed
 
 Git identity `AndresRubio <2109109+AndresRubio@users.noreply.github.com>`. On this machine the default SSH key for `github.com` belongs to another account; AndresRubio repositories push through the `github.com-personal` alias, which the clones already use. Commit messages and pull request bodies carry no attribution lines. Pull requests are merged by the owner, or by the session once the owner has said so in that session in their own message; without that the app's permission classifier refuses a merge. Commit message files go in the session scratchpad under a unique name, and their first line is checked in a call of its own before the commit, because two hooks in this repository can refuse a whole Bash command and a retry then commits a stale file.
