@@ -382,7 +382,7 @@ A second reader went through the diff before the commit, with mutations on a cop
 - A pull request whose body has no "Fixes #N" has no lock to hold an update back, and the update can now come while its checks are pending. Stage 9 always writes that line, so only a body edited by hand is exposed.
 - Every waiting pull request now costs one compare call per run of `pipeline-ready`.
 
-Version 0.3.8 is not released. It has no tag, both sandboxes still pin `issue-pipeline--v0.3.7`, and none of its changes has run in Actions. The tag and the update of the public sandbox wait for the owner's yes.
+Version 0.3.8 is on `main` at commit `07dda53` and tagged `issue-pipeline--v0.3.8`, pushed at the owner's word. Both sandboxes still pin `issue-pipeline--v0.3.7`, and none of its changes has run in Actions. The update of the public sandbox waits for the owner's yes.
 
 ## Conventions this work followed
 
