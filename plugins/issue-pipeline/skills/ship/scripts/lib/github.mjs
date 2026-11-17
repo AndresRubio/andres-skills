@@ -3,7 +3,8 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { parseMarker } from './marker.mjs';
-import { isPipelineComment, TRUSTED } from './lock.mjs';
+import { isPipelineComment, PIPELINE_BOTS, TRUSTED } from './lock.mjs';
+import { splitInto } from './split.mjs';
 import { activeRuns } from './runs.mjs';
 
 export function ghJson(args) {
@@ -84,7 +85,28 @@ export function postIssueComment(repo, number, body, gh = ghText, env = process.
   return gh(['issue', 'comment', String(number), '--repo', repo, '--body-file', file]);
 }
 
-export function normalizeIssue(apiIssue, apiComments, { blockedBy = [], subIssues = [] } = {}) {
+// The number of the parent issue, only when GitHub's parent_issue_url names an issue of this repository.
+export function parentNumber(repo, url) {
+  let parsed;
+  try { parsed = new URL(url); } catch { return null; }
+  if (parsed.protocol !== 'https:' || parsed.search !== '' || parsed.hash !== '') return null;
+  const match = /\/issues\/([1-9][0-9]*)$/.exec(parsed.pathname);
+  if (!match) return null;
+  const n = Number(match[1]);
+  return Number.isSafeInteger(n) && parsed.pathname === `/repos/${repo}/issues/${n}` ? n : null;
+}
+
+// The parent of an issue a pipeline bot wrote, with the sub-issues its split comment lists. Null for any other issue.
+export function fetchSplitParent(repo, apiIssue, gh = ghJson) {
+  if (!PIPELINE_BOTS.has(apiIssue.user?.login)) return null;
+  const n = parentNumber(repo, apiIssue.parent_issue_url);
+  if (n === null) return null;
+  const parent = gh(['api', `repos/${repo}/issues/${n}`]);
+  const comments = gh(['api', '--paginate', '--slurp', `repos/${repo}/issues/${n}/comments`]).flat();
+  return { number: n, authorAssociation: parent.author_association, splitInto: splitInto(normalizeComments(comments)) };
+}
+
+export function normalizeIssue(apiIssue, apiComments, { blockedBy = [], subIssues = [], parent = null } = {}) {
   return {
     number: apiIssue.number,
     id: apiIssue.id,
@@ -101,6 +123,7 @@ export function normalizeIssue(apiIssue, apiComments, { blockedBy = [], subIssue
     openBlockedBy: blockedBy.filter((i) => i.state === 'open').map((i) => i.number),
     openSubIssues: subIssues.filter((i) => i.state === 'open').map((i) => i.number),
     comments: normalizeComments(apiComments),
+    parent,
   };
 }
 
@@ -109,7 +132,7 @@ export function fetchIssue(repo, number, gh = ghJson) {
   const comments = gh(['api', '--paginate', '--slurp', `repos/${repo}/issues/${number}/comments`]).flat();
   const blockedBy = gh(['api', `repos/${repo}/issues/${number}/dependencies/blocked_by`]);
   const subIssues = gh(['api', `repos/${repo}/issues/${number}/sub_issues`]);
-  return normalizeIssue(issue, comments, { blockedBy, subIssues });
+  return normalizeIssue(issue, comments, { blockedBy, subIssues, parent: fetchSplitParent(repo, issue, gh) });
 }
 
 // Runs in progress for issue selfNumber (spec D16): open PRs, then every open issue

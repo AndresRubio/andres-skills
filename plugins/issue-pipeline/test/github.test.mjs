@@ -193,6 +193,43 @@ const waitRoutes = (line) => {
   return issueRoutes(5, [apiLock(951, '2026-10-06T11:00:00Z', 'pipeline/5-self'), wait]);
 };
 
+const BOT_CHILD = { user: { login: 'claude[bot]' }, author_association: 'NONE', parent_issue_url: `https://api.github.com/repos/${REPO}/issues/4` };
+const splitComment = (line) => ({ id: 500, user: { login: 'claude[bot]' }, author_association: 'NONE', created_at: '2026-11-13T22:32:10Z', body: `**[issue-pipeline]** split · 2026-11-13T22:32:10Z · local\n\n${line}` });
+const parentRoutes = (line) => ({
+  [`api repos/${REPO}/issues/4`]: apiIssue(4, { labels: [{ name: 'pipeline' }] }),
+  [`api --paginate --slurp repos/${REPO}/issues/4/comments`]: [[splitComment(line)]],
+});
+
+test('parentNumber accepts only an issue of the same repository', () => {
+  assert.equal(github.parentNumber(REPO, `https://api.github.com/repos/${REPO}/issues/4`), 4);
+  for (const url of [null, undefined, '', 'not a url', 'https://api.github.com/repos/other/r/issues/4',
+    `http://api.github.com/repos/${REPO}/issues/4`, `https://api.github.com/repos/${REPO}/issues/4/comments`,
+    `https://api.github.com/repos/${REPO}/issues/0`, `https://api.github.com/repos/${REPO}/issues/4?x=1`]) {
+    assert.equal(github.parentNumber(REPO, url), null, String(url));
+  }
+});
+
+test('CLI issue adds the parent of a bot-written sub-issue', () => {
+  const { dir } = loggingGh({ ...issueRoutes(28, [], BOT_CHILD), ...parentRoutes('Split into: 28, 29, 30') });
+  const r = runCli(['issue', '28', '--repo', REPO], { env: { PATH: `${dir}:${process.env.PATH}` } });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(r.json().parent, { number: 4, authorAssociation: 'OWNER', splitInto: [28, 29, 30] });
+});
+
+test('CLI issue fetches no parent for an owner issue or for a parent in another repository', () => {
+  const owner = loggingGh(issueRoutes(5, [], { parent_issue_url: `https://api.github.com/repos/${REPO}/issues/4` }));
+  assert.equal(runCli(['issue', '5', '--repo', REPO], { env: { PATH: `${owner.dir}:${process.env.PATH}` } }).json().parent, null);
+  assert.ok(!owner.calls().some((c) => c.includes('issues/4')));
+  const cross = loggingGh(issueRoutes(28, [], { ...BOT_CHILD, parent_issue_url: 'https://api.github.com/repos/other/r/issues/4' }));
+  assert.equal(runCli(['issue', '28', '--repo', REPO], { env: { PATH: `${cross.dir}:${process.env.PATH}` } }).json().parent, null);
+  assert.ok(!cross.calls().some((c) => c.includes('other/r')));
+});
+
+test('CLI issue fails when the parent of a bot-written sub-issue cannot be read', () => {
+  const { dir } = loggingGh({ ...issueRoutes(28, [], BOT_CHILD), [`api repos/${REPO}/issues/4`]: { __ghError: 'HTTP 502' } });
+  assert.equal(runCli(['issue', '28', '--repo', REPO], { env: { PATH: `${dir}:${process.env.PATH}` } }).code, 1);
+});
+
 test('CLI waiting-for --repo --issue --expect prints the wait when the posted keys read back', () => {
   const { dir, calls } = loggingGh(waitRoutes('Waiting for: 8, 7'));
   const r = runCli(['waiting-for', '--repo', REPO, '--issue', '5', '--expect', '7,8'], { env: { PATH: `${dir}:${process.env.PATH}`, ISSUE_PIPELINE_RECOUNT_DELAY_MS: '0' } });
