@@ -20,7 +20,9 @@ Takes a marker kind and a body.
 
 ## add-labels
 
-`gh issue edit "$NUMBER" --repo "$REPO" --add-label "<label>[,<label>…]"`
+Takes labels, and an issue number when the labels go on an issue other than this run's, as when a split labels its sub-issues. `<issue>` is that number, or `$NUMBER`.
+
+`gh issue edit "<issue>" --repo "$REPO" --add-label "<label>[,<label>…]"`
 
 ## remove-labels
 

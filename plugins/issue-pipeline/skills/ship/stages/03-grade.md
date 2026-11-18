@@ -46,11 +46,13 @@ Decide whether the issue can be built as it is, needs recorded assumptions, need
   4. Stop procedure (the worktree may be removed; don't post `blocked`).
 - **too-big:**
   1. Append a "## Proposed split" section to grade.md.
-  2. For each slice in order: `tracker:create-sub-issue` under NUMBER, labelled `pipeline`, plus `needs-local` if the parent has it.
+  2. For each slice in order: `tracker:create-sub-issue` under NUMBER, with `needs-local` if the parent has it and no other label. The `pipeline` label comes in step 6, once the split is on record.
   3. For every slice after the first: `tracker:add-blocked-by`, blocked by the previous slice.
-  4. `tracker:post-comment` kind `split` on the parent, with grade.md and the list of created issues.
-  5. `tracker:remove-labels` `pipeline-working`.
-  6. Delete `docs/pipeline/<KEY>` in WT and remove the empty worktree with `node "$PIPELINE" worktree-remove-if-empty --repo-root "$REPO_ROOT" --path "$WT" --branch "$BRANCH" --base "$BASE_REF"`. Stop: the parent stays open until its children finish. This isn't the stop procedure, and no `needs-decision` is added.
+  4. `tracker:post-comment` kind `split` on the parent, with grade.md, the list of created issues and, as the last line, "Split into: " followed by the sub-issue numbers in slice order joined by ", ", such as `Split into: 28, 29, 30`: no backticks, no bold, nothing after it. A sub-issue is trusted only if this line lists it.
+  5. Check that the split reads back: `node "$PIPELINE" split-into --repo "$REPO" --issue "$NUMBER" --expect "<numbers>"`, where `<numbers>` is the sub-issue numbers joined by commas, such as `28,29,30`. It fetches the parent, and retries once if the numbers differ. If it fails, apply hard rule 7.
+  6. For each sub-issue in order: `tracker:add-labels` `pipeline` on that sub-issue. The first one starts from this label; each later one waits until the one before it is closed.
+  7. `tracker:remove-labels` `pipeline-working`.
+  8. Delete `docs/pipeline/<KEY>` in WT and remove the empty worktree with `node "$PIPELINE" worktree-remove-if-empty --repo-root "$REPO_ROOT" --path "$WT" --branch "$BRANCH" --base "$BASE_REF"`. Stop: the parent stays open until its children finish. This isn't the stop procedure, and no `needs-decision` is added.
 - **wait:**
   1. Append a "## Waiting for" section to grade.md: each run in grade.json's `waitFor`, its relation and the evidence from research.md.
   2. `tracker:post-comment` kind `deferred`. The body is grade.md, then "This issue becomes eligible again once none of these runs is in progress: the sweep or the next poll picks it up, or run `/ship #<NUMBER>` again. To run it alongside them anyway, add `pipeline-go`.", then, as the last line, grade.json's `waitLine` copied verbatim: no backticks, no bold, nothing after it.

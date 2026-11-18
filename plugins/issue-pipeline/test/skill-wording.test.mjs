@@ -481,3 +481,17 @@ test('review SKILL.md allows bare npx rows only for installed local bins, run as
   assert.match(step, /`npx <tool> …` or `npx --no <tool> …` only when `<tool>` is a bare name .* and `\$WT\/node_modules\/\.bin\/<tool>` exists/);
   assert.match(step, /always run as `npx --no <tool> …`/);
 });
+
+test('a too-big split adds pipeline to its sub-issues only after the split comment reads back', () => {
+  const tooBig = read('stages/03-grade.md').split('- **too-big:**')[1].split('\n- **wait:**')[0];
+  assert.doesNotMatch(tooBig, /create-sub-issue[^\n]*labelled `pipeline`/);
+  const order = ['`tracker:create-sub-issue`', '`tracker:add-blocked-by`', 'kind `split`', 'Split into: ',
+    'split-into --repo "$REPO" --issue "$NUMBER" --expect', '`tracker:add-labels` `pipeline`', '`tracker:remove-labels` `pipeline-working`']
+    .map((s) => tooBig.indexOf(s));
+  assert.ok(order.every((i) => i >= 0), JSON.stringify(order));
+  assert.deepEqual([...order].sort((a, b) => a - b), order);
+});
+
+test('the GitHub tracker adds labels to an issue other than NUMBER when told to', () => {
+  assert.match(section(read('trackers/github.md'), 'add-labels'), /gh issue edit "<issue>" --repo "\$REPO" --add-label/);
+});
