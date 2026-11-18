@@ -494,13 +494,13 @@ It is a seatbelt, not a boundary. Commands written to a file and then run get pa
 - **Secrets:**
   - `CLAUDE_CODE_OAUTH_TOKEN` (a one-year subscription token) exists only in `pipeline-ship.yml` and `pipeline-review.yml`.
   - `pipeline-ready.yml` runs on the default `GITHUB_TOKEN` with `contents: write` (branch updates), `pull-requests: write` and `issues: write` (labels and comments). No merge token exists until a repo opts into Phase 4 auto-merge (D5).
-  - Modal runner: `CLAUDE_CODE_OAUTH_TOKEN` and the GitHub token are Modal Secrets passed to each Sandbox. Unlike Anthropic's cloud sessions, which keep the GitHub token outside the sandbox behind a proxy, the agent can read them. The orchestrator therefore mints a short-lived GitHub App installation token per run, scoped to the one repo with contents, issues and pull-request write (§12, Q12). If the app's bot is the author, its login is added to `PIPELINE_BOTS`.
+  - Modal runner: `CLAUDE_CODE_OAUTH_TOKEN` and the GitHub token are Modal Secrets passed to each Sandbox. Unlike Anthropic's cloud sessions, which keep the GitHub token outside the sandbox behind a proxy, the agent can read them. The orchestrator therefore mints a short-lived GitHub App installation token per run, scoped to the one repo with contents, issues and pull-request write (§12, Q12). If the app's bot is the author, its login is added to `PIPELINE_BOTS`. Since 0.3.9 that login can also author sub-issues that run, under the rule in `2026-11-15-split-sub-issue-trust-amendment.md`.
   - Jobs get minimal permissions, turn caps and timeouts.
   - Never set `allowed_non_write_users`.
 - **Private data (the lethal trifecta):** a run reads public issue text, holds a GitHub token and can post comments. So every automatic run gets a token that reaches only the repo it works on: a fine-grained token, or an App installation token (Q2, Q12). The Phase 1 acceptance runs use one scoped to the two sandboxes. Test issue 10 checks that private data never reaches a public comment.
 - **Who counts as the pipeline:** a marked comment from an OWNER, MEMBER or COLLABORATOR, or from `claude[bot]`.
   - In an org-owned repo, MEMBER includes read-only members, and `claude[bot]` includes `@claude` sessions outside the pipeline.
-  - Such a comment can reorder runs, hide a running run from the count, or hold an issue back (§8.1). It can't start a run or change what a run builds.
+  - Such a comment can reorder runs, hide a running run from the count, or hold an issue back (§8.1). It can't start a run or change what a run builds, with one exception since 0.3.9: a marked `split` comment on a trusted parent lets the sub-issues it lists run when a pipeline bot wrote them (`2026-11-15-split-sub-issue-trust-amendment.md`).
   - Branch names read from lock comments are limited to `pipeline/` plus safe characters.
 - **Plugin supply chain:** consumers pin `issue-pipeline` and its dependencies to tags or commits, never HEAD.
 - **Local runner:** sandboxed (§6.2). It never runs in your main checkout.

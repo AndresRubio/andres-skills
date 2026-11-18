@@ -492,6 +492,23 @@ test('a too-big split adds pipeline to its sub-issues only after the split comme
   assert.deepEqual([...order].sort((a, b) => a - b), order);
 });
 
+test('a failed read-back or labelling tells the owner on the parent before the run stops', () => {
+  const tooBig = section(read('stages/03-grade.md'), 'Automatic mode').split('- **too-big:**')[1].split('\n- **wait:**')[0];
+  const readBack = tooBig.indexOf('split-into --repo "$REPO" --issue "$NUMBER" --expect');
+  const blockedAt = tooBig.indexOf('kind `blocked`', readBack);
+  assert.ok(readBack >= 0 && blockedAt > readBack, JSON.stringify({ readBack, blockedAt }));
+  const labelling = tooBig.indexOf('`tracker:add-labels` `pipeline`');
+  assert.ok(tooBig.indexOf('kind `blocked`', labelling) > labelling, 'labelling failure also posts blocked');
+});
+
+test('a sub-issue the pipeline wrote is not split again, since a bot parent could never vouch for its children', () => {
+  const tooBig = section(read('stages/03-grade.md'), 'Automatic mode').split('- **too-big:**')[1].split('\n- **wait:**')[0];
+  const head = tooBig.split('1. Append')[0];
+  assert.match(head, /`claude\[bot\]`/);
+  assert.match(head, /`github-actions\[bot\]`/);
+  assert.match(head, /stop procedure/);
+});
+
 test('the GitHub tracker adds labels to an issue other than NUMBER when told to', () => {
   assert.match(section(read('trackers/github.md'), 'add-labels'), /gh issue edit "<issue>" --repo "\$REPO" --add-label/);
 });

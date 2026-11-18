@@ -216,6 +216,15 @@ test('CLI issue adds the parent of a bot-written sub-issue', () => {
   assert.deepEqual(r.json().parent, { number: 4, authorAssociation: 'OWNER', splitInto: [28, 29, 30] });
 });
 
+test('CLI issue reports the parent association as GitHub gives it, not a fixed value', () => {
+  const routes = { ...issueRoutes(28, [], BOT_CHILD), ...parentRoutes('Split into: 28, 29, 30') };
+  routes[`api repos/${REPO}/issues/4`] = apiIssue(4, { author_association: 'NONE', labels: [{ name: 'pipeline' }] });
+  const { dir } = loggingGh(routes);
+  const r = runCli(['issue', '28', '--repo', REPO], { env: { PATH: `${dir}:${process.env.PATH}` } });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.json().parent.authorAssociation, 'NONE');
+});
+
 test('CLI issue fetches no parent for an owner issue or for a parent in another repository', () => {
   const owner = loggingGh(issueRoutes(5, [], { parent_issue_url: `https://api.github.com/repos/${REPO}/issues/4` }));
   assert.equal(runCli(['issue', '5', '--repo', REPO], { env: { PATH: `${owner.dir}:${process.env.PATH}` } }).json().parent, null);

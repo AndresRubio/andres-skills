@@ -100,6 +100,12 @@ Each test is written first and seen to fail, as in 0.3.8.
 
 Version 0.3.9, with the three version fields equal. Sub-issues 28, 29 and 30 of the private sandbox have no split line, so they stay untrusted on 0.3.9 and nothing starts by itself when the sandbox moves to it. To see the whole path, with the owner's word for each step: close 28 to 30 as not planned, take `pipeline` off issue 4 and put it back, and expect a new split whose first sub-issue starts from its label and whose later ones start after each merge.
 
+## Added after the final review (2026-11-18)
+
+- If the read-back in step 5 or the labelling in step 6 fails, the session posts a `blocked` comment on the parent before hard rule 7, naming the step and what the owner does next. The stop procedure posts no comment of its own once `split` is posted, so without this the owner would see nothing on the tracker.
+- A sub-issue written by a pipeline bot that is graded `too-big` is not split again. Sub-issues under it could never run, since a parent written by a bot does not vouch, so the run stops with the proposed split in its `blocked` comment.
+- Known limits, left as they are: a closed parent still vouches for its open sub-issues, and in a repository owned by an organization no person can start a bot-written sub-issue by label, though the sweep still can.
+
 ## Calls made in this design
 
 The owner did not decide these. Each can be changed before the plan is written.

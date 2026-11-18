@@ -17,6 +17,8 @@ test('splitInto reads the last line of the latest pipeline split comment', () =>
   assert.deepEqual(splitInto([split(2, 'Split into: 40'), split(1, 'Split into: 28')]), [40], 'latest by id, not by array order');
   assert.deepEqual(splitInto([split(1, 'Split into: 28'), split(2, 'no line here')]), [], 'the latest split comment decides');
   assert.deepEqual(splitInto([split(1, '`Split into: 28`')]), []);
+  assert.deepEqual(splitInto([split(1, '- Split into: 28')]), [], 'a list bullet is not the line');
+  assert.deepEqual(splitInto([split(1, '**Split into:** 28')]), [], 'bold is not the line');
   assert.deepEqual(splitInto([split(1, 'Split into: 28\n\nThanks')]), [], 'nothing may follow the line');
   assert.deepEqual(splitInto([split(1, 'Split into: 28', { author: 'stranger' })]), [], 'not a pipeline comment');
   assert.deepEqual(splitInto([split(1, 'Split into: 28', { marker: { kind: 'report', at, run: 'local' } })]), []);

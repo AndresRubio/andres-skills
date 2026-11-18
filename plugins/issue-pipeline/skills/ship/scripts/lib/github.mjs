@@ -85,6 +85,8 @@ export function postIssueComment(repo, number, body, gh = ghText, env = process.
   return gh(['issue', 'comment', String(number), '--repo', repo, '--body-file', file]);
 }
 
+// Only the number is used, against the host gh talks to, so the URL's host is not checked. A GitHub
+// Enterprise Server URL (/api/v3/...) gives null and fails closed.
 // The number of the parent issue, only when GitHub's parent_issue_url names an issue of this repository.
 export function parentNumber(repo, url) {
   let parsed;

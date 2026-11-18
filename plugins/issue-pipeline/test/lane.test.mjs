@@ -130,3 +130,43 @@ test('CLI lane-target reads the parent of a bot-written sub-issue, and fails whe
   const down = runCli(['lane-target', '--event-file', file, '--repo', 'o/r', '--event-name', 'issues'], { env: { PATH: `${fakeGh({ 'api repos/o/r/issues/28': routes['api repos/o/r/issues/28'] })}:${process.env.PATH}` } });
   assert.equal(down.code, 1);
 });
+
+test('a vouched sub-issue still needs a trusted labeller and a trusted commenter', () => {
+  assert.match(laneTarget({ name: 'issues', payload: labeled('pipeline', botChild(), { login: 'triager' }) }, { parent: vouching }).reason, /label sender is not the issue author or the repo owner/);
+  const parked = botChild({ labels: [{ name: 'pipeline' }, { name: 'needs-decision' }] });
+  assert.match(laneTarget({ name: 'issue_comment', payload: commented('go ahead', parked, 'NONE') }, { openPrs: [], parent: vouching }).reason, /commenter is not trusted/);
+});
+
+test('laneTarget ignores a parent field that the payload issue carries', () => {
+  const forged = botChild({ parent: vouching });
+  assert.match(laneTarget({ name: 'issues', payload: labeled('pipeline', forged, session) }, { parent: null }).reason, /issue author is not trusted/);
+});
+
+const childRoutes = (parentAssociation) => {
+  const split = { id: 500, user: { login: 'claude[bot]' }, author_association: 'NONE', created_at: '2026-11-13T22:32:10Z', body: '**[issue-pipeline]** split · 2026-11-13T22:32:10Z · local\n\nSplit into: 28, 29, 30' };
+  return {
+    'api repos/o/r/issues/28': { number: 28, user: { login: 'claude[bot]' }, author_association: 'NONE', parent_issue_url: 'https://api.github.com/repos/o/r/issues/4' },
+    'api repos/o/r/issues/4': { number: 4, user: owner, author_association: parentAssociation },
+    'api --paginate --slurp repos/o/r/issues/4/comments': [[split]],
+  };
+};
+
+test('CLI lane-target refuses a sub-issue whose parent is not written by a trusted author', () => {
+  const dir = tempDir();
+  const file = path.join(dir, 'event.json');
+  writeFileSync(file, JSON.stringify(labeled('pipeline', botChild(), session)));
+  const r = runCli(['lane-target', '--event-file', file, '--repo', 'o/r', '--event-name', 'issues'], { env: { PATH: `${fakeGh(childRoutes('NONE'))}:${process.env.PATH}` } });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.json().run, false);
+  assert.match(r.json().reason, /issue author is not trusted/);
+});
+
+test('CLI lane-target reads the parent for a reply on a parked bot-written sub-issue', () => {
+  const dir = tempDir();
+  const file = path.join(dir, 'event.json');
+  writeFileSync(file, JSON.stringify(commented('go ahead', botChild({ labels: [{ name: 'pipeline' }, { name: 'needs-decision' }] }))));
+  const routes = { 'pr list --repo o/r --state open --limit 500 --json number,headRefName,isCrossRepository,labels': [], ...childRoutes('OWNER') };
+  const r = runCli(['lane-target', '--event-file', file, '--repo', 'o/r', '--event-name', 'issue_comment'], { env: { PATH: `${fakeGh(routes)}:${process.env.PATH}` } });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.json().run, true);
+});

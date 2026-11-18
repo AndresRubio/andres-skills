@@ -410,16 +410,20 @@ The private canary string was found in no issue, comment or branch history of th
 
 ## Version 0.3.9
 
-Built on `main` of this repository to fix what the first split showed. It holds four changes:
+Built on `main` of this repository to fix what the first split showed. It holds six changes:
 
-1. The trust rule. A sub-issue that a pipeline bot created in a split counts as trusted when its parent was created by the owner or a collaborator and the parent's latest `split` comment lists it on its `Split into:` line. A parent written by a bot never vouches. The rule is `issueTrusted` in `lock.mjs`, and eligibility and the sweep use it.
-2. The parent fetch. `fetchSplitParent` in `github.mjs` reads the parent of a bot-written sub-issue, so the trust rule has something to check.
+1. The trust rule. A sub-issue that a pipeline bot created in a split counts as trusted when its parent was created by the owner or a collaborator and the parent's latest `split` comment lists it on its `Split into:` line. A parent written by a bot never vouches. The rule is `issueTrusted` in `lock.mjs`. The route, eligibility and the sweep all use it; the route is the check that refused sub-issues 28 to 30.
+2. The parent fetch. `fetchSplitParent` in `github.mjs` reads the parent of a bot-written sub-issue for eligibility and the sweep, and the `lane-target` command does the same for the route, reading the issue fresh from the API.
 3. The new order in stage 3 and the `split-into` command. The session creates the sub-issues without the `pipeline` label, posts the split comment ending with a `Split into:` line, and runs `split-into` to check that the line reads back. Only then does it add `pipeline` to each sub-issue in order, with `tracker:add-labels` taking an optional issue number.
-4. The route refuses events on an issue that is blocked by an open issue, so a later sub-issue does not start before the one ahead of it has merged.
+4. The route refuses events on an issue that is blocked by an open issue, so labelling a later sub-issue does not start a ship job that stage 0 would only stop. Eligibility is what keeps a later sub-issue waiting until the one ahead of it is closed.
+5. If the read-back or the labelling fails after the split comment, the session posts a `blocked` comment on the parent saying what the owner does next.
+6. A sub-issue written by a bot that is itself graded too big is not split again. The run stops, and its `blocked` comment carries the proposed split.
 
-The suite has 725 tests and `npm run check` passes.
+The suite has 732 tests and `npm run check` passes.
 
 Not yet run in Actions: a split on 0.3.9, a sub-issue starting from its label, a later sub-issue starting after a merge, and `pipeline-go`. Two facts about GitHub are also unverified. One is whether the `issues` and `issue_comment` webhook payloads carry `issue_dependencies_summary`. The route's refusal of blocked issues relies on it, and without it the refusal never fires and stage 0 refuses instead. The other is whether `issue_dependencies_summary.blocked_by` counts only open blockers.
+
+Known limits, left as they are: a closed parent still vouches for its open sub-issues. In a repository owned by an organization, no person can start a bot-written sub-issue by adding a label, since the route accepts only the issue's author or the repository's owner as the one who labels it; the sweep still starts it.
 
 Sub-issues 28, 29 and 30 of the private sandbox stay untrusted on 0.3.9, because their split comment has no `Split into:` line. Nothing starts by itself when the sandbox moves to 0.3.9.
 
