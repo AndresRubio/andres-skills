@@ -234,3 +234,13 @@ test('hasNewTrustedReply: a reply in the same second as the last marked comment 
   assert.equal(hasNewTrustedReply(makeIssue({ comments })), false);
   assert.equal(hasNewTrustedReply(makeIssue({ comments: [...comments, reply('2026-09-25T10:00:01Z')] })), true);
 });
+
+const bot = { author: 'claude[bot]', authorAssociation: 'NONE' };
+const vouched = { number: 4, authorAssociation: 'OWNER', splitInto: [5] };
+
+test('a pipeline-bot sub-issue is eligible when its trusted parent split into it', () => {
+  assert.equal(check(makeIssue({ ...bot, parent: vouched })).eligible, true);
+  assert.match(check(makeIssue({ ...bot, parent: null })).reasons.join(), /author claude\[bot\] is not trusted \(NONE\)/);
+  assert.match(check(makeIssue({ ...bot, parent: { ...vouched, splitInto: [6] } })).reasons.join(), /not trusted/);
+  assert.match(check(makeIssue({ ...bot, parent: vouched, openBlockedBy: [28] })).reasons.join(), /blocked by #28/);
+});

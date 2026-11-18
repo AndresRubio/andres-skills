@@ -1,4 +1,4 @@
-import { lockStatus, TRUSTED, isPipelineComment } from './lock.mjs';
+import { lockStatus, TRUSTED, isPipelineComment, issueTrusted } from './lock.mjs';
 import { waitingFor } from './runs.mjs';
 
 export { TRUSTED };
@@ -33,7 +33,7 @@ export function checkEligibility({ issue, config, lane, activeRuns, now = new Da
   if (issue.isPullRequest) reasons.push('is a pull request, not an issue');
   if (issue.state !== 'open') reasons.push(`state is ${issue.state}`);
   if (!labels.has('pipeline')) reasons.push('missing label pipeline');
-  if (!TRUSTED.has(issue.authorAssociation)) {
+  if (!issueTrusted(issue)) {
     reasons.push(`author ${issue.author} is not trusted (${issue.authorAssociation})`);
   }
   const needsLocal = labels.has('needs-local');

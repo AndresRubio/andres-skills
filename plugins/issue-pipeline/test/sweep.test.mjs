@@ -127,3 +127,9 @@ test('a cross-repository PR on a pipeline/* branch neither blocks an issue nor c
   const closedFork = { number: 41, headRefName: 'pipeline/7-x', isCrossRepository: true, closedAt: '2026-10-20T11:30:00Z', mergedAt: null };
   assert.deepEqual(sweepCandidates({ issues: [backOff(7)], prs: [], closedPrs: [closedFork], config, now: NOW }).start, [7]);
 });
+
+test('a split sub-issue that no run has touched starts once nothing blocks it', () => {
+  const child = makeIssue(29, { author: 'claude[bot]', authorAssociation: 'NONE', labeledBy: 'claude[bot]', parent: { number: 4, authorAssociation: 'OWNER', splitInto: [28, 29, 30] } });
+  assert.deepEqual(sweepCandidates({ issues: [child], prs: [], closedPrs: [], config, owner: 'AndresRubio', now: NOW }).start, [29]);
+  assert.deepEqual(sweepCandidates({ issues: [{ ...child, openBlockedBy: [28] }], prs: [], closedPrs: [], config, owner: 'AndresRubio', now: NOW }).start, []);
+});
