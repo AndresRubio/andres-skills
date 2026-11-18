@@ -1,0 +1,7 @@
+{
+  "name": "session-cost",
+  "version": "0.1.0",
+  "author": { "name": "AndresRubio" },
+  "description": "Shows above the prompt the tokens the session has used, with the cache share, the estimated cost and the latest model response, updated on every response, subagents included.",
+  "types": "./types/index.d.ts"
+}
