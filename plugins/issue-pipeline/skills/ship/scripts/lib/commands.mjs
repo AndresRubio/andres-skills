@@ -10,6 +10,7 @@ import { checkEligibility, LANES } from './eligibility.mjs';
 import { ghJson, ghText, isRepoSlug, fetchSplitParent, fetchIssue, fetchPr, currentRepo, fetchActiveRuns, fetchPrComments, postPrComment, postIssueComment } from './github.mjs';
 import { computeVerdict, formatVerdictBody, latestVerdict } from './verdict.mjs';
 import { waitingFor, KEY_RE } from './runs.mjs';
+import { splitInto } from './split.mjs';
 import { gradeVerdict } from './grade.mjs';
 import { findFreePort, diffSize } from './runtime.mjs';
 import { takeScreenshot } from './chrome.mjs';
@@ -354,6 +355,26 @@ export const COMMANDS = {
       }
     }
     return { waitingFor: keys };
+  },
+  // Stage 3 reads the `Split into:` line it just posted back from GitHub before it labels the sub-issues.
+  'split-into': async (argv) => {
+    const v = parse(argv, { repo: { type: 'string' }, issue: { type: 'string' }, expect: { type: 'string' } });
+    required(v, 'repo', 'issue', 'expect');
+    const number = issueNumber(v.issue);
+    const pieces = v.expect.split(',').map((piece) => piece.trim());
+    if (!pieces.every((piece) => /^[1-9]\d*$/.test(piece))) throw new UsageError('--expect must be issue numbers joined by ","');
+    const expected = pieces.map(Number);
+    const delayMs = recountDelayMs();
+    const same = (numbers) => numbers.length === expected.length && numbers.every((n, i) => n === expected[i]);
+    let numbers = splitInto(fetchIssue(v.repo, number).comments);
+    if (!same(numbers)) {
+      await sleep(delayMs);
+      numbers = splitInto(fetchIssue(v.repo, number).comments);
+      if (!same(numbers)) {
+        throw new Error(`the posted split doesn't read back: expected ${expected.join(', ')}, got ${numbers.length ? numbers.join(', ') : 'none'}`);
+      }
+    }
+    return { splitInto: numbers };
   },
   eligibility: (argv) => {
     const v = parse(argv, {

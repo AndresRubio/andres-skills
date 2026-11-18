@@ -266,6 +266,34 @@ test('CLI waiting-for: mixing the file mode and the fetch mode, or a partial fet
   }
 });
 
+const splitRoutes = (line) => issueRoutes(4, [splitComment(line)], { labels: [{ name: 'pipeline' }] });
+const env = (dir) => ({ env: { PATH: `${dir}:${process.env.PATH}`, ISSUE_PIPELINE_RECOUNT_DELAY_MS: '0' } });
+
+test('CLI split-into prints the split when the posted line reads back', () => {
+  const { dir, calls } = loggingGh(splitRoutes('Split into: 28, 29, 30'));
+  const r = runCli(['split-into', '--repo', REPO, '--issue', '4', '--expect', '28,29,30'], env(dir));
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(r.json(), { splitInto: [28, 29, 30] });
+  assert.equal(calls().filter((c) => c === `api repos/${REPO}/issues/4`).length, 1);
+});
+
+test('CLI split-into exits 1 after one retry when the line is missing, partial or out of order', () => {
+  const none = loggingGh(splitRoutes('`Split into: 28, 29, 30`'));
+  const r = runCli(['split-into', '--repo', REPO, '--issue', '4', '--expect', '28,29,30'], env(none.dir));
+  assert.equal(r.code, 1);
+  assert.deepEqual(JSON.parse(r.stderr), { error: "the posted split doesn't read back: expected 28, 29, 30, got none" });
+  assert.equal(none.calls().filter((c) => c === `api repos/${REPO}/issues/4`).length, 2);
+  const partial = runCli(['split-into', '--repo', REPO, '--issue', '4', '--expect', '28,29,30'], env(loggingGh(splitRoutes('Split into: 28, 29')).dir));
+  assert.deepEqual(JSON.parse(partial.stderr), { error: "the posted split doesn't read back: expected 28, 29, 30, got 28, 29" });
+  assert.equal(runCli(['split-into', '--repo', REPO, '--issue', '4', '--expect', '29,28'], env(loggingGh(splitRoutes('Split into: 28, 29')).dir)).code, 1);
+});
+
+test('CLI split-into: a missing flag or a bad number is a usage error', () => {
+  for (const args of [['--repo', REPO, '--issue', '4'], ['--repo', REPO, '--expect', '28'], ['--repo', REPO, '--issue', '4', '--expect', '28,x'], ['--repo', REPO, '--issue', '4', '--expect', '0']]) {
+    assert.equal(runCli(['split-into', ...args]).code, 2, args.join(' '));
+  }
+});
+
 test('CLI waiting-for reads the wait from an issue file', () => {
   const file = path.join(tempDir(), 'issue.json');
   const at = '2026-10-06T11:00:00Z';
