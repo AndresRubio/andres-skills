@@ -7,8 +7,10 @@ import { isPipelineComment, PIPELINE_BOTS, TRUSTED } from './lock.mjs';
 import { splitInto } from './split.mjs';
 import { activeRuns } from './runs.mjs';
 
-export function ghJson(args) {
-  const out = execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+// With a token, this one call runs with it as GH_TOKEN. Without one, gh keeps the authentication it has.
+export function ghJson(args, { token } = {}) {
+  const env = token ? { ...process.env, GH_TOKEN: token } : process.env;
+  const out = execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, env });
   return JSON.parse(out);
 }
 
@@ -64,11 +66,21 @@ export function isRepoSlug(repo) {
   return typeof repo === 'string' && /^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9._-]+$/.test(repo) && !repo.endsWith('/.') && !repo.endsWith('/..');
 }
 
-export const PR_FIELDS = 'number,url,title,body,headRefName,headRefOid,baseRefName,isDraft,isCrossRepository,labels,mergeable,mergeStateStatus,statusCheckRollup,author';
+export const PR_FIELDS = 'number,url,title,body,headRefName,headRefOid,baseRefName,isDraft,isCrossRepository,labels,mergeable,mergeStateStatus,author';
+// The checks are read apart from the other fields, so that one call can use its own token.
+export const PR_CHECKS_FIELDS = `${PR_FIELDS},statusCheckRollup`;
+
+function viewPr(repo, number, fields, gh) {
+  const pr = gh(['pr', 'view', String(number), '--repo', repo, '--json', fields]);
+  return { ...pr, labels: (pr.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name)) };
+}
 
 export function fetchPr(repo, number, gh = ghJson) {
-  const pr = gh(['pr', 'view', String(number), '--repo', repo, '--json', PR_FIELDS]);
-  return { ...pr, labels: (pr.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name)) };
+  return viewPr(repo, number, PR_FIELDS, gh);
+}
+
+export function fetchPrWithChecks(repo, number, gh = ghJson) {
+  return viewPr(repo, number, PR_CHECKS_FIELDS, gh);
 }
 
 // Posts a comment body through a file (free text never goes on a command line). Tests set

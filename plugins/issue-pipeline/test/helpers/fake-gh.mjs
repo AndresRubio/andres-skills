@@ -4,6 +4,7 @@ import { tempDir } from './git.mjs';
 
 // routes: { "<args joined by one space>": <JSON value to print> }
 // Every call is appended to <dir>/calls.log, routed or not; ghCalls(dir) reads them back in order.
+// The GH_TOKEN each call saw goes to <dir>/tokens.log; ghTokens(dir) reads them back the same way.
 // A route value of { __ghError: "<stderr text>", __ghExit?: <code, default 1> } makes the
 // fake `gh` fail instead: it writes __ghError to stderr and exits with __ghExit.
 export function fakeGh(routes) {
@@ -14,6 +15,7 @@ export function fakeGh(routes) {
     '#!/usr/bin/env node',
     `const routes = require(${JSON.stringify(routesFile)});`,
     "const key = process.argv.slice(2).join(' ');",
+    `require('fs').appendFileSync(${JSON.stringify(path.join(dir, 'tokens.log'))}, (process.env.GH_TOKEN ?? '') + '\\n');`,
     `require('fs').appendFileSync(${JSON.stringify(path.join(dir, 'calls.log'))}, key + '\\n');`,
     "if (!(key in routes)) { process.stderr.write('fake gh: no route for ' + key + '\\n'); process.exit(1); }",
     'const r = routes[key];',
@@ -28,4 +30,9 @@ export function fakeGh(routes) {
 export function ghCalls(dir) {
   const log = path.join(dir, 'calls.log');
   return existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean) : [];
+}
+
+export function ghTokens(dir) {
+  const log = path.join(dir, 'tokens.log');
+  return existsSync(log) ? readFileSync(log, 'utf8').split('\n').slice(0, -1) : [];
 }

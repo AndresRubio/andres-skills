@@ -1,4 +1,4 @@
-import { ghJson, ghText, fetchRunJson, fetchPr, fetchPrComments, fetchIssue, postPrComment, postIssueComment } from './github.mjs';
+import { ghJson, ghText, fetchRunJson, fetchPrWithChecks, fetchPrComments, fetchIssue, postPrComment, postIssueComment } from './github.mjs';
 import { latestVerdict } from './verdict.mjs';
 import { decideReady, readyReport, issueNumberFromBody } from './ready.mjs';
 import { formatMarker, defaultRun } from './marker.mjs';
@@ -12,10 +12,11 @@ const LOCK_GATED = new Set(['fix', 'update', 'needs-decision']);
 // so that it takes its base in before the review it waits for has been paid for (see decideReady).
 const TAKES_BASE = new Set(['ready', 'already-ready', 'wait']);
 
-export function realDeps(repo) {
+// checksToken is the token the pull request read (the one that needs the checks) runs with; unset keeps gh's own.
+export function realDeps(repo, { checksToken } = {}) {
   return {
     listPrs: () => ghJson(['pr', 'list', '--repo', repo, '--state', 'open', '--limit', '500', '--json', 'number,headRefName,isCrossRepository,isDraft']),
-    fetchPr: (r, n) => fetchPr(r, n),
+    fetchPr: (r, n) => fetchPrWithChecks(r, n, checksToken ? (args) => ghJson(args, { token: checksToken }) : ghJson),
     fetchPrComments: (r, n) => fetchPrComments(r, n),
     fetchIssue: (r, n) => fetchIssue(r, n),
     // BEHIND in mergeStateStatus may only be reported when branch protection requires up-to-date

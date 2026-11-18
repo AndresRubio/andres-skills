@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { runReady } from '../skills/ship/scripts/lib/ready-run.mjs';
 import { formatVerdictBody } from '../skills/ship/scripts/lib/verdict.mjs';
 import { validateConfig } from '../skills/ship/scripts/lib/config.mjs';
-import { normalizeComments, PR_FIELDS } from '../skills/ship/scripts/lib/github.mjs';
+import { normalizeComments, PR_CHECKS_FIELDS } from '../skills/ship/scripts/lib/github.mjs';
 import { runCli } from './helpers/cli.mjs';
-import { fakeGh } from './helpers/fake-gh.mjs';
+import { fakeGh, ghTokens } from './helpers/fake-gh.mjs';
 import { makeRepoWithOrigin } from './helpers/git.mjs';
 
 const REPO = 'o/r';
@@ -168,7 +168,7 @@ test('an error on one PR is recorded and the queue continues', async () => {
 test('the CLI prints the result and exits 1 when any PR errored', () => {
   const dir = fakeGh({
     [`pr list --repo ${REPO} --state open --limit 500 --json number,headRefName,isCrossRepository,isDraft`]: [{ number: 7, headRefName: 'pipeline/5-x', isCrossRepository: false, isDraft: false }],
-    [`pr view 7 --repo ${REPO} --json ${PR_FIELDS}`]: { __ghError: 'boom' },
+    [`pr view 7 --repo ${REPO} --json ${PR_CHECKS_FIELDS}`]: { __ghError: 'boom' },
   });
   const { root } = makeRepoWithOrigin({ '.claude/pipeline.json': JSON.stringify({ tracker: { type: 'github' } }) });
   const r = runCli(['ready', '--repo', REPO, '--repo-root', root, '--dry-run'], { env: { PATH: `${dir}:${process.env.PATH}` } });
@@ -360,4 +360,29 @@ test('a step that fails is not listed as done', async () => {
   deps.addLabel = () => { throw new Error('Resource not accessible by personal access token'); };
   const r = await runReady({ repo: REPO, config, now: NOW, run: 'local' }, deps);
   assert.deepEqual(r.actions, [{ pr: 7, action: 'error', reason: 'Resource not accessible by personal access token', done: ['comment on PR 7', 'comment on issue 5'] }]);
+});
+
+const waitingRoutes = () => ({
+  [`pr list --repo ${REPO} --state open --limit 500 --json number,headRefName,isCrossRepository,isDraft`]: [{ number: 7, headRefName: 'pipeline/5-x', isCrossRepository: false, isDraft: false }],
+  [`pr view 7 --repo ${REPO} --json ${PR_CHECKS_FIELDS}`]: basePr({ mergeable: 'UNKNOWN', statusCheckRollup: [run('test', 'SUCCESS'), { __typename: 'CheckRun', name: 'pipeline-review', status: 'IN_PROGRESS', conclusion: null }] }),
+  [`api --paginate --slurp repos/${REPO}/issues/7/comments`]: [[]],
+});
+
+test('the CLI reads each pull request with its checks through ISSUE_PIPELINE_CHECKS_TOKEN, and makes every other call with GH_TOKEN', () => {
+  const dir = fakeGh(waitingRoutes());
+  const { root } = makeRepoWithOrigin({ '.claude/pipeline.json': JSON.stringify({ tracker: { type: 'github' }, ciChecks: ['test'] }) });
+  const r = runCli(['ready', '--repo', REPO, '--repo-root', root, '--dry-run'], { env: { PATH: `${dir}:${process.env.PATH}`, GH_TOKEN: 'pipeline-token', ISSUE_PIPELINE_CHECKS_TOKEN: 'workflow-token' } });
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  assert.deepEqual(r.json().actions.map((a) => [a.pr, a.action]), [[7, 'wait']]);
+  assert.deepEqual(ghTokens(dir), ['pipeline-token', 'workflow-token', 'pipeline-token']);
+});
+
+test('without ISSUE_PIPELINE_CHECKS_TOKEN, or with it empty, the pull request read uses GH_TOKEN like every other call', () => {
+  for (const checks of [undefined, '']) {
+    const dir = fakeGh(waitingRoutes());
+    const { root } = makeRepoWithOrigin({ '.claude/pipeline.json': JSON.stringify({ tracker: { type: 'github' }, ciChecks: ['test'] }) });
+    const r = runCli(['ready', '--repo', REPO, '--repo-root', root, '--dry-run'], { env: { PATH: `${dir}:${process.env.PATH}`, GH_TOKEN: 'pipeline-token', ISSUE_PIPELINE_CHECKS_TOKEN: checks } });
+    assert.equal(r.code, 0, r.stdout + r.stderr);
+    assert.deepEqual(ghTokens(dir), ['pipeline-token', 'pipeline-token', 'pipeline-token']);
+  }
 });

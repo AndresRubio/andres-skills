@@ -378,3 +378,14 @@ test('isRepoSlug accepts owner/name and refuses anything else', () => {
   for (const ok of ['o/r', 'AndresRubio/andres-skills', 'a-b/c.d_e', 'O/R.git', `${'a'.repeat(39)}/r`]) assert.equal(github.isRepoSlug(ok), true, ok);
   for (const bad of ['', 'o', 'o/', '/r', 'o/r/x', 'o/.', 'o/..', '-o/r', 'o r/x', 'o/r;x', '--flag', 'o/r\n', 'o/r?x', undefined, 5]) assert.equal(github.isRepoSlug(bad), false, JSON.stringify(bad));
 });
+
+test('fetchPr no longer asks for the checks, and fetchPrWithChecks reads them in the same call', () => {
+  const { PR_FIELDS, PR_CHECKS_FIELDS, fetchPrWithChecks } = github;
+  assert.doesNotMatch(PR_FIELDS, /statusCheckRollup/);
+  assert.equal(PR_CHECKS_FIELDS, `${PR_FIELDS},statusCheckRollup`);
+  const seen = [];
+  const pr = fetchPrWithChecks('o/r', 7, (args) => { seen.push(args); return { number: 7, labels: [{ name: 'ready' }], statusCheckRollup: [] }; });
+  assert.deepEqual(seen, [['pr', 'view', '7', '--repo', 'o/r', '--json', PR_CHECKS_FIELDS]]);
+  assert.deepEqual(pr.labels, ['ready']);
+  assert.deepEqual(pr.statusCheckRollup, []);
+});

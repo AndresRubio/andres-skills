@@ -19,7 +19,7 @@ import { createWorktree, isolateInPlace, removeWorktreeIfEmpty } from './worktre
 import { diffRisk } from './diff-risk.mjs';
 import { revertCheck, changedTestFiles } from './revert-check.mjs';
 import { STAGE_POLICY, stageMark, readStages, stageTimings, loadUsage, buildRun, appendRun, refuseSymlink, readRunFile, sameRun, summaryLine } from './run-record.mjs';
-import { runReady } from './ready-run.mjs';
+import { runReady, realDeps } from './ready-run.mjs';
 import { runSweep, realSweepDeps } from './sweep-run.mjs';
 import { laneTarget } from './lane.mjs';
 import { sessionStarted, sessionTrace, notStartedBody, notStartedEdits, attemptComments, lockLeft, endingEdits, stoppedBody } from './ship-status.mjs';
@@ -435,7 +435,7 @@ export const COMMANDS = {
     required(v, 'repo', 'repo-root');
     if (v.now !== undefined && Number.isNaN(new Date(v.now).getTime())) throw new UsageError('--now must be an ISO date');
     // Reads .claude/pipeline.json from the default branch (origin/HEAD), never from the PR's head.
-    const result = await runReady({ repo: v.repo, config: loadConfig(v['repo-root']), now: v.now ? new Date(v.now) : new Date(), dryRun: Boolean(v['dry-run']) });
+    const result = await runReady({ repo: v.repo, config: loadConfig(v['repo-root']), now: v.now ? new Date(v.now) : new Date(), dryRun: Boolean(v['dry-run']) }, realDeps(v.repo, { checksToken: process.env.ISSUE_PIPELINE_CHECKS_TOKEN || undefined }));
     if (result.actions.some((a) => a.action === 'error')) throw new ExitError(result);
     return result;
   },
