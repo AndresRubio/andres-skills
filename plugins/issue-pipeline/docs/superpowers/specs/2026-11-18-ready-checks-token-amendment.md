@@ -4,7 +4,7 @@ Amendment to `2026-09-24-issue-pipeline-design.md`, for issue-pipeline 0.3.10. S
 
 ## Why
 
-On 2026-11-18 the private sandbox ran 0.3.9 for the first time. `pipeline-go` resumed issue 4, pull request 32 opened and the review accepted it. `pipeline-ready` then failed twice on that pull request, once after CI and once after the review:
+On 2026-11-18 the private sandbox ran 0.3.9 for the first time. `pipeline-go` resumed issue 4, pull request 32 opened and the review accepted it. `pipeline-ready` then failed three times on that pull request: run 44373485709 after CI, run 44373887074 after the review, and the scheduled run 44378833567:
 
 ```
 GraphQL: Resource not accessible by personal access token (repository.pullRequest.statusCheckRollup.nodes.0.commit.statusCheckRollup)
@@ -62,7 +62,7 @@ When `PIPELINE_TOKEN` is unset, both variables hold `github.token`, which can no
 
 - Design spec §7.1 (line 424) and §7.3 (line 496) still say `pipeline-ready` runs only on the default `GITHUB_TOKEN`, while the template sets `GH_TOKEN` to `PIPELINE_TOKEN` and falls back to `github.token`. Both lines are rewritten: writes that must start workflows use `PIPELINE_TOKEN`, and the pull request read with its checks uses the workflow token with `checks: read` and `statuses: read`.
 - `README.md` and `skills/setup/SKILL.md`: one sentence each, saying that a fine-grained token cannot read checks on a private repository and that the workflow's own token makes that read, so the owner adds no permission for it.
-- `docs/acceptance-handoff.md`: the 0.3.9 push and tag, the private sandbox's move (pull request 31), sub-issues 28 to 30 closed, issue 4 graded `fork`, `pipeline-go` and pull request 32 with their costs, the two `pipeline-ready` failures, and a "Version 0.3.10" section.
+- `docs/acceptance-handoff.md`: the 0.3.9 push and tag, the private sandbox's move (pull request 31), sub-issues 28 to 30 closed, issue 4 graded `fork`, `pipeline-go` and pull request 32 with their costs, the three `pipeline-ready` failures, and a "Version 0.3.10" section.
 - Version 0.3.10 in `package.json`, `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`.
 
 ## Tests

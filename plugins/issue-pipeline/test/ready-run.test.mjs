@@ -171,7 +171,7 @@ test('the CLI prints the result and exits 1 when any PR errored', () => {
     [`pr view 7 --repo ${REPO} --json ${PR_CHECKS_FIELDS}`]: { __ghError: 'boom' },
   });
   const { root } = makeRepoWithOrigin({ '.claude/pipeline.json': JSON.stringify({ tracker: { type: 'github' } }) });
-  const r = runCli(['ready', '--repo', REPO, '--repo-root', root, '--dry-run'], { env: { PATH: `${dir}:${process.env.PATH}` } });
+  const r = runCli(['ready', '--repo', REPO, '--repo-root', root, '--dry-run'], { env: { PATH: `${dir}:${process.env.PATH}`, ISSUE_PIPELINE_CHECKS_TOKEN: 'workflow-token' } });
   assert.equal(r.code, 1, r.stderr);
   const out = r.json();
   assert.deepEqual(out.actions.map((a) => [a.pr, a.action]), [[7, 'error']]);

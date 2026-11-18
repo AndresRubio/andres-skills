@@ -284,7 +284,6 @@ test('pipeline-ship checks in code that the session started, against the pipelin
   assert.match(afterClaude, /if: \$\{\{ always\(\) \}\}\n\s+env:\n\s+GH_TOKEN: \$\{\{ github\.token \}\}\n[\s\S]*?KEY: \$\{\{ needs\.route\.outputs\.key \}\}\n\s+run: node "\S*pipeline\.mjs" ship-status --home "\$ISSUE_PIPELINE_HOME" --repo \$\{\{ github\.repository \}\} --key "\$KEY" --since "\$ATTEMPT_STARTED" --execution-file "\$RUNNER_TEMP\/claude-execution-output\.json" --post-missing$/m);
 });
 
-
 test('pipeline-ready reads checks with the workflow token: checks and statuses read, ISSUE_PIPELINE_CHECKS_TOKEN only on Decide and act', () => {
   const t = rendered('pipeline-ready.yml');
   assert.match(t, /actions: write\n\s+checks: read\n\s+statuses: read\n/);
