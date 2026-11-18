@@ -400,6 +400,31 @@ The owner then said to finish the pull requests. Pull request 37 was merged as c
 
 The two merged branches, `pipeline/17-document-what-formatadded-returns` on the public sandbox and `issue-pipeline-v0.3.8` on the private one, were deleted once the owner asked for it. The session's permission check had refused the deletion before that. Each sandbox has only `main` again.
 
+## The first split, 2026-11-13
+
+The owner said yes to labelling issue 4 ("Make the whole app bilingual") on the private sandbox. The ship run, 43519533724, took 202 seconds, 40 turns and 0.66 dollars, with no denied tool calls. The grade was `too-big`: 8 files against a limit of 6, and parts that could ship apart. It came with seven assumptions. The session created sub-issues 28, 29 and 30, chained them and posted the split comment.
+
+The route then skipped all three label events with "issue author is not trusted" (runs 43520027166, 43520038246 and 43520052542). GitHub gives `claude[bot]` the author association `NONE`, so the sub-issues it wrote failed the same check an outsider's issue fails.
+
+The private canary string was found in no issue, comment or branch history of the public sandbox. The history search was confirmed by running it on the private repository, where it finds the string once. `pipeline-go` stayed untested.
+
+## Version 0.3.9
+
+Built on `main` of this repository to fix what the first split showed. It holds four changes:
+
+1. The trust rule. A sub-issue that a pipeline bot created in a split counts as trusted when its parent was created by the owner or a collaborator and the parent's latest `split` comment lists it on its `Split into:` line. A parent written by a bot never vouches. The rule is `issueTrusted` in `lock.mjs`, and eligibility and the sweep use it.
+2. The parent fetch. `fetchSplitParent` in `github.mjs` reads the parent of a bot-written sub-issue, so the trust rule has something to check.
+3. The new order in stage 3 and the `split-into` command. The session creates the sub-issues without the `pipeline` label, posts the split comment ending with a `Split into:` line, and runs `split-into` to check that the line reads back. Only then does it add `pipeline` to each sub-issue in order, with `tracker:add-labels` taking an optional issue number.
+4. The route refuses events on an issue that is blocked by an open issue, so a later sub-issue does not start before the one ahead of it has merged.
+
+The suite has 725 tests and `npm run check` passes.
+
+Not yet run in Actions: a split on 0.3.9, a sub-issue starting from its label, a later sub-issue starting after a merge, and `pipeline-go`. Two facts about GitHub are also unverified. One is whether the `issues` and `issue_comment` webhook payloads carry `issue_dependencies_summary`. The route's refusal of blocked issues relies on it, and without it the refusal never fires and stage 0 refuses instead. The other is whether `issue_dependencies_summary.blocked_by` counts only open blockers.
+
+Sub-issues 28, 29 and 30 of the private sandbox stay untrusted on 0.3.9, because their split comment has no `Split into:` line. Nothing starts by itself when the sandbox moves to 0.3.9.
+
+The rollout steps come from the amendment, each at the owner's word: move the sandbox to 0.3.9, close 28 to 30 as not planned, take `pipeline` off issue 4 and put it back, and expect a new split whose first sub-issue starts from its label and whose later ones start after each merge. The tag `issue-pipeline--v0.3.9` and the push wait for the owner.
+
 ## Conventions this work followed
 
 Git identity `AndresRubio <2109109+AndresRubio@users.noreply.github.com>`. On this machine the default SSH key for `github.com` belongs to another account; AndresRubio repositories push through the `github.com-personal` alias, which the clones already use. Commit messages and pull request bodies carry no attribution lines. Pull requests are merged by the owner, or by the session once the owner has said so in that session in their own message; without that the app's permission classifier refuses a merge. Commit message files go in the session scratchpad under a unique name, and their first line is checked in a call of its own before the commit, because two hooks in this repository can refuse a whole Bash command and a retry then commits a stale file.

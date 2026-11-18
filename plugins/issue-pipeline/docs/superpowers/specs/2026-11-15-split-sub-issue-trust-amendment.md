@@ -1,6 +1,6 @@
 # Split sub-issue trust amendment (2026-11-15)
 
-Amendment to `2026-09-24-issue-pipeline-design.md`, for issue-pipeline 0.3.9. Status: approved by the owner on 2026-11-17, with the calls listed at the end.
+Amendment to `2026-09-24-issue-pipeline-design.md`, for issue-pipeline 0.3.9. Status: approved by the owner on 2026-11-17, with the calls listed at the end. Built in 0.3.9 on 2026-11-18, not yet run in Actions.
 
 ## Why
 

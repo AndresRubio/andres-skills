@@ -245,8 +245,8 @@ Nothing is asked of you, so there's no `needs-decision`, and no tracker link is 
 **On a fork:** post a `questions` comment with numbered questions, each with a recommended answer; add `needs-decision`; remove the lock; remove the worktree if nothing was committed.
 
 **On too-big:**
-- Create sub-issues, each labelled `pipeline`, chained in order with blocked-by links.
-- Comment the split on the parent. The parent stays open, blocked by its children.
+- Create sub-issues without the `pipeline` label, chained in order with blocked-by links.
+- Comment the split on the parent, ending with a `Split into: <numbers>` line, and check that it reads back. Then add `pipeline` to each sub-issue in order. The parent stays open, blocked by its children (see `2026-11-15-split-sub-issue-trust-amendment.md`).
 - Only one child per parent is taken at a time.
 
 ### 5.3 Hard rules (every mode)
@@ -319,7 +319,7 @@ Rules:
 
 An issue is eligible when all of these hold:
 - It has the `pipeline` label and is in Todo (Linear) or open (GitHub).
-- It was created by you or a collaborator (GitHub `author_association` of OWNER, MEMBER or COLLABORATOR; in Linear, a workspace member).
+- It was created by you or a collaborator (GitHub `author_association` of OWNER, MEMBER or COLLABORATOR; in Linear, a workspace member), or it is a sub-issue that a pipeline bot created in a split: its parent was created by you or a collaborator, and the parent's latest `split` comment lists it on its `Split into:` line (`2026-11-15-split-sub-issue-trust-amendment.md`).
 - It is not blocked by an open issue, and it is not a parent with open children.
 - It has no fresh `pipeline-working` lock (younger than `lockTtlHours`).
 - The lane matches: cloud lanes skip `needs-local`; the local lane takes only `needs-local`.
