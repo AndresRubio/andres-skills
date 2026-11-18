@@ -419,7 +419,7 @@ Built on `main` of this repository to fix what the first split showed. It holds 
 5. If the read-back or the labelling fails after the split comment, the session posts a `blocked` comment on the parent saying what the owner does next.
 6. A sub-issue written by a bot that is itself graded too big is not split again. The run stops, and its `blocked` comment carries the proposed split.
 
-The suite has 732 tests and `npm run check` passes.
+The suite has 734 tests and `npm run check` passes.
 
 Not yet run in Actions: a split on 0.3.9, a sub-issue starting from its label, a later sub-issue starting after a merge, and `pipeline-go`. Two facts about GitHub are also unverified. One is whether the `issues` and `issue_comment` webhook payloads carry `issue_dependencies_summary`. The route's refusal of blocked issues relies on it, and without it the refusal never fires and stage 0 refuses instead. The other is whether `issue_dependencies_summary.blocked_by` counts only open blockers.
 

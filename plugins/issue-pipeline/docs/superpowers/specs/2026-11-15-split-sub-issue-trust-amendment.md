@@ -102,8 +102,8 @@ Version 0.3.9, with the three version fields equal. Sub-issues 28, 29 and 30 of 
 
 ## Added after the final review (2026-11-18)
 
-- If the read-back in step 5 or the labelling in step 6 fails, the session posts a `blocked` comment on the parent before hard rule 7, naming the step and what the owner does next. The stop procedure posts no comment of its own once `split` is posted, so without this the owner would see nothing on the tracker.
-- A sub-issue written by a pipeline bot that is graded `too-big` is not split again. Sub-issues under it could never run, since a parent written by a bot does not vouch, so the run stops with the proposed split in its `blocked` comment.
+- If the read-back in step 5 or the labelling in step 6 fails, the session tries once to post a `blocked` comment on the parent, naming the step and what the owner does next, and then applies hard rule 7 whether or not the comment went through. The stop procedure posts no comment of its own once `split` is posted, so without this the owner would see nothing on the tracker.
+- A sub-issue written by a pipeline bot that is graded `too-big` is not split again. Sub-issues under it could never run, since a parent written by a bot does not vouch, so the run stops with the proposed split in its `blocked` comment. The session copies grade.md into the run folder before deleting the run's notes, so the comment can quote it, and the comment ends with its own ask (split by hand, or narrow the issue and reply) in place of the stop procedure's usual `pipeline-go` line, which can't make a too-big issue fit. A wording test checks that the guard names every login in `PIPELINE_BOTS`, so a bot added there later is stopped here too.
 - Known limits, left as they are: a closed parent still vouches for its open sub-issues, and in a repository owned by an organization no person can start a bot-written sub-issue by label, though the sweep still can.
 
 ## Calls made in this design

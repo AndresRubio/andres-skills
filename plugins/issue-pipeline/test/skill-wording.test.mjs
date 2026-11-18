@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { read, section, step } from './helpers/skill.mjs';
+import { PIPELINE_BOTS } from '../skills/ship/scripts/lib/lock.mjs';
 
 // Wording pins for the ship and review skills. Each test here checks that a particular sentence,
 // phrase or command spelling is present in a skill file: the instruction a review or a fix wave
@@ -504,9 +505,28 @@ test('a failed read-back or labelling tells the owner on the parent before the r
 test('a sub-issue the pipeline wrote is not split again, since a bot parent could never vouch for its children', () => {
   const tooBig = section(read('stages/03-grade.md'), 'Automatic mode').split('- **too-big:**')[1].split('\n- **wait:**')[0];
   const head = tooBig.split('1. Append')[0];
-  assert.match(head, /`claude\[bot\]`/);
-  assert.match(head, /`github-actions\[bot\]`/);
+  // Every login that can author a trusted sub-issue must stop here too, or a new bot brings the stall back.
+  for (const login of PIPELINE_BOTS) assert.ok(head.includes(`\`${login}\``), `the guard does not name ${login}`);
   assert.match(head, /stop procedure/);
+});
+
+test('the guard keeps grade.md for its blocked comment and gives that comment its own last line', () => {
+  const tooBig = section(read('stages/03-grade.md'), 'Automatic mode').split('- **too-big:**')[1].split('\n- **wait:**')[0];
+  const head = tooBig.split('1. Append')[0];
+  const copied = head.indexOf('copy grade.md to `$RUN_DIR/grade.md`');
+  const deleted = head.indexOf('delete `docs/pipeline/<KEY>`');
+  assert.ok(copied >= 0 && deleted > copied, 'grade.md is copied out before the run folder is deleted');
+  assert.ok(head.indexOf('`$RUN_DIR/grade.md`', head.indexOf('stop procedure')) > 0, 'the blocked comment quotes the copy');
+  assert.match(head, /in place of the stop procedure's usual last line/);
+});
+
+test('when the split cannot finish, the blocked comment is tried once and the run stops either way', () => {
+  const tooBig = section(read('stages/03-grade.md'), 'Automatic mode').split('- **too-big:**')[1].split('\n- **wait:**')[0];
+  for (const n of [5, 6]) {
+    const text = tooBig.match(new RegExp(`^  ${n}\\. .*$`, 'm'))?.[0] ?? '';
+    assert.match(text, /try once to `tracker:post-comment` kind `blocked`/, `step ${n}`);
+    assert.match(text, /apply hard rule 7, whether or not that comment went through/, `step ${n}`);
+  }
 });
 
 test('the GitHub tracker adds labels to an issue other than NUMBER when told to', () => {
