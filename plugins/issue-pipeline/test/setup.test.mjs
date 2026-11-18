@@ -73,6 +73,7 @@ test('setup skill: installs the Claude GitHub App before the secrets, and PIPELI
   assert.match(steps, /`PIPELINE_TOKEN`[^\n]*required/i);
   assert.match(steps, /contents: write[^\n]*issues: write[^\n]*pull-requests: write/);
   assert.match(steps, /start no workflows/);
+  assert.match(steps, /checks: read/);
   assert.doesNotMatch(text, /GitHub App token/);
   assert.doesNotMatch(text, /`PIPELINE_TOKEN` is optional|Optional second secret/);
 });
@@ -83,6 +84,7 @@ test('README: names both secrets and the Claude GitHub App, and says the workflo
   assert.match(wf, /CLAUDE_CODE_OAUTH_TOKEN/);
   assert.match(wf, /PIPELINE_TOKEN/);
   assert.match(wf, /\/install-github-app/);
+  assert.match(wf, /checks: read/);
   assert.doesNotMatch(wf, /The one secret/);
   assert.match(wf, /pinned checkout[^\n]*not[^\n]*marketplace/);
   assert.doesNotMatch(text, /GitHub App token/);

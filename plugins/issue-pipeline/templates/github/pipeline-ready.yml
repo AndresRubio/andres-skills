@@ -15,6 +15,8 @@ permissions:
   pull-requests: write
   issues: write
   actions: write
+  checks: read
+  statuses: read
 
 concurrency:
   group: pipeline-ready-${{ github.repository }}
@@ -45,6 +47,9 @@ jobs:
           # Required for the fix lane and branch updates: a fine-grained PAT for the repo owner (contents, issues,
           # pull-requests and actions write). Events made with the default token start no workflows; the fallback only labels and comments.
           GH_TOKEN: ${{ secrets.PIPELINE_TOKEN || github.token }}
+          # PIPELINE_TOKEN is a fine-grained token, and those have no Checks permission. So the read of a pull request
+          # with its checks uses this workflow's own token, with the checks and statuses read permissions above.
+          ISSUE_PIPELINE_CHECKS_TOKEN: ${{ github.token }}
         run: |
           git remote set-head origin --auto
           node "$RUNNER_TEMP/issue-pipeline-plugin/{{PLUGIN_SUBDIR}}skills/ship/scripts/pipeline.mjs" ready --repo-root . --repo ${{ github.repository }}

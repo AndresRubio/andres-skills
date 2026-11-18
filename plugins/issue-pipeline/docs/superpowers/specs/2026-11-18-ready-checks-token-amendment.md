@@ -1,6 +1,6 @@
 # Ready checks token amendment (2026-11-18)
 
-Amendment to `2026-09-24-issue-pipeline-design.md`, for issue-pipeline 0.3.10. Status: approved by the owner on 2026-11-18, with the calls listed at the end.
+Amendment to `2026-09-24-issue-pipeline-design.md`, for issue-pipeline 0.3.10. Status: approved by the owner on 2026-11-18, with the calls listed at the end. Built in 0.3.10 on 2026-11-18, not yet run in Actions.
 
 ## Why
 
