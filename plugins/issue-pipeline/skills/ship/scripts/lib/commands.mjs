@@ -5,9 +5,9 @@ import { parseSource } from './source.mjs';
 import { branchName, keyFromBranch, worktreePath } from './naming.mjs';
 import { loadConfig } from './config.mjs';
 import { formatMarker, parseMarker, defaultRun } from './marker.mjs';
-import { lockStatus } from './lock.mjs';
+import { lockStatus, PIPELINE_BOTS } from './lock.mjs';
 import { checkEligibility, LANES } from './eligibility.mjs';
-import { ghJson, ghText, isRepoSlug, fetchIssue, fetchPr, currentRepo, fetchActiveRuns, fetchPrComments, postPrComment, postIssueComment } from './github.mjs';
+import { ghJson, ghText, isRepoSlug, fetchSplitParent, fetchIssue, fetchPr, currentRepo, fetchActiveRuns, fetchPrComments, postPrComment, postIssueComment } from './github.mjs';
 import { computeVerdict, formatVerdictBody, latestVerdict } from './verdict.mjs';
 import { waitingFor, KEY_RE } from './runs.mjs';
 import { gradeVerdict } from './grade.mjs';
@@ -27,6 +27,16 @@ import { formatScoreBody } from './score.mjs';
 import { hydrate } from './hydrate-run.mjs';
 import { aggregate, formatTable } from './metrics.mjs';
 import { collectRows } from './metrics-run.mjs';
+
+// The split parent of a bot-written issue, read from the issue as the API returns it now. Nothing
+// about the parent comes from the webhook payload, which only decides whether to look.
+function splitParentOf(repo, eventName, payload) {
+  if (eventName !== 'issues' && eventName !== 'issue_comment') return null;
+  const n = payload.issue?.number;
+  if (!PIPELINE_BOTS.has(payload.issue?.user?.login) || !Number.isSafeInteger(n) || n < 1) return null;
+  if (!isRepoSlug(repo)) throw new UsageError(`--repo must be owner/name, got ${JSON.stringify(repo)}`);
+  return fetchSplitParent(repo, ghJson(['api', `repos/${repo}/issues/${n}`]));
+}
 
 export class UsageError extends Error {}
 
@@ -431,7 +441,7 @@ export const COMMANDS = {
     const openPrs = v['event-name'] === 'issue_comment'
       ? ghJson(['pr', 'list', '--repo', v.repo, '--state', 'open', '--limit', '500', '--json', 'number,headRefName,isCrossRepository,labels'])
       : [];
-    return laneTarget({ name: v['event-name'], payload }, { openPrs });
+    return laneTarget({ name: v['event-name'], payload }, { openPrs, parent: splitParentOf(v.repo, v['event-name'], payload) });
   },
   screenshot: async (argv) => {
     const v = parse(argv, { url: { type: 'string' }, out: { type: 'string' }, width: { type: 'string' }, height: { type: 'string' } });

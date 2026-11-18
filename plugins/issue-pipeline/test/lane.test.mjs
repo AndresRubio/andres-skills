@@ -92,3 +92,41 @@ test('CLI lane-target reads the event file and lists PRs only for comments', () 
   const r2 = runCli(['lane-target', '--event-file', file, '--repo', 'o/r', '--event-name', 'issues'], { env: { PATH: `${fakeGh({})}:${process.env.PATH}` } });
   assert.equal(r2.json().prompt, '/issue-pipeline:ship #5 --mode auto');
 });
+
+const botChild = (over = {}) => issue({ number: 28, author_association: 'NONE', user: { login: 'claude[bot]' }, ...over });
+const vouching = { number: 4, authorAssociation: 'OWNER', splitInto: [28, 29, 30] };
+const session = { login: 'claude[bot]' };
+
+test('a sub-issue its trusted parent split into starts from its label, from pipeline-go, or from a reply', () => {
+  assert.equal(laneTarget({ name: 'issues', payload: labeled('pipeline', botChild(), session) }, { parent: vouching }).run, true);
+  assert.equal(laneTarget({ name: 'issues', payload: { ...labeled('pipeline-go', botChild(), owner), repository: { owner } } }, { parent: vouching }).run, true);
+  assert.match(laneTarget({ name: 'issues', payload: labeled('pipeline', botChild(), session) }, { parent: null }).reason, /issue author is not trusted/);
+  assert.match(laneTarget({ name: 'issues', payload: labeled('pipeline', botChild(), session) }, { parent: { ...vouching, splitInto: [29] } }).reason, /issue author is not trusted/);
+  const parked = botChild({ labels: [{ name: 'pipeline' }, { name: 'needs-decision' }] });
+  assert.equal(laneTarget({ name: 'issue_comment', payload: commented('go ahead', parked) }, { openPrs: [], parent: vouching }).run, true);
+});
+
+test('an issue blocked by an open issue does not start from an event', () => {
+  const summary = (blocked_by) => ({ issue_dependencies_summary: { blocked_by, total_blocked_by: 1 } });
+  assert.match(laneTarget({ name: 'issues', payload: labeled('pipeline', issue(summary(1))) }).reason, /blocked by an open issue/);
+  const parked = issue({ ...summary(1), labels: [{ name: 'pipeline' }, { name: 'needs-decision' }] });
+  assert.match(laneTarget({ name: 'issue_comment', payload: commented('x', parked) }).reason, /blocked by an open issue/);
+  assert.equal(laneTarget({ name: 'issues', payload: labeled('pipeline', issue(summary(0))) }).run, true);
+});
+
+test('CLI lane-target reads the parent of a bot-written sub-issue, and fails when it cannot', () => {
+  const dir = tempDir();
+  const file = path.join(dir, 'event.json');
+  writeFileSync(file, JSON.stringify(labeled('pipeline', botChild(), session)));
+  const split = { id: 500, user: { login: 'claude[bot]' }, author_association: 'NONE', created_at: '2026-11-13T22:32:10Z', body: '**[issue-pipeline]** split · 2026-11-13T22:32:10Z · local\n\nSplit into: 28, 29, 30' };
+  const routes = {
+    'api repos/o/r/issues/28': { number: 28, user: { login: 'claude[bot]' }, author_association: 'NONE', parent_issue_url: 'https://api.github.com/repos/o/r/issues/4' },
+    'api repos/o/r/issues/4': { number: 4, user: owner, author_association: 'OWNER' },
+    'api --paginate --slurp repos/o/r/issues/4/comments': [[split]],
+  };
+  const ok = runCli(['lane-target', '--event-file', file, '--repo', 'o/r', '--event-name', 'issues'], { env: { PATH: `${fakeGh(routes)}:${process.env.PATH}` } });
+  assert.equal(ok.code, 0, ok.stderr);
+  assert.equal(ok.json().run, true);
+  const down = runCli(['lane-target', '--event-file', file, '--repo', 'o/r', '--event-name', 'issues'], { env: { PATH: `${fakeGh({ 'api repos/o/r/issues/28': routes['api repos/o/r/issues/28'] })}:${process.env.PATH}` } });
+  assert.equal(down.code, 1);
+});

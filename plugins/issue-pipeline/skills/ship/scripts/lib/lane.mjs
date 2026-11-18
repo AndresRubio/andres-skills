@@ -1,19 +1,23 @@
-import { TRUSTED } from './lock.mjs';
+import { TRUSTED, issueTrusted } from './lock.mjs';
 import { parseMarker } from './marker.mjs';
 
 const no = (reason) => ({ run: false, reason });
 const yes = (prompt, key) => ({ run: true, prompt, key, concurrency: `ship-${key}` });
 const names = (labels) => (labels ?? []).map((l) => (typeof l === 'string' ? l : l.name));
+// parent is the split parent of a bot-written issue, fetched by the caller from the API and never from the payload.
+const authorTrusted = (issue, parent) => issueTrusted({ number: issue.number, author: issue.user?.login ?? null, authorAssociation: issue.author_association, parent });
+const blocked = (issue) => issue.issue_dependencies_summary?.blocked_by > 0;
 const pipelinePrFor = (n, openPrs) => openPrs.find((p) => !p.isCrossRepository && (p.headRefName === `pipeline/${n}` || p.headRefName.startsWith(`pipeline/${n}-`)));
 
-export function laneTarget({ name, payload }, { openPrs = [] } = {}) {
+export function laneTarget({ name, payload }, { openPrs = [], parent = null } = {}) {
   if (name === 'issues' && payload.action === 'labeled') {
     const { issue, label, sender } = payload;
     if (!['pipeline', 'pipeline-go'].includes(label?.name)) return no(`label ${label?.name} is not an intake label`);
     if (issue.pull_request) return no('pull requests are not issues');
     if (issue.state !== 'open') return no('issue is not open');
     if (names(issue.labels).includes('needs-local')) return no('needs-local issues run only on the local lane');
-    if (!TRUSTED.has(issue.author_association)) return no('issue author is not trusted');
+    if (!authorTrusted(issue, parent)) return no('issue author is not trusted');
+    if (blocked(issue)) return no('issue is blocked by an open issue');
     if (!sender?.login) return no('no label sender');
     // GitHub sends no author_association for the sender. In a solo repo the trusted labellers are
     // the issue's (trusted) author and the repository owner.
@@ -29,7 +33,8 @@ export function laneTarget({ name, payload }, { openPrs = [] } = {}) {
     if (names(issue.labels).includes('needs-local')) return no('needs-local issues run only on the local lane');
     if (!names(issue.labels).includes('needs-decision')) return no('issue is not waiting for a decision');
     if (!TRUSTED.has(comment.author_association)) return no('commenter is not trusted');
-    if (!TRUSTED.has(issue.author_association)) return no('issue author is not trusted');
+    if (!authorTrusted(issue, parent)) return no('issue author is not trusted');
+    if (blocked(issue)) return no('issue is blocked by an open issue');
     if (parseMarker(comment.body)) return no('pipeline comment');
     const pr = pipelinePrFor(issue.number, openPrs);
     if (pr && names(pr.labels).includes('needs-local')) return no('needs-local PRs are fixed only by the local runner');
