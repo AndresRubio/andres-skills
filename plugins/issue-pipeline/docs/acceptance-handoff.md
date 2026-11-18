@@ -429,6 +429,28 @@ Sub-issues 28, 29 and 30 of the private sandbox stay untrusted on 0.3.9, because
 
 The rollout steps come from the amendment, each at the owner's word: move the sandbox to 0.3.9, close 28 to 30 as not planned, take `pipeline` off issue 4 and put it back, and expect a new split whose first sub-issue starts from its label and whose later ones start after each merge. The tag `issue-pipeline--v0.3.9` and the push wait for the owner.
 
+## The 0.3.9 sandbox run, 2026-11-18
+
+At the owner's word, `main` was pushed with 0.3.9 and tagged `issue-pipeline--v0.3.9` at `b16083f`. Everything below ran on the private sandbox.
+
+Pull request 31 pinned the four workflows to `issue-pipeline--v0.3.9` and was merged as `4d95ec2`. The `pipeline-ready` runs it set off passed and started nothing, as expected, since sub-issues 28 to 30 have no `Split into:` line. They were then closed as not planned.
+
+Issue 4 was labelled again. Run 44370502112 graded it `fork` this time: 6 of 6 files and seven assumptions, A1 to A7. It cost 0.61 dollars, with no denied calls. The split path has still not run on 0.3.9.
+
+Then `pipeline-go` was added, the first time that label was used in Actions. Run 44371321977 resumed issue 4 and wrote in its "Decisions" that the label accepted A1 to A7. It built the change, opened pull request 32, and removed `pipeline-go` and `needs-decision`. It cost 3.02 dollars, in 686 seconds and 136 turns, with 2 denied calls that were not identified. The review, run 44373425878, said `accepted` with no findings and cost 2.27 dollars. The day cost 5.90 dollars.
+
+`pipeline-ready` then failed on pull request 32 three times: run 44373485709 after CI, run 44373887074 after the review, and the scheduled run 44378833567. Each stopped at "GraphQL: Resource not accessible by personal access token (repository.pullRequest.statusCheckRollup...)". `PIPELINE_TOKEN` is a fine-grained token, and GitHub's list of permissions for those has no Checks, so it can never read the check runs of a private repository. A public repository serves that read to anyone, which is why the public sandbox never showed it. Pull request 32 stays open as the test case for the fix.
+
+Still not seen in Actions on 0.3.9: a split, a sub-issue starting from its own label, and whether webhook payloads carry `issue_dependencies_summary`.
+
+## Version 0.3.10
+
+Built on `main`, following `2026-11-18-ready-checks-token-amendment.md`. `pipeline-ready` now reads a pull request with its checks through the workflow's own token, which its template grants `checks: read` and `statuses: read` and passes in `ISSUE_PIPELINE_CHECKS_TOKEN`. Every other call keeps `PIPELINE_TOKEN`. `fetchPr` no longer asks for checks, so `ship-status` and `verdict-status` no longer need a permission their workflows never had.
+
+The suite has 738 tests and `npm run check` passes. Not yet run in Actions.
+
+Next, each at the owner's word: push and tag `issue-pipeline--v0.3.10`, then move the private sandbox first, since the bug only exists there. That merge puts pull request 32 behind `main`, so `pipeline-ready` should update its branch, CI and the review should run again (the review cost 2.27 dollars last time), and `pipeline-ready` should then label it `ready`. It will be the first branch update on the private sandbox, and the first proof that the workflow token reads `statusCheckRollup` there. The public sandbox moves from 0.3.8 to 0.3.10 later, in one pull request.
+
 ## Conventions this work followed
 
 Git identity `AndresRubio <2109109+AndresRubio@users.noreply.github.com>`. On this machine the default SSH key for `github.com` belongs to another account; AndresRubio repositories push through the `github.com-personal` alias, which the clones already use. Commit messages and pull request bodies carry no attribution lines. Pull requests are merged by the owner, or by the session once the owner has said so in that session in their own message; without that the app's permission classifier refuses a merge. Commit message files go in the session scratchpad under a unique name, and their first line is checked in a call of its own before the commit, because two hooks in this repository can refuse a whole Bash command and a retry then commits a stale file.
