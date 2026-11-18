@@ -49,6 +49,11 @@
       "description": "Mod: a pane showing where an issue-pipeline /ship run stands."
     },
     {
+      "name": "session-cost",
+      "source": "./plugins/session-cost",
+      "description": "Mod: the session's tokens, cache share, estimated cost and latest model response above the prompt, updated on every response."
+    },
+    {
       "name": "humanizer",
       "source": "./plugins/humanizer",
       "description": "Mod: a writing reminder on each prompt, rewrite feedback on prose files, a refusal when a commit message or PR text has a strong tell or a commit adds a prose line with any tell, a note on closing messages, and the humanizer rewriting skill."
