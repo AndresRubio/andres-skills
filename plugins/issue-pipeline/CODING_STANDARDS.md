@@ -4,7 +4,7 @@ Read during review. Each rule below is a fixed pattern; a violation is Important
 
 ## Linear scans on text the pipeline did not write
 
-A regex or hand-written scanner that runs on a Bash command, an issue body, a comment, a tool output or a transcript is linear: no nested quantifiers, and no `[^x]*` run before a required literal that can restart at every position. It ships with a test that feeds about 200 KB of the worst-case character and asserts a sub-second bound. The run guard's hook timeout is 10 seconds and a timed-out hook counts as allow, so a slow scan in a hook is a bypass.
+A regex or hand-written scanner that runs on a Bash command, an issue body, a comment, a tool output or a transcript is linear: no nested quantifiers, and no `[^x]*` run before a required literal that can restart at every position. It ships with a test that feeds about 200 KB of the worst-case input and checks with `growsLinearly` from `test/helpers/growth.mjs` that four times the input takes at most eight times the CPU time. A limit in milliseconds fails when the machine is busy, so new tests don't use one; the limits in older tests stay until those tests change. Growth shows the scan is linear. A linear scan that still takes seconds on 200 KB is a finding of its own. The run guard's hook timeout is 10 seconds and a timed-out hook counts as allow, so a slow scan in a hook is a bypass.
 
 ## Redirects by hand
 
