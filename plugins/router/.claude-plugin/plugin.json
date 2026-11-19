@@ -1,0 +1,6 @@
+{
+  "name": "router",
+  "version": "0.1.0",
+  "author": { "name": "AndresRubio" },
+  "description": "Routes subagent work by task: four agents with a fixed model and effort (scout on haiku, implementer on sonnet, reviewer on opus, lead on fable), and a check that refuses an Agent call, other than a fork, when neither the call nor its agent type sets a model and an effort."
+}

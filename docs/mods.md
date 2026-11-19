@@ -68,6 +68,7 @@ A guard is a hook that refuses a tool call or asks the person first. Review ever
 - Raise events with `$.tool.call({ tool: 'Bash', command })`, `$.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })`, `$.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })` and `$.command.run(...)`. `await clock.settle()` lets detached work finish. A refused call comes back as `{ deny }` or `{ isError: true, text }`.
 - Mount UI with `$.ui.mount({ plugin, component, surface, props, requestId? })` for each of `['terminal', 'desktop'] as const`. AbovePrompt props are `{ hasSurvey, isWorking, maxRows, bodyColumns, scroll: { offset: 0, bodyRows: 10 }, view: {} }`; Pane props are in the skill's `examples/pane.test.tsx`. Query and press with `ui.find({ type: 'Text', text: /re/ })`, `ui.find({ key })` and `ui.press({ key })`.
 - Assert unconditionally. Check that a value exists with `expect(x).toBeDefined()` before asserting on it, so a missing value fails the test.
+- A test can import only code files, so it can't load a mod's own `agents/*.md` or any other data file. When a rule depends on such a file, the hook reads it at run time under `$.plugin.root` and the test answers that read from its `fs.list` and `fs.read` hooks, as `plugins/router/tests/guard.test.ts` does. Under a test `$.plugin.root` is the mod's real folder, which differs per machine, so match those paths by their ending.
 
 ## Before you push
 
