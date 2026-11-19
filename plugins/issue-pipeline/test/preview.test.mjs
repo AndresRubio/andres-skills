@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { startPreview, stopPreview } from '../skills/ship/scripts/lib/preview.mjs';
 import { findFreePort } from '../skills/ship/scripts/lib/runtime.mjs';
@@ -15,6 +16,19 @@ function killLeftoverGroup(pidFile) {
   if (Number.isInteger(pid) && pid > 0) {
     try { process.kill(-pid, 'SIGKILL'); } catch { /* already gone */ }
   }
+}
+
+// A port for one test's server, starting from one the system hands out. A fixed starting port
+// such as 45300 is shared by every copy of the suite: two copies running at once (the check gate in
+// two worktrees) both found it free, one server then died with EADDRINUSE, and the other copy's
+// server answered its probe or was gone by then. findFreePort still applies the pipeline's own
+// checks, which also catch a listener bound only to 127.0.0.1.
+async function freshPort() {
+  const server = net.createServer();
+  await new Promise((resolve) => { server.listen(0, resolve); });
+  const { port } = server.address();
+  await new Promise((resolve) => { server.close(resolve); });
+  return findFreePort(port);
 }
 
 // A tiny HTTP server, run directly as the preview command (single-process case).
@@ -50,7 +64,7 @@ test('startPreview resolves once the server answers, with the PID recorded on di
   t.after(() => killLeftoverGroup(pidFile));
 
   const server = serverScript(dir);
-  const port = await findFreePort(45300);
+  const port = await freshPort();
   const config = { preview: { command: `"${process.execPath}" "${server}" {port}` } };
 
   const result = await startPreview({
@@ -72,7 +86,7 @@ test('stopPreview kills the whole process group, including a grandchild server',
   const serverPidFile = path.join(dir, 'server.pid');
   const server = serverScript(dir);
   const wrapper = wrapperScript(dir, server, serverPidFile);
-  const port = await findFreePort(45310);
+  const port = await freshPort();
   const config = { preview: { command: `"${process.execPath}" "${wrapper}" {port}` } };
 
   await startPreview({
@@ -102,7 +116,7 @@ test('startPreview times out and kills the process group, leaving nothing behind
   t.after(() => killLeftoverGroup(pidFile));
 
   const config = { preview: { command: 'sleep 30' } }; // never listens
-  const port = await findFreePort(45320);
+  const port = await freshPort();
 
   await assert.rejects(
     startPreview({ config, port, cwd: dir, logFile: path.join(dir, 'preview.log'), pidFile, timeoutMs: 700 }),
@@ -147,7 +161,7 @@ test('CLI preview-start / preview-stop are wired end to end', async (t) => {
   t.after(() => killLeftoverGroup(pidFile));
 
   const server = serverScript(dir);
-  const port = await findFreePort(45340);
+  const port = await freshPort();
   const configFile = path.join(dir, 'config.json');
   writeFileSync(configFile, JSON.stringify({ preview: { command: `"${process.execPath}" "${server}" {port}` } }));
 

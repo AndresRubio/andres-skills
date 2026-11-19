@@ -35,11 +35,19 @@ test('scanText: a malformed percent escape in a permalink path does not throw', 
 // size is timed five times, the two sizes in turn so that a busy moment falls on both, and the
 // best times are compared. A scan under 5 ms counts as 5 so that noise near zero cannot fail the
 // test. A failed comparison is measured once more: load passes, a quadratic scan stays quadratic.
+// The clock is this process's CPU time. Wall-clock time also counts the wait for a free core, and
+// a long run waits for one more often than a short one: with 30 busy processes on 10 cores, a
+// linear loop measured up to 16.6 times as long at four times the size and the check failed 14
+// times in 48, where its CPU time grew 4.0 to 4.2 times and the check never failed.
+const cpuMs = () => {
+  const { user, system } = process.cpuUsage();
+  return (user + system) / 1000;
+};
 function growsLinearly(run, n) {
   const time = (size) => {
-    const t0 = performance.now();
+    const t0 = cpuMs();
     run(size);
-    return performance.now() - t0;
+    return cpuMs() - t0;
   };
   const measure = () => {
     let small = Infinity;
